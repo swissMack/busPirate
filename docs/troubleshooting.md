@@ -123,7 +123,13 @@ time you use real hardware, and a bug report here if they are wrong:
       (`buspirate ping` prints what it made of it)
 - [ ] `write_then_read()` against a real 24Cxx EEPROM — the wire format is
       taken from the documented command, not from observation
-- [ ] SPI `set_mode()` polarity and phase against a real flash chip
+- [ ] SPI `set_mode()` against a real flash chip. The CKP/CKE mapping now
+      follows the documented startup default (mode 0 = CKP 0, CKE 1), but it
+      has only been checked against the documentation, not a scope.
+- [ ] A flash erase/write/verify round trip on a real chip, ideally one you
+      have dumped first
+- [ ] The I2C and SPI sniffers against real traffic — in particular whether
+      stopping resynchronises cleanly on your firmware version
 - [ ] The v4 pull-up rail command on firmware that actually implements it
 - [ ] The probe cable colour table against your own cable
       (Connection → **Show the cable legend**)

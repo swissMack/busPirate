@@ -114,7 +114,9 @@ zeros. The mode tests run twice, once as a v3 and once as a v4.
 
 ## Status
 
-Written against the published protocol documentation and tested against the
-simulated device. It has **not yet been run against real hardware** — see the
-checklist at the end of [troubleshooting](docs/troubleshooting.md) for the
-handful of things worth verifying the first time you plug one in.
+Written against the published protocol documentation and tested against a
+simulated device: 238 Python tests plus a frontend test that drives the real
+UI. It has **not yet been run against real hardware** — see the checklist at
+the end of [troubleshooting](docs/troubleshooting.md) for what is worth
+verifying the first time you plug one in, chiefly the SPI clock phase
+mapping, a flash write round trip, and the sniffers.
