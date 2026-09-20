@@ -61,6 +61,8 @@ class DeviceSession:
         self.fake_variant = fake_variant
         self.bp: Optional[BusPirate] = None
         self.port: Optional[str] = None
+        #: What discovery knew about the port we connected to.
+        self.port_info: Optional[Dict[str, Any]] = None
         self.mode_name: Optional[str] = None
         self._mode = None
         self.lock = asyncio.Lock()
@@ -136,6 +138,7 @@ class DeviceSession:
     def connect_blocking(self, port: Optional[str]) -> Dict[str, Any]:
         self.disconnect_blocking()
         resolved = "fake" if self.use_fake else resolve(port)
+        self.port_info = self._describe_port(resolved)
         device = self._make_device(resolved)
         device.open()
         self.bp = device
@@ -152,17 +155,58 @@ class DeviceSession:
                 pass
         self.bp = None
         self.port = None
+        self.port_info = None
         self.mode_name = None
         self._mode = None
 
+    def _describe_port(self, device: str) -> Dict[str, Any]:
+        """What USB discovery can tell us about one device path."""
+        if self.use_fake:
+            return {
+                "device": device,
+                "usb_id": None,
+                "description": f"simulated Bus Pirate {self.fake_variant}",
+                "note": "no hardware involved",
+            }
+        for candidate in discover(include_unlikely=True):
+            if candidate.device == device:
+                return {
+                    "device": device,
+                    "usb_id": candidate.usb_id,
+                    "description": candidate.description,
+                    "note": candidate.note,
+                }
+        return {"device": device, "usb_id": None, "description": "", "note": ""}
+
+    def usb_status(self) -> Dict[str, Any]:
+        """Is the USB device still there? Checked live, not cached.
+
+        Unplugging the Bus Pirate does not close the file handle on macOS, so
+        the only honest way to answer is to re-enumerate.
+        """
+        if self.port is None:
+            return {"attached": False}
+        if self.use_fake:
+            return dict(self.port_info or {}, attached=True, simulated=True)
+        attached = any(
+            candidate.device == self.port
+            for candidate in discover(include_unlikely=True)
+        )
+        return dict(self.port_info or {"device": self.port}, attached=attached)
+
     def status(self) -> Dict[str, Any]:
         if self.bp is None or not self.bp.is_open:
-            return {"connected": False, "simulated": self.use_fake}
+            return {
+                "connected": False,
+                "simulated": self.use_fake,
+                "usb": {"attached": False},
+            }
         profile = self.bp.profile
         return {
             "connected": True,
             "simulated": self.use_fake,
             "port": self.port,
+            "usb": self.usb_status(),
             "mode": self.mode_name,
             "variant": profile.variant,
             "firmware": profile.firmware,

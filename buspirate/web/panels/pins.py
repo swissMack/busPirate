@@ -62,6 +62,8 @@ def _pwm_clear(ctx):
 
 PANEL = Panel(
     id="pins",
+    refcard_rows=['AUX', 'ADC', 'supplies', 'GND'],
+    doc="pins-and-power",
     title="Pins & power",
     blurb="Drive the pins by hand, switch the supplies, measure a voltage.",
     mode=None,

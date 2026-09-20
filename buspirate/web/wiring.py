@@ -1,43 +1,118 @@
-"""The probe cable colour reference.
+"""The probe cable colour reference, and the reference card geometry.
 
-The Seeed Studio cable is the project's reference colour order and is what the
-firmware's own ``i`` command prints. **SparkFun cables are usually the reverse
-order, and the v2go differs again** — so every wiring block in the dashboard
-carries that warning and offers to read the legend off the connected device.
+The colours and the per-protocol pin mapping here are read off the Dangerous
+Prototypes reference cards bundled in ``static/img/`` — not from memory. The
+Seeed Studio cable is the project's reference order and is what the firmware's
+own ``i`` command prints.
+
+**SparkFun cables are usually the reverse order and the v2go differs again**,
+so every wiring block in the dashboard carries that warning and offers to read
+the legend off the connected device.
+
+Image credit: reference cards from the Dangerous Prototypes wiki
+(dangerousprototypes.com), CC BY-SA. See ``static/img/CREDITS.md``.
 """
 
 from __future__ import annotations
 
-# Bus Pirate probe header, pin 1 first, with the Seeed cable colours.
+# Probe cable, pin 1 first, with the colours sampled from the Seeed cable card.
+# Pin 1 is MISO and pin 10 is GND — the opposite end from what you might guess.
 SEEED_CABLE = [
-    ("GND", "black"),
-    ("+3.3V", "brown"),
-    ("+5.0V", "red"),
-    ("ADC", "orange"),
-    ("VPU", "yellow"),
-    ("AUX", "green"),
-    ("CLK", "blue"),
-    ("MOSI", "purple"),
-    ("CS", "grey"),
-    ("MISO", "white"),
+    ("MISO", "#000000", "black"),
+    ("CS", "#ffffff", "white"),
+    ("MOSI", "#a9a9a9", "grey"),
+    ("CLK", "#ff85ff", "pink"),
+    ("AUX", "#0433ff", "blue"),
+    ("VPU", "#00f900", "green"),
+    ("ADC", "#fffb00", "yellow"),
+    ("+5V", "#ff9300", "orange"),
+    ("+3.3V", "#ff2600", "red"),
+    ("GND", "#945200", "brown"),
 ]
 
-COLOURS = dict(SEEED_CABLE)
+COLOURS = {signal: hexcode for signal, hexcode, _ in SEEED_CABLE}
+COLOUR_NAMES = {signal: name for signal, _, name in SEEED_CABLE}
+
+# What each signal becomes on each bus, from the reference card.
+SIGNAL_ROLES = {
+    "MOSI": {"1-Wire": "OWD", "UART": "TX", "I2C": "SDA", "SPI": "MOSI", "JTAG": "TDI"},
+    "CLK": {"I2C": "SCL", "SPI": "CLK", "JTAG": "TCK"},
+    "MISO": {"UART": "RX", "SPI": "MISO", "JTAG": "TDO"},
+    "CS": {"SPI": "CS", "JTAG": "TMS"},
+}
+
+SIGNAL_NOTES = {
+    "AUX": "Auxiliary I/O, frequency probe, PWM",
+    "VPU": "Input for the pull-up resistors, 0-5V",
+    "ADC": "A/D converter, max 6V, 10-bit, 500 ksps",
+    "+5V": "Switchable supply, max 150 mA",
+    "+3.3V": "Switchable supply, max 150 mA",
+    "GND": "Ground to the test circuit",
+}
+
+# Pixel geometry of static/img/refcard.png (490x286), measured from the file.
+REFCARD = {
+    "image": "/static/img/refcard.png",
+    "width": 490,
+    "height": 286,
+    # Column x-ranges, from the vertical rules in the image.
+    "columns": {
+        "signal": [4, 76],
+        "HiZ": [76, 126],
+        "1-Wire": [126, 208],
+        "UART": [208, 287],
+        "I2C": [287, 345],
+        "SPI": [345, 416],
+        "JTAG": [416, 483],
+    },
+    # Row y-ranges. The first five come from the horizontal rules; the lower
+    # block is one merged cell in the artwork, split evenly by its five labels.
+    "rows": {
+        "header": [4, 27],
+        "MOSI": [27, 56],
+        "CLK": [56, 85],
+        "MISO": [85, 114],
+        "CS": [114, 142],
+        "AUX": [142, 170],
+        "VPU": [170, 198],
+        "ADC": [198, 225],
+        "supplies": [225, 253],
+        "GND": [253, 281],
+    },
+}
+
+# Pixel geometry of static/img/seeed-cable.png (490x301).
+CABLE_CARD = {
+    "image": "/static/img/seeed-cable.png",
+    "width": 490,
+    "height": 301,
+    "band": [228, 285],  # y range of the colour swatches
+    "swatches": {
+        "MISO": [128, 159],
+        "CS": [160, 193],
+        "MOSI": [195, 225],
+        "CLK": [229, 258],
+        "AUX": [262, 292],
+        "VPU": [295, 326],
+        "ADC": [328, 359],
+        "+5V": [362, 392],
+        "+3.3V": [396, 425],
+        "GND": [429, 459],
+    },
+}
 
 CABLE_CAVEAT = (
-    "Colours are the Seeed cable order, which is the firmware reference. "
-    "SparkFun cables are usually reversed and the v2go differs — use "
-    "“Show my device’s legend” on the Connection panel to confirm."
+    "Colours and pin order are the Seeed/Adafruit cable, which is the "
+    "firmware reference — pin 1 is MISO (black) and pin 10 is GND (brown). "
+    "SparkFun cables are usually reversed and the v2go differs, so check "
+    "“Show the cable legend” on the Connection panel against your own."
 )
 
-
-def colour(signal: str) -> str:
-    return COLOURS.get(signal, "")
-
 POWER_NOTE = (
-    "The power switch turns on the 3.3V and 5V supplies together — there is no "
-    "command to pick one. You choose the voltage by which probe wire you "
-    "connect to the target's VCC. Never connect both."
+    "The power switch turns on the 3.3V and 5V supplies together — there is "
+    "no command to pick one, and each is good for about 150 mA. You choose the "
+    "voltage by which probe wire you connect to the target's VCC. Never "
+    "connect both."
 )
 
 PULLUP_RAIL_NOTE = (
@@ -45,3 +120,12 @@ PULLUP_RAIL_NOTE = (
     "in software. On a v3 the pull-ups follow whatever you feed the VPU pin, "
     "so tie VPU to the target's own supply."
 )
+
+
+def colour(signal: str) -> str:
+    """The cable colour for a signal, as a CSS hex value."""
+    return COLOURS.get(signal, "")
+
+
+def colour_name(signal: str) -> str:
+    return COLOUR_NAMES.get(signal, "")

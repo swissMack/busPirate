@@ -1,0 +1,58 @@
+# UART
+
+An asynchronous serial line — no clock, so both ends must agree on speed.
+
+## Wiring
+
+| Probe wire | Seeed colour | Target |
+|-----------|--------------|--------|
+| MISO | black | the target's **TX** |
+| MOSI | grey | the target's **RX** |
+| GND | brown | GND — connect this first |
+
+**TX and RX cross over.** The Bus Pirate listens on MISO, so MISO goes to the
+pin the target *transmits* from. If you see nothing, swapping these two is
+the first thing to try.
+
+Only connect the Bus Pirate's power if the target needs it. Two supplies
+fighting each other is a good way to lose a board.
+
+## Using it
+
+```python
+with bp.uart() as uart:
+    uart.set_baudrate(uart.BAUD_115200)
+    uart.configure(databits_parity=0, stop_bits=1)   # 8N1
+    uart.write(b"AT\r\n")
+
+    uart.start_receive()          # the Bus Pirate now forwards what it hears
+    print(uart.read_available(256))
+    uart.stop_receive()
+```
+
+In the dashboard: **Set the line up**, then **Start listening**, then
+**Read what arrived**.
+
+## Baud rates
+
+300, 1200, 2400, 4800, 9600, 19200, 31250 (MIDI), 38400, 57600, 115200.
+Anything else goes through `set_manual_baudrate()` with a raw BRG divisor.
+
+## Reading the symptoms
+
+| What you see | What it means |
+|--------------|---------------|
+| Nothing at all | TX/RX swapped, no common ground, or the target is silent |
+| Consistent garbage | wrong baud rate |
+| Mostly right, occasional wrong byte | baud rate close but not exact, or a noisy line |
+| Every byte doubled | echo is on at both ends |
+| Correct text, then nothing | the target stopped, or flow control it expects is missing |
+
+Garbled characters are a speed problem, not a wiring problem: wiring faults
+give you silence, not nonsense.
+
+## Voltage levels
+
+The Bus Pirate's UART is 3.3V logic and tolerates 5V inputs. It is **not**
+RS-232: a real serial port swings ±12V and will damage it. For RS-232 you
+need a level shifter such as a MAX3232.

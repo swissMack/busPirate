@@ -121,6 +121,9 @@ def _flash_dump(ctx, length, filename, power, speed, spi_mode):
 
 PANEL = Panel(
     id="spi",
+    refcard_column='SPI',
+    refcard_rows=['supplies', 'GND'],
+    doc="spi",
     title="SPI",
     blurb="Four wires, one chip at a time. Start with the JEDEC ID.",
     mode="spi",

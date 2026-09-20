@@ -132,6 +132,9 @@ _BUS_PARAMS = [
 
 PANEL = Panel(
     id="i2c",
+    refcard_column='I2C',
+    refcard_rows=['VPU', 'supplies', 'GND'],
+    doc="i2c",
     title="I2C",
     blurb="Two wires, many devices. Start by scanning to see what answers.",
     mode="i2c",

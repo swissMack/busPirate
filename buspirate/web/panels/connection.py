@@ -36,14 +36,15 @@ def _identify(ctx):
 
 def _legend(ctx):
     rows = [
-        [index, signal, colour]
-        for index, (signal, colour) in enumerate(SEEED_CABLE, start=1)
+        [index, signal, name, hexcode]
+        for index, (signal, hexcode, name) in enumerate(SEEED_CABLE, start=1)
     ]
     return table(
-        ["Pin", "Signal", "Seeed cable colour"],
+        ["Pin", "Signal", "Cable colour", "Hex"],
         rows,
         caption=(
-            "Probe header, pin 1 first. Hold the cable against this list before "
+            "Seeed/Adafruit probe cable, pin 1 first. Pin 1 is MISO (black) "
+            "and pin 10 is GND (brown). Hold your cable against this before "
             "wiring anything — a reversed cable is the commonest mistake."
         ),
     )
@@ -62,6 +63,7 @@ def _self_test(ctx):
 
 PANEL = Panel(
     id="connection",
+    doc="macos-setup",
     title="Connection",
     blurb="Find the Bus Pirate, connect to it, and confirm what it is.",
     mode=None,

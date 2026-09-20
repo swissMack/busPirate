@@ -72,6 +72,9 @@ def _read(ctx, max_bytes):
 
 PANEL = Panel(
     id="uart",
+    refcard_column='UART',
+    refcard_rows=['GND'],
+    doc="uart",
     title="UART",
     blurb="Listen to a serial line, or send it something.",
     mode="uart",

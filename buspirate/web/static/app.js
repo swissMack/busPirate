@@ -7,9 +7,29 @@ const $ = (id) => document.getElementById(id);
 const state = {
   status: { connected: false },
   panels: [],
+  cable: [],
+  cableCaveat: "",
+  refcard: null,
+  cableCard: null,
   current: localStorage.getItem("bp.panel") || null,
+  guide: { open: false, pages: [], page: null },
   busy: false,
 };
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function svg(tag, attrs = {}, ...children) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value === null || value === undefined || value === false) continue;
+    node.setAttribute(key, value);
+  }
+  for (const child of children.flat()) {
+    if (child === null || child === undefined) continue;
+    node.append(child.nodeType ? child : document.createTextNode(child));
+  }
+  return node;
+}
 
 /* ---------------------------------------------------------------- helpers */
 
@@ -47,6 +67,10 @@ async function loadState() {
   const data = await api("/api/state");
   state.status = data.status;
   state.panels = data.panels;
+  state.cable = data.cable || [];
+  state.cableCaveat = data.cable_caveat || "";
+  state.refcard = data.refcard || null;
+  state.cableCard = data.cable_card || null;
   if (!state.panels.some((p) => p.id === state.current)) {
     state.current = state.panels.length ? state.panels[0].id : null;
   }
@@ -59,9 +83,12 @@ function render() {
   renderNav();
   renderRecipes();
   const connected = state.status.connected;
-  $("welcome").hidden = connected;
-  $("panel").hidden = !connected;
-  if (connected) renderPanel();
+  const guiding = state.guide.open;
+  $("welcome").hidden = connected || guiding;
+  $("panel").hidden = !connected || guiding;
+  $("guide").hidden = !guiding;
+  if (guiding) renderGuide();
+  else if (connected) renderPanel();
 }
 
 function renderStatus() {
@@ -70,8 +97,26 @@ function renderStatus() {
   box.className =
     "status " + (s.connected ? (s.simulated ? "status--sim" : "status--on") : "status--off");
   $("status-text").textContent = s.connected
-    ? `${s.simulated ? "SIMULATED " : ""}${s.description} · ${s.port}${s.mode ? " · " + s.mode : ""}`
+    ? `${s.simulated ? "SIMULATED " : ""}${s.description}${s.mode ? " · " + s.mode : ""}`
     : "Not connected";
+  renderUsb(s.usb || { attached: false });
+}
+
+function renderUsb(usb) {
+  const box = $("usb");
+  if (!usb.device) {
+    box.className = "usb muted";
+    box.textContent = "USB: no device";
+    return;
+  }
+  const id = usb.usb_id ? ` [${usb.usb_id}]` : "";
+  if (usb.attached) {
+    box.className = "usb muted";
+    box.textContent = `USB: ${usb.device}${id}`;
+  } else {
+    box.className = "usb usb--gone";
+    box.textContent = `USB: ${usb.device} has gone away — unplugged?`;
+  }
 }
 
 function renderNav() {
@@ -83,12 +128,23 @@ function renderNav() {
         "aria-current": panel.id === state.current ? "true" : "false",
         onclick: () => {
           state.current = panel.id;
+          state.guide.open = false;
           localStorage.setItem("bp.panel", panel.id);
           render();
         },
       })
-    )
+    ),
+    el("button", {
+      text: "Guide",
+      "aria-current": state.guide.open ? "true" : "false",
+      onclick: () => openGuide(panelDoc() || "user-guide"),
+    })
   );
+}
+
+function panelDoc() {
+  const panel = state.panels.find((p) => p.id === state.current);
+  return panel ? panel.doc : null;
 }
 
 function renderRecipes() {
@@ -148,17 +204,24 @@ function wiringCard(panel) {
   return el(
     "div",
     { class: "card" },
-    el("h2", { text: panel.wiring.length ? "Wiring" : "Before you start" }),
+    el("h2", { text: panel.wiring.length ? "How to hook it up" : "Before you start" }),
+    panel.wiring.length ? hookupDiagram(panel) : null,
     rows.length ? el("table", { class: "wiring" }, ...rows) : null,
     panel.notes.length
       ? el("ul", { class: "notes" }, ...panel.notes.map((note) => el("li", { text: note })))
+      : null,
+    panel.doc
+      ? el(
+          "p",
+          { class: "docslink" },
+          el("button", { text: `Read the ${panel.title} guide`, onclick: () => openGuide(panel.doc) })
+        )
       : null
   );
 }
 
-function cssColour(name) {
-  const map = { grey: "#9aa0ad", purple: "#8b5cd6", white: "#f2f4f8", black: "#1c1f27" };
-  return map[name] || name || "transparent";
+function cssColour(value) {
+  return value || "transparent";
 }
 
 function actionBlock(panel, action) {
@@ -415,3 +478,271 @@ $("log-toggle").addEventListener("click", (event) => {
 refreshPorts();
 loadState();
 connectFeed();
+
+/* ------------------------------------------------- hook-up diagram */
+
+/* The two Dangerous Prototypes reference cards, with this panel's connections
+   marked on them. Using the project's own artwork means the colours and the
+   per-bus pin names are the authoritative ones rather than a redrawing, and
+   the overlay is computed from the panel's wiring, so a new panel gets its
+   diagram for free. Geometry comes from the server, measured from the files. */
+
+const SUPPLY_SIGNALS = new Set(["+3.3V", "+5V", "+5.0V"]);
+
+function highlightedRows(panel) {
+  const rows = new Set(panel.refcard_rows || []);
+  for (const wire of panel.wiring) {
+    rows.add(SUPPLY_SIGNALS.has(wire.signal) ? "supplies" : wire.signal);
+  }
+  return rows;
+}
+
+function markRect(x, y, w, h, { strong = false, colour = null } = {}) {
+  return svg("rect", {
+    x, y, width: w, height: h, rx: 3,
+    fill: colour || "var(--accent)",
+    "fill-opacity": strong ? 0.22 : 0.13,
+    stroke: colour || "var(--accent)",
+    "stroke-width": strong ? 2 : 1.25,
+    "stroke-opacity": strong ? 0.95 : 0.6,
+  });
+}
+
+function refcardDiagram(panel) {
+  const card = state.refcard;
+  if (!card) return null;
+  const column = panel.refcard_column && card.columns[panel.refcard_column];
+  const rows = highlightedRows(panel);
+  const marks = [];
+
+  // The protocol's whole column, from the header down through the CS row.
+  if (column) {
+    const top = card.rows.header[0];
+    const bottom = card.rows.CS[1];
+    marks.push(markRect(column[0], top, column[1] - column[0], bottom - top, { strong: true }));
+  }
+
+  // The signal-name cell of every row this panel actually uses.
+  const [nameLeft, nameRight] = card.columns.signal;
+  for (const [name, [top, bottom]] of Object.entries(card.rows)) {
+    if (name === "header" || !rows.has(name)) continue;
+    const full = ["AUX", "VPU", "ADC", "supplies", "GND"].includes(name);
+    const right = full ? card.width - 8 : nameRight;
+    marks.push(markRect(nameLeft, top, right - nameLeft, bottom - top,
+      { colour: full ? "var(--good)" : null }));
+  }
+
+  return svg(
+    "svg",
+    { viewBox: `0 0 ${card.width} ${card.height}`, width: card.width, height: card.height,
+      class: "card-img", role: "img",
+      "aria-label": `Bus Pirate reference card, ${panel.title} column highlighted` },
+    svg("image", { href: card.image, x: 0, y: 0, width: card.width, height: card.height }),
+    ...marks
+  );
+}
+
+function cableDiagram(panel) {
+  const card = state.cableCard;
+  if (!card) return null;
+  const rows = highlightedRows(panel);
+  const [bandTop, bandBottom] = card.band;
+  const marks = [];
+  for (const [signal, [left, right]] of Object.entries(card.swatches)) {
+    const used = rows.has(SUPPLY_SIGNALS.has(signal) ? "supplies" : signal);
+    if (!used) continue;
+    marks.push(markRect(left - 3, bandTop - 4, right - left + 6, bandBottom - bandTop + 8,
+      { strong: true }));
+  }
+  return svg(
+    "svg",
+    { viewBox: `0 0 ${card.width} ${card.height}`, width: card.width, height: card.height,
+      class: "card-img", role: "img",
+      "aria-label": `Probe cable colours, the wires ${panel.title} uses highlighted` },
+    svg("image", { href: card.image, x: 0, y: 0, width: card.width, height: card.height }),
+    ...marks
+  );
+}
+
+function hookupDiagram(panel) {
+  const board = state.status.variant === "v4" ? "Bus Pirate v4" : "Bus Pirate v3";
+  const columnNote = panel.refcard_column
+    ? `Highlighted: the ${panel.refcard_column} column — what each probe wire becomes on this bus.`
+    : "Highlighted: the pins this panel drives.";
+  return el(
+    "div",
+    { class: "diagram" },
+    el("div", { class: "diagram__cards" }, refcardDiagram(panel), cableDiagram(panel)),
+    el("p", { class: "caption", text: `${board} · ${columnNote}` }),
+    el("p", { class: "caption", text: state.cableCaveat }),
+    el("p", {
+      class: "caption credit",
+      text: "Reference cards: Dangerous Prototypes wiki (dangerousprototypes.com), CC BY-SA.",
+    })
+  );
+}
+
+/* ------------------------------------------------------------ guide */
+
+async function openGuide(name) {
+  state.guide.open = true;
+  render();
+  try {
+    if (!state.guide.pages.length) {
+      state.guide.pages = (await api("/api/docs")).pages;
+    }
+    const body = await api(`/api/docs/${name}`);
+    state.guide.page = { name, markdown: body.markdown };
+  } catch (error) {
+    state.guide.page = { name, markdown: `# Guide\n\n${error.message}` };
+  }
+  renderGuide();
+}
+
+function renderGuide() {
+  const root = $("guide");
+  const page = state.guide.page;
+  const picker = el(
+    "select",
+    {
+      onchange: (event) => openGuide(event.target.value),
+    },
+    ...state.guide.pages.map((p) =>
+      el("option", { value: p.name, selected: page && p.name === page.name }, p.title)
+    )
+  );
+  const back = el("button", {
+    class: "btn btn--small",
+    text: "← Back to the dashboard",
+    onclick: () => {
+      state.guide.open = false;
+      render();
+    },
+  });
+  const body = el("div", { class: "guide__body" });
+  body.innerHTML = page ? markdownToHtml(page.markdown) : "Loading…";
+  body.querySelectorAll("a[data-doc]").forEach((link) =>
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      openGuide(link.dataset.doc);
+    })
+  );
+  root.replaceChildren(el("div", { class: "guide__bar" }, back, picker), body);
+  root.scrollTop = 0;
+}
+
+/* A deliberately small Markdown renderer: everything is HTML-escaped first,
+   so only the markup added here can reach the page. */
+function markdownToHtml(markdown) {
+  const escape = (s) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const blocks = [];
+  const lines = escape(markdown).split("\n");
+  let index = 0;
+
+  const inline = (text) =>
+    text
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, href) =>
+        href.endsWith(".md")
+          ? `<a href="#" data-doc="${href.replace(/\.md$/, "")}">${label}</a>`
+          : `<a href="${href}" target="_blank" rel="noreferrer">${label}</a>`
+      );
+
+  const isTableRow = (line) => line.trim().startsWith("|") && line.trim().endsWith("|");
+  const cells = (line) =>
+    line.trim().slice(1, -1).split("|").map((cell) => cell.trim());
+
+  while (index < lines.length) {
+    const line = lines[index];
+
+    if (line.startsWith("```")) {
+      const code = [];
+      index += 1;
+      while (index < lines.length && !lines[index].startsWith("```")) code.push(lines[index++]);
+      index += 1;
+      blocks.push(`<pre><code>${code.join("\n")}</code></pre>`);
+      continue;
+    }
+    const heading = line.match(/^(#{1,4})\s+(.*)$/);
+    if (heading) {
+      const level = heading[1].length;
+      blocks.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+      index += 1;
+      continue;
+    }
+    if (/^(-{3,}|\*{3,})$/.test(line.trim())) {
+      blocks.push("<hr>");
+      index += 1;
+      continue;
+    }
+    if (isTableRow(line) && isTableRow(lines[index + 1] || "") && /^[\s|:-]+$/.test(lines[index + 1])) {
+      const head = cells(line);
+      index += 2;
+      const body = [];
+      while (index < lines.length && isTableRow(lines[index])) body.push(cells(lines[index++]));
+      blocks.push(
+        `<table><thead><tr>${head.map((c) => `<th>${inline(c)}</th>`).join("")}</tr></thead>` +
+          `<tbody>${body
+            .map((row) => `<tr>${row.map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`)
+            .join("")}</tbody></table>`
+      );
+      continue;
+    }
+    if (/^\s*[-*]\s+/.test(line) || /^\s*\d+\.\s+/.test(line)) {
+      const ordered = /^\s*\d+\.\s+/.test(line);
+      const items = [];
+      while (index < lines.length && (/^\s*[-*]\s+/.test(lines[index]) || /^\s*\d+\.\s+/.test(lines[index]))) {
+        let item = lines[index].replace(/^\s*(?:[-*]|\d+\.)\s+/, "");
+        item = item.replace(/^\[([ x])\]\s*/, (m, mark) =>
+          `<input type="checkbox" disabled ${mark === "x" ? "checked" : ""}>`
+        );
+        items.push(`<li>${inline(item)}</li>`);
+        index += 1;
+      }
+      blocks.push(`<${ordered ? "ol" : "ul"}>${items.join("")}</${ordered ? "ol" : "ul"}>`);
+      continue;
+    }
+    if (line.startsWith("&gt; ")) {
+      const quote = [];
+      while (index < lines.length && lines[index].startsWith("&gt; ")) quote.push(lines[index++].slice(5));
+      blocks.push(`<blockquote>${inline(quote.join(" "))}</blockquote>`);
+      continue;
+    }
+    if (line.trim() === "") {
+      index += 1;
+      continue;
+    }
+    const paragraph = [];
+    while (index < lines.length && lines[index].trim() !== "" && !/^(#{1,4}\s|```|\s*[-*]\s|\s*\d+\.\s|\|)/.test(lines[index])) {
+      paragraph.push(lines[index++]);
+    }
+    if (paragraph.length === 0) {
+      // A line that begins a block we did not recognise — a stray table row,
+      // say. Emit it verbatim and move on; never leave index unchanged, or
+      // this loop never ends.
+      paragraph.push(lines[index++]);
+    }
+    blocks.push(`<p>${inline(paragraph.join(" "))}</p>`);
+  }
+  return blocks.join("\n");
+}
+
+$("guide-btn").addEventListener("click", () => openGuide(panelDoc() || "user-guide"));
+
+/* Keep the USB indicator honest: unplugging does not close the handle on
+   macOS, so the only way to notice is to re-check. */
+setInterval(async () => {
+  if (!state.status.connected || state.guide.open) return;
+  try {
+    const data = await api("/api/state");
+    const before = JSON.stringify(state.status);
+    state.status = data.status;
+    if (JSON.stringify(state.status) !== before) renderStatus();
+  } catch {
+    /* the server went away; the websocket reconnect will notice */
+  }
+}, 5000);

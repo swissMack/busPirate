@@ -79,6 +79,9 @@ _BUS = [
 
 PANEL = Panel(
     id="onewire",
+    refcard_column='1-Wire',
+    refcard_rows=['VPU', 'supplies', 'GND'],
+    doc="onewire",
     title="1-Wire",
     blurb="One data wire and a ground. Mostly temperature sensors.",
     mode="onewire",

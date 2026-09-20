@@ -12,9 +12,13 @@
   <div class="brand">bus<b>Pirate</b></div>
   <div id="recipes" class="recipes" hidden></div>
   <div class="spacer"></div>
-  <div id="status" class="status status--off">
-    <span class="dot"></span><span id="status-text">Not connected</span>
+  <div class="statusblock">
+    <div id="status" class="status status--off">
+      <span class="dot"></span><span id="status-text">Not connected</span>
+    </div>
+    <div id="usb" class="usb muted">USB: no device</div>
   </div>
+  <button id="guide-btn" class="btn btn--small">Guide</button>
 </header>
 
 <main class="layout">
@@ -37,6 +41,7 @@
          until it sees carrier detect, which looks exactly like a hang.</p>
     </div>
     <div id="panel" class="panel" hidden></div>
+    <div id="guide" class="guide" hidden></div>
   </section>
 </main>
 

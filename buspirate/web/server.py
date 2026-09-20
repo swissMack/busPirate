@@ -14,13 +14,22 @@ import ipaddress
 import os
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..exceptions import BusPirateError
+from . import docs as docs_module
 from .params import ParamError, coerce_all
 from .session import DeviceSession
+from .wiring import (
+    CABLE_CARD,
+    CABLE_CAVEAT,
+    REFCARD,
+    SEEED_CABLE,
+    SIGNAL_NOTES,
+    SIGNAL_ROLES,
+)
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
@@ -73,11 +82,36 @@ def create_app(
             "status": session.status(),
             "panels": _panels_json(),
             "traffic": list(session.traffic),
+            "cable": [
+                {
+                    "pin": index,
+                    "signal": signal,
+                    "colour": hexcode,
+                    "colour_name": name,
+                    "roles": SIGNAL_ROLES.get(signal, {}),
+                    "note": SIGNAL_NOTES.get(signal, ""),
+                }
+                for index, (signal, hexcode, name) in enumerate(SEEED_CABLE, start=1)
+            ],
+            "cable_caveat": CABLE_CAVEAT,
+            "refcard": REFCARD,
+            "cable_card": CABLE_CARD,
         }
 
     @app.get("/api/ports")
     async def ports() -> Dict[str, Any]:
         return {"ports": await session.call(session.ports)}
+
+    @app.get("/api/docs")
+    async def doc_index() -> Dict[str, Any]:
+        return {"pages": docs_module.available()}
+
+    @app.get("/api/docs/{name}")
+    async def doc_page(name: str) -> JSONResponse:
+        text = docs_module.read(name)
+        if text is None:
+            return _error(f"no guide page called {name!r}", status=404)
+        return JSONResponse({"ok": True, "name": name, "markdown": text})
 
     @app.post("/api/run")
     async def run(payload: Dict[str, Any]) -> JSONResponse:
@@ -129,6 +163,14 @@ def create_app(
     @app.get("/")
     async def index() -> FileResponse:
         return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+    @app.middleware("http")
+    async def no_cache(request: Request, call_next):
+        """The UI is edited in place while it runs; never serve it stale."""
+        response = await call_next(request)
+        if request.url.path.startswith("/static") or request.url.path == "/":
+            response.headers["Cache-Control"] = "no-store, must-revalidate"
+        return response
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app

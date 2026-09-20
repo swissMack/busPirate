@@ -138,6 +138,12 @@ class Panel:
     order: int = 50
     #: Shown under the wiring block; the place for per-protocol warnings.
     notes: List[str] = field(default_factory=list)
+    #: Name of the page in ``docs/`` that explains this panel in full.
+    doc: Optional[str] = None
+    #: Column to highlight on the Bus Pirate reference card, when there is one.
+    refcard_column: Optional[str] = None
+    #: Extra reference-card rows worth highlighting for this bus.
+    refcard_rows: List[str] = field(default_factory=list)
 
     def action(self, name: str) -> Action:
         for action in self.actions:
@@ -153,6 +159,9 @@ class Panel:
             "mode": self.mode,
             "wiring": [w.to_json() for w in self.wiring],
             "notes": self.notes,
+            "doc": self.doc,
+            "refcard_column": self.refcard_column,
+            "refcard_rows": self.refcard_rows,
             "actions": [a.to_json() for a in self.actions],
         }
 
