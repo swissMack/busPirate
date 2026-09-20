@@ -21,3 +21,8 @@ venv/
 *.egg-info/
 build/
 dist/
+
+# frontend test deps (see tests/ui/README.md)
+node_modules/
+package-lock.json
+package.json

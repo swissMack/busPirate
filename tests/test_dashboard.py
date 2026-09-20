@@ -270,3 +270,94 @@ def test_the_v4_pullup_rail_refusal_reaches_the_user(client):
     status, body = run(client, "i2c", "pullup_voltage", selection=2)
     assert status == 400
     assert "VPU" in body["error"] and "protection" in body["error"]
+
+
+# -- the guide, served from docs/ -----------------------------------------
+
+
+def test_the_guide_is_served_from_the_docs_directory(client):
+    pages = client.get("/api/docs").json()["pages"]
+    names = [p["name"] for p in pages]
+    assert names[0] == "user-guide"
+    assert {"i2c", "spi", "uart", "onewire", "troubleshooting"} <= set(names)
+    assert all(p["title"] for p in pages)
+
+
+def test_a_guide_page_returns_its_markdown(client):
+    body = client.get("/api/docs/i2c").json()
+    assert body["markdown"].startswith("# I2C")
+
+
+def test_the_guide_cannot_be_used_to_read_other_files(client):
+    # An empty name is the index route, not a traversal, so it is not here.
+    for attempt in ["../pyproject", "../../etc/passwd", "..", "Makefile", "../README"]:
+        assert client.get(f"/api/docs/{attempt}").status_code == 404, attempt
+
+
+def test_every_panel_points_at_a_page_that_exists(client):
+    names = {p["name"] for p in client.get("/api/docs").json()["pages"]}
+    for panel in client.get("/api/state").json()["panels"]:
+        if panel["doc"]:
+            assert panel["doc"] in names, panel["id"]
+
+
+# -- hook-up diagram data --------------------------------------------------
+
+
+def test_the_cable_table_matches_the_reference_card(client):
+    cable = client.get("/api/state").json()["cable"]
+    assert [(c["pin"], c["signal"], c["colour_name"]) for c in cable] == [
+        (1, "MISO", "black"),
+        (2, "CS", "white"),
+        (3, "MOSI", "grey"),
+        (4, "CLK", "pink"),
+        (5, "AUX", "blue"),
+        (6, "VPU", "green"),
+        (7, "ADC", "yellow"),
+        (8, "+5V", "orange"),
+        (9, "+3.3V", "red"),
+        (10, "GND", "brown"),
+    ]
+
+
+def test_signals_carry_their_per_bus_role(client):
+    cable = {c["signal"]: c for c in client.get("/api/state").json()["cable"]}
+    assert cable["MOSI"]["roles"]["I2C"] == "SDA"
+    assert cable["CLK"]["roles"]["I2C"] == "SCL"
+    assert cable["MISO"]["roles"]["UART"] == "RX"
+    assert cable["MOSI"]["roles"]["1-Wire"] == "OWD"
+
+
+def test_panels_name_a_column_that_the_card_actually_has(client):
+    state = client.get("/api/state").json()
+    columns = state["refcard"]["columns"]
+    rows = state["refcard"]["rows"]
+    for panel in state["panels"]:
+        if panel["refcard_column"]:
+            assert panel["refcard_column"] in columns, panel["id"]
+        for row in panel["refcard_rows"]:
+            assert row in rows, (panel["id"], row)
+
+
+def test_the_card_geometry_is_ordered_and_inside_the_image(client):
+    card = client.get("/api/state").json()["refcard"]
+    for name, (left, right) in card["columns"].items():
+        assert 0 <= left < right <= card["width"], name
+    for name, (top, bottom) in card["rows"].items():
+        assert 0 <= top < bottom <= card["height"], name
+
+
+def test_the_reference_images_are_actually_served(client):
+    for path in ["/static/img/refcard.png", "/static/img/seeed-cable.png"]:
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.content[:4] == b"\x89PNG"
+
+
+def test_wiring_signals_all_exist_on_the_cable(client):
+    state = client.get("/api/state").json()
+    known = {c["signal"] for c in state["cable"]} | {"+5.0V"}
+    for panel in state["panels"]:
+        for wire in panel["wiring"]:
+            assert wire["signal"] in known, (panel["id"], wire["signal"])
+            assert wire["colour"].startswith("#"), (panel["id"], wire["signal"])

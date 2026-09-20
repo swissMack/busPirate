@@ -3,7 +3,7 @@
 VENV := .venv
 PY := $(VENV)/bin/python
 
-.PHONY: help setup dash demo test ports lint clean
+.PHONY: help setup dash demo test ui-test ports clean
 
 help:  ## show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -27,6 +27,13 @@ test: $(PY)  ## run the test suite
 
 ports: $(PY)  ## list serial ports and flag the likely Bus Pirate
 	$(PY) -m buspirate ports
+
+ui-test: $(PY)  ## drive the real frontend in jsdom (needs node, jsdom, ws)
+	@node -e "require.resolve('jsdom')" 2>/dev/null || \
+	  { echo "install first:  npm install jsdom ws"; exit 1; }
+	@$(PY) -m buspirate dashboard --demo --no-browser & \
+	  sleep 4; node tests/ui/frontend.mjs; status=$$?; \
+	  pkill -f "buspirate dashboard"; exit $$status
 
 clean:  ## remove the virtualenv and caches
 	rm -rf $(VENV) .pytest_cache **/__pycache__
