@@ -1,0 +1,16 @@
+# captures & dumps
+captures/*
+!captures/.gitkeep
+*.bin
+*.hex
+*.dump
+*.log
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# os
+.DS_Store
