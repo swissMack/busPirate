@@ -4,20 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "buspirate"
-version = "0.1.0"
+version = "0.2.0"
 description = "Serial driver for the Bus Pirate binary (bitbang) protocol"
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = ["pyserial>=3.4"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+web = ["fastapi>=0.100", "uvicorn>=0.23"]
+dev = ["pytest>=7", "fastapi>=0.100", "uvicorn>=0.23", "httpx>=0.24"]
 
 [project.scripts]
 buspirate = "buspirate.cli:main"
 
 [tool.setuptools]
-packages = ["buspirate"]
+packages = ["buspirate", "buspirate.web", "buspirate.web.panels"]
+
+[tool.setuptools.package-data]
+"buspirate.web" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

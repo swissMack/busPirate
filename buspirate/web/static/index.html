@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bus Pirate</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#9889;</text></svg>">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">bus<b>Pirate</b></div>
+  <div id="recipes" class="recipes" hidden></div>
+  <div class="spacer"></div>
+  <div id="status" class="status status--off">
+    <span class="dot"></span><span id="status-text">Not connected</span>
+  </div>
+</header>
+
+<main class="layout">
+  <nav id="nav" class="nav"></nav>
+
+  <section class="pane">
+    <div id="welcome" class="welcome">
+      <h1>Connect the Bus Pirate</h1>
+      <p>Plug it in, then pick its port below. If you are not sure which port
+         is right, leave it on <b>Detect automatically</b> — the likely one is
+         marked.</p>
+      <div class="connect-row">
+        <select id="port-select"><option value="">Detect automatically</option></select>
+        <button id="connect" class="btn btn--primary">Connect</button>
+        <button id="refresh-ports" class="btn">Refresh ports</button>
+      </div>
+      <p id="welcome-error" class="error" hidden></p>
+      <p class="hint">On macOS use the <code>/dev/cu.*</code> device. The
+         matching <code>/dev/tty.*</code> entry is the same hardware but blocks
+         until it sees carrier detect, which looks exactly like a hang.</p>
+    </div>
+    <div id="panel" class="panel" hidden></div>
+  </section>
+</main>
+
+<footer class="log">
+  <div class="log__bar">
+    <b>Traffic</b>
+    <span id="log-count" class="muted"></span>
+    <div class="spacer"></div>
+    <label class="check"><input type="checkbox" id="log-follow" checked> Follow</label>
+    <button id="log-clear" class="btn btn--small">Clear</button>
+    <button id="log-toggle" class="btn btn--small">Hide</button>
+  </div>
+  <div id="log-lines" class="log__lines"></div>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

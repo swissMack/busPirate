@@ -103,8 +103,11 @@ def _score(info) -> PortCandidate:
         candidate.score = 20
         candidate.note = "USB serial adapter, unrecognised chip"
     else:
-        candidate.score = 0
-        candidate.note = "serial port"
+        # No USB identity at all: a Bluetooth pairing or an on-board UART.
+        # Return before the platform adjustments so it stays below zero.
+        candidate.score = -1
+        candidate.note = "not a USB serial adapter"
+        return candidate
 
     if sys.platform == "darwin":
         if "/tty." in device:
