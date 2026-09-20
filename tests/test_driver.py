@@ -1,31 +1,16 @@
-import os
-import sys
-
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from buspirate import BusPirate, I2C, ModeError, NackError, SPI  # noqa: E402
-from tests.fake_serial import FakeSerial, fake_factory  # noqa: E402
-
-
-@pytest.fixture
-def fake():
-    return FakeSerial()
-
-
-@pytest.fixture
-def bp(fake):
-    device = BusPirate("/dev/fake", serial_factory=fake_factory(fake))
-    with device:
-        yield device
+from buspirate import I2C, ModeError, NackError
+from buspirate.i2c import address_byte
+from tests.conftest import make_device
+from tests.fake_serial import FakeSerial
 
 
 # -- transport / mode entry ------------------------------------------------
 
 
 def test_open_enters_binary_mode(fake):
-    device = BusPirate("/dev/fake", serial_factory=fake_factory(fake))
+    device = make_device(fake)
     with device:
         assert fake.state == "bbio"
     assert fake.closed
@@ -36,13 +21,13 @@ def test_enter_binary_mode_gives_up_with_a_useful_message(fake):
         def _process(self):
             self._out.clear()
 
-    device = BusPirate("/dev/fake", serial_factory=fake_factory(Deaf()))
-    with pytest.raises(ModeError, match="no BBIO1 response"):
+    device = make_device(Deaf())
+    with pytest.raises(ModeError, match="no BBIO response"):
         device.open()
 
 
 def test_close_returns_the_device_to_its_terminal(fake):
-    device = BusPirate("/dev/fake", serial_factory=fake_factory(fake))
+    device = make_device(fake)
     device.open()
     device.close()
     assert fake.state == "term"
@@ -91,7 +76,7 @@ def test_i2c_write_sends_the_address_with_the_write_bit(bp, fake):
 
 def test_i2c_write_raises_on_a_nack(bp):
     with bp.i2c() as i2c:
-        with pytest.raises(NackError, match="no ACK from 0x11"):
+        with pytest.raises(NackError, match="0x11 did not acknowledge"):
             i2c.write(0x11, b"\x00")
 
 
@@ -126,15 +111,36 @@ def test_i2c_write_chunks_payloads_over_sixteen_bytes(bp, fake):
     assert b"\x1f" in written  # a full 16-byte bulk header appeared
 
 
-def test_i2c_read_register_round_trip(bp):
+def test_i2c_read_register_uses_a_repeated_start(bp, fake):
     with bp.i2c() as i2c:
         assert i2c.read_register(0x50, 0x0A, 4) == b"\x00\x01\x02\x03"
+    written = bytes(fake.written)
+    # write address + register, then a second start before the read address
+    assert b"\x11\xa0\x0a" in written
+    assert written.index(b"\x11\xa0\x0a") < written.rindex(b"\x02")
+
+
+def test_i2c_read_register_names_the_register_that_was_refused(bp, fake):
+    fake.i2c_devices.add(0x22)
+    with bp.i2c() as i2c:
+        i2c.read_register(0x22, 0x0A, 1)  # acks; the address is known
+    with bp.i2c() as i2c:
+        with pytest.raises(NackError, match="did not acknowledge its address"):
+            i2c.read_register(0x11, 0x0A, 1)
+
+
+def test_i2c_write_then_read_sends_exactly_the_bytes_given(bp, fake):
+    with bp.i2c() as i2c:
+        data = i2c.write_then_read(bytes([address_byte(0x50, read=True)]), 4)
+    assert data == b"\x00\x01\x02\x03"
+    # command, write count, read count, then the address byte and nothing else
+    assert b"\x08\x00\x01\x00\x04\xa1" in bytes(fake.written)
 
 
 def test_i2c_write_then_read_raises_when_the_target_is_absent(bp):
     with bp.i2c() as i2c:
-        with pytest.raises(NackError, match="write_then_read"):
-            i2c.write_then_read(0x11, b"\x00", 2)
+        with pytest.raises(NackError, match="write_then_read failed"):
+            i2c.write_then_read(bytes([address_byte(0x11, read=True)]), 2)
 
 
 def test_i2c_rejects_an_out_of_range_address(bp):
@@ -146,7 +152,7 @@ def test_i2c_rejects_an_out_of_range_address(bp):
 def test_i2c_speed_must_be_a_known_constant(bp):
     with bp.i2c() as i2c:
         i2c.set_speed(I2C.SPEED_400KHZ)
-        with pytest.raises(ValueError, match="SPEED_5KHZ"):
+        with pytest.raises(ValueError, match="not available"):
             i2c.set_speed(9)
 
 

@@ -1,9 +1,10 @@
-"""I2C mode (``I2C1``)."""
+"""I2C mode (``I2Cx``)."""
 
 from __future__ import annotations
 
-from typing import Iterable, List, Sequence
+from typing import Iterable, List
 
+from . import device as device_module
 from .exceptions import NackError
 from .mode import Mode
 
@@ -13,10 +14,20 @@ CMD_READ_BYTE = 0x04
 CMD_ACK = 0x06
 CMD_NACK = 0x07
 CMD_WRITE_THEN_READ = 0x08
+CMD_EXTENDED_AUX = 0x09
 CMD_SNIFFER = 0x0F
 SPEED_BASE = 0x60
+PULLUP_VOLTAGE_BASE = 0x50  # 0b010100xy, BPv4 only
 
 MAX_WRITE_THEN_READ = 4096
+
+# Argument bytes for the v4 extended AUX command.
+AUX_LOW = 0x00
+AUX_HIGH = 0x01
+AUX_HIZ = 0x02
+AUX_READ = 0x03
+AUX_USE_AUX = 0x10
+AUX_USE_CS = 0x20
 
 
 class I2C(Mode):
@@ -26,17 +37,22 @@ class I2C(Mode):
     """
 
     enter_command = 0x02
-    version_string = b"I2C1"
+    banner_prefix = "I2C"
+    title = "I2C"
 
     SPEED_5KHZ = 0
     SPEED_50KHZ = 1
     SPEED_100KHZ = 2
     SPEED_400KHZ = 3
 
+    PULLUP_OFF = 0
+    PULLUP_3V3 = 1
+    PULLUP_5V = 2
+
     # -- bus primitives ----------------------------------------------------
 
     def start(self) -> None:
-        """Send a start condition (also used for a repeated start)."""
+        """Send a start condition. Issue it again for a repeated start."""
         self._check_active()
         self.bp.command_expect_ack(CMD_START)
 
@@ -53,23 +69,30 @@ class I2C(Mode):
         return value
 
     def write_bytes(self, data: bytes) -> List[bool]:
-        """Write up to 16 bytes, returning the target's ACK flag per byte.
+        """Write bytes, returning the target's ACK flag per byte.
 
-        ``True`` means the target acknowledged. No start or stop is sent.
+        ``True`` means the target acknowledged. No start or stop is sent, and
+        payloads longer than 16 bytes are split into bulk chunks for you.
         """
-        self._check_active()
-        data = bytes(data)
-        header = self._bulk_header(len(data))
-        self.bp.write(bytes([header]) + data)
-        self._expect_ack("I2C bulk write")
-        # One status byte per written byte: 0x00 = ACK, 0x01 = NACK.
-        return [b == 0x00 for b in self.bp.read(len(data))]
+        # The firmware answers 0x00 for ACK and 0x01 for NACK.
+        return [b == 0x00 for b in self._write_bulk_chunks(data, "I2C bulk write")]
 
     def set_speed(self, speed: int) -> None:
-        """Set the bus clock. Use one of the ``SPEED_*`` constants."""
+        """Set the bus clock. Use one of the ``SPEED_*`` constants.
+
+        Firmware older than v4.2 knows only two speeds (0 = 5 kHz,
+        1 = 50 kHz), so the valid range depends on the connected device.
+        """
         self._check_active()
-        if speed not in (0, 1, 2, 3):
-            raise ValueError("speed must be one of I2C.SPEED_5KHZ..SPEED_400KHZ")
+        available = self.bp.profile.i2c_speeds
+        if speed not in available:
+            options = ", ".join(
+                f"{index}={hz // 1000}kHz" for index, hz in sorted(available.items())
+            )
+            raise ValueError(
+                f"speed {speed} is not available on {self.bp.profile.describe()}; "
+                f"choose from {options}"
+            )
         self.bp.command_expect_ack(SPEED_BASE | speed)
 
     # -- transactions ------------------------------------------------------
@@ -79,13 +102,11 @@ class I2C(Mode):
         payload = bytes([_addr_byte(address, read=False)]) + bytes(data)
         self.start()
         try:
-            for chunk in _chunked(payload, 16):
-                acks = self.write_bytes(chunk)
-                if not all(acks):
-                    raise NackError(
-                        f"no ACK from 0x{address:02X} at byte "
-                        f"{acks.index(False)} of a {len(chunk)}-byte chunk"
-                    )
+            acks = self.write_bytes(payload)
+            if not all(acks):
+                index = acks.index(False)
+                where = "its address" if index == 0 else f"data byte {index - 1}"
+                raise NackError(f"0x{address:02X} did not acknowledge {where}")
         finally:
             self.stop()
 
@@ -96,54 +117,76 @@ class I2C(Mode):
         self.start()
         try:
             if not self.write_bytes(bytes([_addr_byte(address, read=True)]))[0]:
-                raise NackError(f"no ACK from 0x{address:02X} on read address")
+                raise NackError(f"0x{address:02X} did not acknowledge a read")
             # NACK the final byte to tell the target to release the bus.
-            return bytes(
-                self.read_byte(ack=(i < count - 1)) for i in range(count)
-            )
+            return bytes(self.read_byte(ack=(i < count - 1)) for i in range(count))
         finally:
             self.stop()
 
-    def write_then_read(
-        self, address: int, data: bytes = b"", read_count: int = 0
-    ) -> bytes:
-        """One atomic write-then-repeated-start-read, handled by the firmware.
+    def read_register(self, address: int, register: int, count: int = 1) -> bytes:
+        """Point the target at ``register``, then read ``count`` bytes.
 
-        Faster than composing :meth:`write` and :meth:`read` and it holds the
-        bus across the repeated start. Needs Bus Pirate firmware v5.1+.
+        Uses a repeated start, which is what almost every register-mapped chip
+        expects, and works on every firmware version.
+        """
+        if count < 1:
+            raise ValueError("count must be >= 1")
+        self.start()
+        try:
+            acks = self.write_bytes(
+                bytes([_addr_byte(address, read=False), register & 0xFF])
+            )
+            if not acks[0]:
+                raise NackError(f"0x{address:02X} did not acknowledge its address")
+            if not acks[1]:
+                raise NackError(
+                    f"0x{address:02X} did not acknowledge register 0x{register:02X}"
+                )
+            self.start()  # repeated start
+            if not self.write_bytes(bytes([_addr_byte(address, read=True)]))[0]:
+                raise NackError(f"0x{address:02X} did not acknowledge a read")
+            return bytes(self.read_byte(ack=(i < count - 1)) for i in range(count))
+        finally:
+            self.stop()
+
+    def write_register(self, address: int, register: int, data: bytes) -> None:
+        self.write(address, bytes([register & 0xFF]) + bytes(data))
+
+    def write_then_read(self, write_data: bytes = b"", read_count: int = 0) -> bytes:
+        """The firmware's buffered write-then-read (command ``0x08``).
+
+        ``write_data`` is the exact byte stream to put on the bus **including
+        the address byte** — the firmware adds nothing. It sends a start,
+        writes those bytes, reads ``read_count`` bytes ACKing all but the
+        last, then stops. Use :func:`address_byte` to build the address.
+
+        Far faster than the primitives for bulk reads, but it needs firmware
+        v5.1 or newer and there is no repeated start: to read a register, use
+        :meth:`read_register` instead.
         """
         self._check_active()
-        data = bytes(data)
-        write_payload = bytes([_addr_byte(address, read=False)]) + data
-        if read_count:
-            # The firmware appends the read address itself only when we ask it
-            # to; send it explicitly as part of the write for a repeated start.
-            write_payload += bytes([_addr_byte(address, read=True)])
-        if len(write_payload) > MAX_WRITE_THEN_READ or read_count > MAX_WRITE_THEN_READ:
-            raise ValueError(f"write_then_read is limited to {MAX_WRITE_THEN_READ} bytes")
-
+        write_data = bytes(write_data)
+        if len(write_data) > MAX_WRITE_THEN_READ or read_count > MAX_WRITE_THEN_READ:
+            raise ValueError(
+                f"write_then_read handles at most {MAX_WRITE_THEN_READ} bytes "
+                "in each direction"
+            )
         self.bp.write(
             bytes([CMD_WRITE_THEN_READ])
-            + len(write_payload).to_bytes(2, "big")
+            + len(write_data).to_bytes(2, "big")
             + read_count.to_bytes(2, "big")
-            + write_payload
+            + write_data
         )
         status = self.bp.read(1)[0]
         if status != 0x01:
             raise NackError(
-                f"write_then_read to 0x{address:02X} failed (status "
-                f"0x{status:02X}) — usually a NACK from the target"
+                "write_then_read failed (the Bus Pirate returned "
+                f"0x{status:02X}) — the target did not acknowledge, or the "
+                "byte counts are out of range"
             )
         return self.bp.read(read_count) if read_count else b""
 
     # -- convenience -------------------------------------------------------
-
-    def read_register(self, address: int, register: int, count: int = 1) -> bytes:
-        """The common `write register pointer, then read` pattern."""
-        return self.write_then_read(address, bytes([register]), count)
-
-    def write_register(self, address: int, register: int, data: bytes) -> None:
-        self.write(address, bytes([register]) + bytes(data))
 
     def scan(self, addresses: Iterable[int] = range(0x08, 0x78)) -> List[int]:
         """Probe each 7-bit address and return those that acknowledge.
@@ -160,13 +203,33 @@ class I2C(Mode):
                 self.stop()
         return found
 
+    # -- Bus Pirate v4 only ------------------------------------------------
+
+    def set_pullup_voltage(self, selection: int) -> None:
+        """Choose the on-board pull-up rail: off, 3.3V or 5V. **BPv4 only.**"""
+        self._check_active()
+        self.bp.profile.require(device_module.CAP_PULLUP_VOLTAGE)
+        if selection not in (self.PULLUP_OFF, self.PULLUP_3V3, self.PULLUP_5V):
+            raise ValueError("use I2C.PULLUP_OFF, PULLUP_3V3 or PULLUP_5V")
+        self.bp.command_expect_ack(PULLUP_VOLTAGE_BASE | selection)
+
+    def extended_aux(self, command: int) -> None:
+        """Drive or read AUX/CS directly. **BPv4 only.** See the ``AUX_*`` values."""
+        self._check_active()
+        self.bp.profile.require(device_module.CAP_EXTENDED_AUX)
+        self.bp.write(bytes([CMD_EXTENDED_AUX, command & 0xFF]))
+        self._expect_ack("extended AUX command")
+
+
+def address_byte(address: int, read: bool) -> int:
+    """Turn a 7-bit address into the byte that goes on the bus."""
+    return _addr_byte(address, read)
+
 
 def _addr_byte(address: int, read: bool) -> int:
     if not 0x00 <= address <= 0x7F:
-        raise ValueError(f"7-bit address out of range: 0x{address:02X}")
+        raise ValueError(
+            f"0x{address:02X} is not a 7-bit address. Addresses here are 7-bit "
+            "(0x00-0x7F); the read/write bit is added for you."
+        )
     return (address << 1) | (1 if read else 0)
-
-
-def _chunked(data: bytes, size: int):
-    for start in range(0, len(data), size):
-        yield data[start : start + size]

@@ -4,7 +4,8 @@ Typical use::
 
     from buspirate import BusPirate
 
-    with BusPirate("/dev/tty.usbserial-A700eEoR") as bp:
+    with BusPirate("auto") as bp:
+        print(bp.profile.describe())
         with bp.i2c() as i2c:
             i2c.configure_peripherals(power=True, pullups=True)
             i2c.set_speed(i2c.SPEED_100KHZ)
@@ -12,15 +13,19 @@ Typical use::
 """
 
 from .base import BusPirate
+from .device import DeviceProfile, capabilities_for, parse_banner
 from .exceptions import (
     BusPirateError,
     ConnectionError,
     ModeError,
     NackError,
     ProtocolError,
+    UnsupportedFeatureError,
 )
 from .i2c import I2C
 from .onewire import OneWire
+from .ports import PortCandidate, discover, resolve
+from .rawwire import RawWire
 from .spi import SPI
 from .uart import UART
 
@@ -28,13 +33,21 @@ __all__ = [
     "BusPirate",
     "BusPirateError",
     "ConnectionError",
+    "DeviceProfile",
+    "I2C",
     "ModeError",
     "NackError",
+    "OneWire",
+    "PortCandidate",
     "ProtocolError",
-    "I2C",
+    "RawWire",
     "SPI",
     "UART",
-    "OneWire",
+    "UnsupportedFeatureError",
+    "capabilities_for",
+    "discover",
+    "parse_banner",
+    "resolve",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -1,4 +1,4 @@
-"""UART mode (``ART1``)."""
+"""UART mode (``ARTx``)."""
 
 from __future__ import annotations
 
@@ -16,7 +16,8 @@ class UART(Mode):
     """UART bridge. The Bus Pirate transmits on MOSI and receives on MISO."""
 
     enter_command = 0x03
-    version_string = b"ART1"
+    banner_prefix = "ART"
+    title = "UART"
 
     BAUD_300 = 0
     BAUD_1200 = 1
@@ -86,14 +87,7 @@ class UART(Mode):
 
     def write(self, data: bytes) -> None:
         """Transmit any number of bytes, chunked into bulk writes."""
-        self._check_active()
-        data = bytes(data)
-        for start in range(0, len(data), 16):
-            chunk = data[start : start + 16]
-            self.bp.write(bytes([self._bulk_header(len(chunk))]) + chunk)
-            self._expect_ack("UART bulk write")
-            # One status byte per transmitted byte.
-            self.bp.read(len(chunk))
+        self._write_bulk_chunks(data, "UART bulk write")
 
     def start_receive(self) -> None:
         """Begin echoing received bytes back over the USB link.

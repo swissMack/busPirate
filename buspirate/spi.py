@@ -1,4 +1,4 @@
-"""SPI mode (``SPI1``)."""
+"""SPI mode (``SPIx``)."""
 
 from __future__ import annotations
 
@@ -19,7 +19,8 @@ class SPI(Mode):
     """SPI master. The Bus Pirate drives CS, CLK and MOSI; MISO is sampled."""
 
     enter_command = 0x01
-    version_string = b"SPI1"
+    banner_prefix = "SPI"
+    title = "SPI"
 
     SPEED_30KHZ = 0
     SPEED_125KHZ = 1
@@ -46,7 +47,7 @@ class SPI(Mode):
     def set_speed(self, speed: int) -> None:
         """Set the clock rate. Use one of the ``SPEED_*`` constants."""
         self._check_active()
-        if speed not in self._SPEEDS:
+        if speed not in self.bp.profile.spi_speeds:
             raise ValueError("speed must be one of SPI.SPEED_30KHZ..SPEED_8MHZ")
         self.bp.command_expect_ack(SPEED_BASE | speed)
 

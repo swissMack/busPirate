@@ -1,4 +1,4 @@
-"""1-Wire mode (``1W01``)."""
+"""1-Wire mode (``1W0x``)."""
 
 from __future__ import annotations
 
@@ -21,7 +21,8 @@ class OneWire(Mode):
     """1-Wire master on the MOSI pin (needs an external pull-up to Vpu)."""
 
     enter_command = 0x04
-    version_string = b"1W01"
+    banner_prefix = "1W0"
+    title = "1-Wire"
 
     def reset(self) -> None:
         """Send a reset pulse and wait for the presence pulse."""
@@ -38,13 +39,7 @@ class OneWire(Mode):
 
     def write(self, data: bytes) -> None:
         """Write any number of bytes, chunked into bulk writes."""
-        self._check_active()
-        data = bytes(data)
-        for start in range(0, len(data), 16):
-            chunk = data[start : start + 16]
-            self.bp.write(bytes([self._bulk_header(len(chunk))]) + chunk)
-            self._expect_ack("1-Wire bulk write")
-            self.bp.read(len(chunk))
+        self._write_bulk_chunks(data, "1-Wire bulk write")
 
     def search_rom(self, alarm: bool = False) -> List[bytes]:
         """Run the firmware's ROM search and return the 8-byte addresses.

@@ -19,3 +19,7 @@ class ProtocolError(BusPirateError):
 
 class NackError(BusPirateError):
     """A target device did not acknowledge (I2C)."""
+
+
+class UnsupportedFeatureError(BusPirateError):
+    """The connected hardware or firmware does not have this feature."""
