@@ -5,7 +5,8 @@ from __future__ import annotations
 import time
 
 from ...spi import SPI
-from ..registry import Action, Panel, Param, Wire, hexdump, keyvalue, text
+from ...spiflash import SECTOR_SIZE, SPIFlash
+from ..registry import Action, Panel, Param, Wire, hexdump, keyvalue, live, text
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
 
 CMD_JEDEC_ID = 0x9F
@@ -102,20 +103,85 @@ def _flash_read(ctx, offset, length, power, speed, spi_mode):
 
 def _flash_dump(ctx, length, filename, power, speed, spi_mode):
     _setup(ctx, power, speed, spi_mode)
-    chunk_size = 1024
+    flash = SPIFlash(ctx.mode)
     path = ctx.capture_path(filename)
     started = time.monotonic()
+    done = 0
     with open(path, "wb") as handle:
-        for offset in range(0, length, chunk_size):
-            size = min(chunk_size, length - offset)
-            command = bytes(
-                [CMD_READ, (offset >> 16) & 0xFF, (offset >> 8) & 0xFF, offset & 0xFF]
-            )
-            handle.write(ctx.mode.write_then_read(command, size))
-            ctx.progress(offset + size, length, f"read 0x{offset + size:06X}")
+        for chunk in flash.iter_read(0, length):
+            handle.write(chunk)
+            done += len(chunk)
+            ctx.progress(done, length, f"read 0x{done:06X}")
     elapsed = time.monotonic() - started
+    return text(f"Wrote {length} bytes to {path} in {elapsed:.1f}s.", tone="good")
+
+
+def _flash_erase_sector(ctx, offset, power, speed, spi_mode):
+    _setup(ctx, power, speed, spi_mode)
+    flash = SPIFlash(ctx.mode)
+    base = offset - (offset % SECTOR_SIZE)
+    flash.erase_sector(base)
     return text(
-        f"Wrote {length} bytes to {path} in {elapsed:.1f}s.", tone="good"
+        f"Erased the 4 KB sector at 0x{base:06X}. Every byte in it is now 0xFF.",
+        tone="good",
+    )
+
+
+def _flash_erase_chip(ctx, power, speed, spi_mode):
+    _setup(ctx, power, speed, spi_mode)
+    started = time.monotonic()
+    SPIFlash(ctx.mode).erase_chip()
+    return text(
+        f"The whole chip is erased, in {time.monotonic() - started:.1f}s.",
+        tone="good",
+    )
+
+
+def _flash_write(ctx, filename, offset, verify, power, speed, spi_mode):
+    _setup(ctx, power, speed, spi_mode)
+    data = ctx.session.read_capture(filename)
+    flash = SPIFlash(ctx.mode)
+    started = time.monotonic()
+    sectors = flash.erase_range(offset, len(data), ctx.progress)
+    flash.write(offset, data, ctx.progress)
+    message = (
+        f"Erased {sectors} sector(s) and wrote {len(data)} bytes from "
+        f"{filename} at 0x{offset:06X}"
+    )
+    if verify:
+        bad = flash.verify(offset, data, ctx.progress)
+        if bad is not None:
+            return text(
+                f"{message}, but it reads back wrong from 0x{bad:06X}. The chip "
+                "may be write-protected — check that WP is tied high.",
+                tone="warn",
+            )
+        message += ", verified"
+    return text(f"{message}. {time.monotonic() - started:.1f}s.", tone="good")
+
+
+def _flash_verify(ctx, filename, offset, power, speed, spi_mode):
+    _setup(ctx, power, speed, spi_mode)
+    data = ctx.session.read_capture(filename)
+    bad = SPIFlash(ctx.mode).verify(offset, data, ctx.progress)
+    if bad is None:
+        return text(
+            f"All {len(data)} bytes match {filename} from 0x{offset:06X}.",
+            tone="good",
+        )
+    return text(f"First difference at 0x{bad:06X}.", tone="warn")
+
+
+def _sniff(ctx, cs_low_only, power, speed, spi_mode):
+    _setup(ctx, power, speed, spi_mode)
+    ctx.mode.start_sniffer(cs_low_only=cs_low_only)
+    return live(
+        "SPI sniffer",
+        decoder="spi-sniffer",
+        caption="Watching another master talk to the chip. Nothing is driven.",
+        warning="The sniffer is hardware and good to about 10 MHz. If it "
+        "cannot keep up the firmware aborts the sniff and the MODE LED goes "
+        "out.",
     )
 
 
@@ -138,7 +204,9 @@ PANEL = Panel(
     ],
     notes=[
         "Serial flash chips also have WP and HOLD pins. Tie both high, or the "
-        "chip may never respond.",
+        "chip may never respond — and writes will fail silently if WP is low.",
+        "Programming only turns 1s into 0s, so a region has to be erased back "
+        "to 0xFF first. Erasing works in 4 KB sectors, never single bytes.",
         "A reply of all 0x00 or all 0xFF almost always means MISO is not "
         "connected, not that the chip is blank.",
         POWER_NOTE,
@@ -197,6 +265,73 @@ PANEL = Panel(
             ]
             + list(_SETUP),
             handler=_transfer,
+        ),
+        Action(
+            name="flash_write",
+            label="Write a file to flash",
+            long_running=True,
+            confirm="This erases the sectors it covers and reprogrammes them. "
+            "Anything already in those sectors is gone. Continue?",
+            help="Takes a file from captures/. Erases the 4 KB sectors the "
+            "range touches — including any part of them outside your range — "
+            "then programmes and reads it back.",
+            params=[
+                Param("filename", "filename", "File in captures/", default="flash.bin"),
+                Param("offset", "int", "Write at address", default=0, minimum=0),
+                Param("verify", "bool", "Read back and check", default=True),
+            ]
+            + list(_SETUP),
+            handler=_flash_write,
+        ),
+        Action(
+            name="flash_verify",
+            label="Compare with a file",
+            long_running=True,
+            help="Reads the chip and reports the first byte that differs.",
+            params=[
+                Param("filename", "filename", "File in captures/", default="flash.bin"),
+                Param("offset", "int", "Start address", default=0, minimum=0),
+            ]
+            + list(_SETUP),
+            handler=_flash_verify,
+        ),
+        Action(
+            name="flash_erase_sector",
+            label="Erase one sector",
+            confirm="Erasing cannot be undone. Continue?",
+            help="Clears the 4 KB sector containing the address you give.",
+            params=[Param("offset", "hex", "Address in the sector", default=0, minimum=0)]
+            + list(_SETUP),
+            handler=_flash_erase_sector,
+        ),
+        Action(
+            name="flash_erase_chip",
+            label="Erase the whole chip",
+            confirm="This erases every byte on the chip and cannot be undone. "
+            "Dump it first if you might want it back. Continue?",
+            long_running=True,
+            help="Can take a minute or more on a large part.",
+            params=list(_SETUP),
+            handler=_flash_erase_chip,
+        ),
+        Action(
+            name="sniff",
+            label="Sniff the bus",
+            recipe=True,
+            stream=True,
+            help="Passively watch an existing master and chip. Wire CLK, MOSI, "
+            "MISO and CS in parallel with them and share the ground.",
+            params=[
+                Param(
+                    "cs_low_only",
+                    "bool",
+                    "Only while CS is low",
+                    default=True,
+                    help="Filters out the idle chatter between transactions.",
+                )
+            ]
+            + list(_SETUP),
+            handler=_sniff,
         ),
         Action(
             name="configure",

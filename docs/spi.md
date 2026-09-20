@@ -50,6 +50,58 @@ The dashboard's **Dump flash to a file** does this in 1 KB chunks into
 `captures/`, with progress. At 1 MHz expect roughly 100 KB/s, so a 16 MB chip
 is a long coffee break — raise the clock if the wiring is short and tidy.
 
+## Writing to flash
+
+Two facts govern everything:
+
+1. **Programming only clears bits.** A write turns 1s into 0s, never back, so
+   a region must be erased to `0xFF` first.
+2. **Erasing works in blocks**, not bytes — 4 KB sectors typically. Erasing a
+   sector wipes all 4 KB of it, including anything outside the range you meant.
+
+So the safe sequence is erase, program, verify. The dashboard's **Write a file
+to flash** does exactly that, from a file in `captures/`:
+
+```python
+from buspirate.spiflash import SPIFlash
+
+flash = SPIFlash(spi)
+flash.erase_write_verify(0x0000, open("captures/flash.bin", "rb").read())
+```
+
+Or each step by hand:
+
+```python
+flash.erase_range(0x1000, len(data))   # whole sectors
+flash.write(0x1000, data)              # split on page boundaries for you
+bad = flash.verify(0x1000, data)       # None if it matches
+```
+
+A page program may not cross a 256-byte page boundary — the chip wraps back
+to the start of the page instead of carrying on, silently corrupting the
+write. `write()` splits on page boundaries so you do not have to think about
+it; `program_page()` refuses rather than let it happen.
+
+**Dump before you erase.** `flash_dump` writes the whole chip to `captures/`
+in a couple of minutes, and it is the only way back.
+
+### When writes appear to do nothing
+
+Almost always the **WP pin is held low**, which write-protects the chip. The
+commands are accepted and silently ignored — which is why this library reads
+the status register back after enabling writes, and raises rather than
+carrying on.
+
+## Sniffing
+
+**Sniff the bus** watches an existing master and chip without driving
+anything. Wire CLK, MOSI, MISO and CS in parallel with them and share the
+ground. The sniffer is hardware and good to about 10 MHz; if it cannot keep
+up the firmware aborts and the MODE LED goes out.
+
+Filtering to "only while CS is low" hides the idle chatter between
+transactions, which is usually what you want.
+
 ## Clock mode
 
 `set_mode(0..3)` sets polarity and phase together:

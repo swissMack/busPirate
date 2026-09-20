@@ -51,6 +51,16 @@ Anything else goes through `set_manual_baudrate()` with a raw BRG divisor.
 Garbled characters are a speed problem, not a wiring problem: wiring faults
 give you silence, not nonsense.
 
+## Watching, and the bridge
+
+**Watch the line** streams everything received into the dashboard as it
+arrives — better than repeated reads for catching boot messages.
+
+**Transparent bridge** turns the Bus Pirate into a plain USB-to-serial
+adapter. The firmware documents it as "reset to exit": **there is no way out
+in software.** You have to unplug the Bus Pirate and plug it back in. The
+dashboard asks before starting it, and says so again afterwards.
+
 ## Voltage levels
 
 The Bus Pirate's UART is 3.3V logic and tolerates 5V inputs. It is **not**

@@ -11,8 +11,8 @@ requires-python = ">=3.8"
 dependencies = ["pyserial>=3.4"]
 
 [project.optional-dependencies]
-web = ["fastapi>=0.100", "uvicorn>=0.23"]
-dev = ["pytest>=7", "fastapi>=0.100", "uvicorn>=0.23", "httpx>=0.24"]
+web = ["fastapi>=0.100", "uvicorn>=0.23", "websockets>=11"]
+dev = ["pytest>=7", "fastapi>=0.100", "uvicorn>=0.23", "websockets>=11", "httpx>=0.24"]
 
 [project.scripts]
 buspirate = "buspirate.cli:main"

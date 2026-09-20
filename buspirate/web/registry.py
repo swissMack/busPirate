@@ -90,6 +90,12 @@ class Action:
     confirm: str = ""
     #: Long jobs report progress over the websocket.
     long_running: bool = False
+    #: Streaming actions take the port over until stopped: sniffers, bridges,
+    #: continuous measurement. They return :func:`live`.
+    stream: bool = False
+    #: True for actions that must still work while a stream holds the port —
+    #: connecting and disconnecting, which end the stream themselves.
+    allow_while_streaming: bool = False
 
     def to_json(self) -> dict:
         return {
@@ -102,6 +108,8 @@ class Action:
             "primary": self.primary,
             "confirm": self.confirm,
             "long_running": self.long_running,
+            "stream": self.stream,
+            "allow_while_streaming": self.allow_while_streaming,
         }
 
 
@@ -201,6 +209,20 @@ def keyvalue(pairs: List[List[Any]], *, caption: str = "") -> dict:
 
 def pins(state: Dict[str, bool]) -> dict:
     return {"render": "pins", "state": state}
+
+
+def live(kind: str, *, decoder: str, caption: str = "", warning: str = "") -> dict:
+    """A live stream: the device now talks until it is told to stop.
+
+    ``decoder`` names an entry in :mod:`buspirate.web.decoders`.
+    """
+    return {
+        "render": "stream",
+        "kind": kind,
+        "decoder": decoder,
+        "caption": caption,
+        "warning": warning,
+    }
 
 
 # ---------------------------------------------------------------------------

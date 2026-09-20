@@ -85,10 +85,31 @@ AUX, `0x20` use CS.
 | `0000 0011` | CS high |
 | `0000 0100` | write-then-read, CS handled by the firmware |
 | `0000 0101` | write-then-read, CS left alone |
+| `0000 0110` | AVR extended commands (null op, version, bulk flash read) |
+| `0000 11xx` | sniffer: `01` sniffs everything, `10` only while CS is low |
 | `0001 xxxx` | bulk transfer 1–16 bytes, answers `0x01` then the bytes read |
 | `0100 wxyz` | peripherals, as I2C |
 | `0110 0xxx` | speed: 30 k, 125 k, 250 k, 1 M, 2 M, 2.6 M, 4 M, 8 M |
-| `1000 wxyz` | `w` push-pull, `x` clock idle phase, `y` clock edge, `z` sample time |
+| `1000 wxyz` | `w` pin output HiZ(0)/3.3V(1), `x` CKP clock idle, `y` CKE clock edge, `z` SMP sample time |
+
+The config bits are not CPOL/CPHA directly. **CKP is CPOL, but CKE is the
+inverse of CPHA and does not depend on CPOL.** The documented startup default
+is `0010` — CKP 0, CKE 1 — which is SPI mode 0:
+
+| SPI mode | CPOL | CPHA | CKP | CKE |
+|----------|------|------|-----|-----|
+| 0 | 0 | 0 | 0 | 1 |
+| 1 | 0 | 1 | 0 | 0 |
+| 2 | 1 | 0 | 1 | 1 |
+| 3 | 1 | 1 | 1 | 0 |
+
+The sniffer is implemented in hardware and is good to about 10 MHz. It
+answers `0x01`, then traffic flows: `[` and `]` mark CS going low and high,
+and `\` escapes a **pair** of bytes, MOSI then MISO (firmware v5.1 and later).
+If it cannot keep up, the firmware aborts the sniff and turns the MODE LED
+off. Any byte stops it — but *where* the firmware puts its acknowledgement
+changed in v5.8, so the safe way back is to drain whatever arrives and then
+re-enter bitbang mode, which is unambiguous on every version.
 
 ## UART (`ARTx`) — page *UART (binary)*
 
@@ -97,11 +118,17 @@ AUX, `0x20` use CS.
 | `0000 0000` | exit to bitbang |
 | `0000 0010` | start echoing received bytes |
 | `0000 0011` | stop echoing |
-| `0000 0111` | set the raw BRG divisor, two bytes follow |
-| `0000 1111` | transparent bridge (needs a power cycle to leave) |
+| `0000 0111` | set the raw BRG divisor, two bytes follow (fosc 32 MHz, divider 2, BRGH=1) |
+| `0000 1111` | transparent bridge — **only a power cycle leaves it** |
 | `0001 xxxx` | bulk write 1–16 bytes |
 | `0110 xxxx` | baud rate index |
-| `100w xxyz` | `w` pin output, `xx` data bits and parity, `y` stop bits, `z` RX polarity |
+| `100w xxyz` | `w` pin output HiZ(0)/3.3V(1), `xx` 8/N(0) 8/E(1) 8/O(2) 9/N(3), `y` stop bits 1(0)/2(1), `z` RX idle high(0)/low(1) |
+
+In binary UART mode the receiver is always running; the echo commands only
+control whether what it hears is copied to USB. Echo starts *disabled*, so a
+configuration reply is never mixed with line traffic. The manual baud command
+is documented as answering `0x01` "to each byte", which is ambiguous — this
+driver reads one acknowledgement and drains any extra.
 
 ## 1-Wire (`1W0x`) — page *1-Wire (binary)*
 
@@ -118,6 +145,25 @@ Unused search slots come back as all `FF` and are dropped by the driver.
 
 ## Raw wire (`RAWx`) — page *Raw wire (binary)*
 
-Start/stop bits, CS high and low, read byte and read bit, a clock tick, and
-direct control of the clock and data lines. Use it for buses that are nearly
-SPI or I2C but not quite.
+| Command | Meaning |
+|---------|---------|
+| `0000 0010` / `0000 0011` | start bit / stop bit |
+| `0000 0100` / `0000 0101` | CS low / CS high |
+| `0000 0110` | read one byte |
+| `0000 0111` | read one bit |
+| `0000 1000` | read the data pin without clocking |
+| `0000 1001` | one clock pulse |
+| `0000 1010` / `0000 1011` | clock low / clock high |
+| `0000 1100` / `0000 1101` | data low / data high |
+| `0001 xxxx` | bulk write 1–16 bytes |
+| `0110 00xx` | speed |
+| `1000 wxyz` | `w` push-pull, `x` three-wire, `y` LSB first |
+
+Use it for buses that are nearly SPI or I2C but not quite.
+
+## OpenOCD JTAG (`OCD1`) — bitbang command `0000 0110`
+
+The mode exists, but its command set is documented only in the firmware
+source. This driver enters no such mode: point OpenOCD at the Bus Pirate
+directly. To poke at JTAG by hand, the reference card maps MOSI to TDI, CLK to
+TCK, MISO to TDO and CS to TMS, all of which the raw-wire mode can clock.

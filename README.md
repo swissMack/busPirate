@@ -3,7 +3,8 @@
 A Python driver, command line and web dashboard for the
 [Bus Pirate](http://dangerousprototypes.com/docs/Bus_Pirate) v3 and v4 — I2C,
 SPI, UART, 1-Wire and raw wire, over the binary protocol rather than by
-scraping the device's terminal.
+scraping the device's terminal. It talks to chips, watches other people's
+buses, and reads, erases and programmes SPI flash.
 
 ## Start here
 
@@ -39,7 +40,16 @@ on them — which probe wire becomes SDA, which becomes SCL — plus the warning
 that matter for that bus. The full user guide is in the sidebar too, so you
 never have to leave the page to look something up. One-click recipes cover the
 jobs worth coming back for: scan a bus, read a 24Cxx, identify and dump SPI
-flash, read DS18B20 temperatures.
+flash, read DS18B20 temperatures, sniff traffic between two other devices.
+
+## What it does
+
+| | |
+|---|---|
+| **Talk** | I2C, SPI, UART, 1-Wire, raw wire — scan, read, write, read registers |
+| **Watch** | passive I2C and SPI sniffers, a UART monitor and a voltage monitor, decoded live |
+| **Programme** | SPI flash: identify, dump, erase by sector or whole chip, write from a file, verify |
+| **Measure** | voltage on the ADC pin, frequency on AUX, PWM out, pins by hand |
 
 ## Command line
 

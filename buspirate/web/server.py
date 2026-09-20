@@ -102,6 +102,16 @@ def create_app(
     async def ports() -> Dict[str, Any]:
         return {"ports": await session.call(session.ports)}
 
+    @app.post("/api/stream/stop")
+    async def stop_stream() -> JSONResponse:
+        result = await asyncio.get_running_loop().run_in_executor(
+            None, session.stop_stream_blocking
+        )
+        return JSONResponse(
+            {"ok": True, "result": result, "status": session.status(),
+             "panels": _panels_json()}
+        )
+
     @app.get("/api/docs")
     async def doc_index() -> Dict[str, Any]:
         return {"pages": docs_module.available()}

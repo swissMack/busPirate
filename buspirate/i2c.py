@@ -205,6 +205,17 @@ class I2C(Mode):
                 self.stop()
         return found
 
+    def start_sniffer(self) -> None:
+        """Start the passive bus sniffer. The device then streams until stopped.
+
+        Nothing is read here: from this point the port carries sniffed traffic,
+        not command replies. Call :meth:`~buspirate.base.BusPirate.stop_stream`
+        to get back to a known state.
+        """
+        self._check_active()
+        self.bp.write(bytes([CMD_SNIFFER]))
+        self.bp.streaming = True
+
     # -- Bus Pirate v4 only ------------------------------------------------
 
     def set_pullup_voltage(self, selection: int) -> None:

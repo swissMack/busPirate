@@ -201,8 +201,9 @@ def test_spi_write_then_read_enforces_the_firmware_limit(bp):
 
 
 def test_spi_set_mode_maps_to_polarity_and_edge(bp, fake):
+    """CKP is CPOL; CKE is NOT CPHA. Mode 0 must be the documented default."""
     with bp.spi() as spi:
-        for mode, expected in ((0, 0x8A), (1, 0x88), (2, 0x8C), (3, 0x8E)):
+        for mode, expected in ((0, 0x8A), (1, 0x88), (2, 0x8E), (3, 0x8C)):
             fake.written.clear()
             spi.set_mode(mode)
             assert fake.written[0] == expected, f"SPI mode {mode}"

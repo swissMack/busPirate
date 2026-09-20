@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ...uart import UART
-from ..registry import Action, Panel, Param, Wire, hexdump, text
+from ..registry import Action, Panel, Param, Wire, hexdump, live, text
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
 
 BAUD_CHOICES = [
@@ -70,6 +70,27 @@ def _read(ctx, max_bytes):
     return hexdump(data, caption=f"{len(data)} byte(s) received — {printable}")
 
 
+def _monitor(ctx):
+    ctx.mode.start_receive()
+    return live(
+        "UART monitor",
+        decoder="text",
+        caption="Everything arriving on the line, as it arrives.",
+    )
+
+
+def _bridge(ctx):
+    ctx.mode.start_bridge()
+    return live(
+        "UART bridge",
+        decoder="text",
+        caption="The Bus Pirate is now a plain USB-to-serial adapter.",
+        warning="There is no way out of bridge mode in software — the "
+        "firmware needs a power cycle. Unplug the Bus Pirate and plug it back "
+        "in, then reconnect.",
+    )
+
+
 PANEL = Panel(
     id="uart",
     refcard_column='UART',
@@ -126,6 +147,15 @@ PANEL = Panel(
             handler=_read,
         ),
         Action(
+            name="monitor",
+            label="Watch the line",
+            recipe=True,
+            stream=True,
+            help="Live view of everything received. Better than Read for "
+            "watching boot messages go by.",
+            handler=_monitor,
+        ),
+        Action(
             name="send_text",
             label="Send text",
             params=[
@@ -139,6 +169,16 @@ PANEL = Panel(
             label="Send raw bytes",
             params=[Param("data", "bytes", "Bytes", default="41 54 0d 0a")],
             handler=_send_bytes,
+        ),
+        Action(
+            name="bridge",
+            label="Transparent bridge",
+            stream=True,
+            confirm="Bridge mode cannot be stopped from software — you will "
+            "have to unplug the Bus Pirate to get it back. Continue?",
+            help="Turns the Bus Pirate into a plain USB-to-serial adapter. "
+            "Only a power cycle ends it.",
+            handler=_bridge,
         ),
     ],
 )

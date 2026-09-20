@@ -74,6 +74,9 @@ class BusPirate:
         self.profile: DeviceProfile = UNKNOWN_PROFILE
         self.bitbang_version: Optional[int] = None
         self._mode = None
+        #: True while a sniffer or bridge is streaming and the port no longer
+        #: carries command replies.
+        self.streaming = False
         self._traffic_hooks: List[TrafficHook] = []
         if on_traffic is not None:
             self._traffic_hooks.append(on_traffic)
@@ -179,6 +182,39 @@ class BusPirate:
                 f"expected {count} byte(s), got {len(data)}: {data!r}"
             )
         return data
+
+    def drain(self, seconds: float = 0.1) -> bytes:
+        """Read whatever is waiting, for a short while. Never raises on short reads."""
+        if self.serial is None:
+            return b""
+        collected = bytearray()
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            chunk = self.serial.read(256)
+            if chunk:
+                collected += chunk
+            else:
+                time.sleep(0.005)
+        if collected:
+            self._notify("rx", bytes(collected))
+        return bytes(collected)
+
+    def stop_stream(self) -> None:
+        """Leave a sniffer and return to a known state.
+
+        Any byte stops a sniffer, but *where* the firmware puts its 0x01
+        acknowledgement changed between versions — the SPI page says as much.
+        Rather than guess, this drains whatever comes back and then knocks the
+        device into bitbang mode, which is unambiguous on every version.
+        """
+        self.streaming = False
+        if self.serial is None:
+            return
+        self.write(b"\x00")
+        self.drain(0.15)
+        self.flush_input()
+        self.enter_binary_mode()
+        self._mode = None
 
     def read_text(self, settle: float = 0.4, limit: int = 4096) -> str:
         """Drain whatever text the terminal is emitting, until it goes quiet."""
@@ -404,6 +440,12 @@ class BusPirate:
         }
 
     # -- measurement and PWM (bitbang mode only) ---------------------------
+
+    def start_voltage_stream(self) -> None:
+        """Begin continuous ADC readings. Stop with :meth:`stop_stream`."""
+        self.profile.require(device_module.CAP_ADC)
+        self.write(bytes([CMD_VOLTAGE_CONTINUOUS]))
+        self.streaming = True
 
     def read_voltage(self) -> float:
         """One reading from the ADC probe, in volts."""

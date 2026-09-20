@@ -56,6 +56,9 @@ The ADC is 10-bit behind a divide-by-two, so it reads up to about 6 V with
 roughly 6 mV resolution. It needs a shared ground with whatever you are
 measuring. It is fine for checking a rail; it is not a multimeter.
 
+**Watch a voltage** streams readings continuously rather than one at a time,
+which is what you want for watching a rail come up or sag under load.
+
 ## PWM
 
 ```python

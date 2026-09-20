@@ -9,6 +9,10 @@ CMD_CS_LOW = 0x02
 CMD_CS_HIGH = 0x03
 CMD_WRITE_THEN_READ = 0x04
 CMD_WRITE_THEN_READ_NO_CS = 0x05
+CMD_AVR_EXTENDED = 0x06
+# 0b000011xx: xx = 01 sniffs everything, 10 sniffs only while CS is low.
+CMD_SNIFF_ALL = 0x0D
+CMD_SNIFF_CS_LOW = 0x0E
 SPEED_BASE = 0x60
 CONFIG_BASE = 0x80
 
@@ -55,40 +59,44 @@ class SPI(Mode):
         self,
         push_pull: bool = True,
         clock_idle_high: bool = False,
-        clock_edge_falling: bool = True,
-        sample_end: bool = False,
+        clock_edge_active_to_idle: bool = True,
+        sample_at_end: bool = False,
     ) -> None:
-        """Set output driver and clock polarity/phase.
+        """Set the output driver, clock polarity and clock phase.
 
-        ``push_pull=False`` selects open-drain outputs, which need external
-        pull-ups. The CPOL/CPHA pairs map as: mode 0 = idle low + falling edge,
-        mode 1 = idle low + rising, mode 2 = idle high + rising, mode 3 =
-        idle high + falling.
+        The firmware calls these ``w`` (pin output: HiZ or 3.3V), ``x`` (CKP,
+        clock idle phase), ``y`` (CKE, clock edge) and ``z`` (SMP, sample
+        time). ``push_pull=False`` selects HiZ, which needs external pull-ups.
+
+        Prefer :meth:`set_mode` unless you know you want these individually.
         """
         self._check_active()
         value = CONFIG_BASE
         for flag, bit in (
             (push_pull, 0x08),
             (clock_idle_high, 0x04),
-            (clock_edge_falling, 0x02),
-            (sample_end, 0x01),
+            (clock_edge_active_to_idle, 0x02),
+            (sample_at_end, 0x01),
         ):
             if flag:
                 value |= bit
         self.bp.command_expect_ack(value)
 
     def set_mode(self, mode: int, push_pull: bool = True) -> None:
-        """Configure clock polarity and phase by SPI mode number (0-3)."""
+        """Configure clock polarity and phase by SPI mode number (0-3).
+
+        CPOL becomes the firmware's CKP bit directly. CKE is the *inverse* of
+        CPHA and does not depend on CPOL — the firmware's documented startup
+        default is CKP=0, CKE=1, which is SPI mode 0.
+        """
         if mode not in (0, 1, 2, 3):
             raise ValueError("SPI mode must be 0, 1, 2 or 3")
         cpol = bool(mode & 0b10)
         cpha = bool(mode & 0b01)
-        # On the Bus Pirate the edge bit means "output on the falling edge",
-        # which is the idle-low, CPHA=0 case and its CPOL-inverted twin.
         self.configure(
             push_pull=push_pull,
             clock_idle_high=cpol,
-            clock_edge_falling=(cpol == cpha),
+            clock_edge_active_to_idle=not cpha,
         )
 
     # -- chip select -------------------------------------------------------
@@ -127,6 +135,17 @@ class SPI(Mode):
         for start in range(0, len(data), 16):
             out += self.transfer_bulk(data[start : start + 16])
         return bytes(out)
+
+    def start_sniffer(self, cs_low_only: bool = False) -> None:
+        """Start the hardware SPI sniffer, optionally only while CS is low.
+
+        It follows the mode's clock settings and works to about 10 MHz. If it
+        cannot keep up the firmware aborts the sniff and turns the MODE LED
+        off. Nothing is read here — see :meth:`I2C.start_sniffer`.
+        """
+        self._check_active()
+        self.bp.write(bytes([CMD_SNIFF_CS_LOW if cs_low_only else CMD_SNIFF_ALL]))
+        self.bp.streaming = True
 
     def write_then_read(
         self, data: bytes = b"", read_count: int = 0, assert_cs: bool = True

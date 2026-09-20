@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ... import device as device_module
 from ...i2c import I2C
-from ..registry import Action, Panel, Param, Wire, chips, hexdump, text
+from ..registry import Action, Panel, Param, Wire, chips, hexdump, live, text
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, PULLUP_RAIL_NOTE, colour
 
 # Addresses common enough to be worth naming in the scan results.
@@ -118,6 +118,17 @@ def _eeprom_read(ctx, address, offset, length, address_bytes):
     return hexdump(data, start=offset, caption=f"EEPROM 0x{address:02X}")
 
 
+def _sniff(ctx, power, pullups, speed):
+    ctx.mode.configure_peripherals(power=power, pullups=pullups)
+    ctx.mode.set_speed(speed)
+    ctx.mode.start_sniffer()
+    return live(
+        "I2C sniffer",
+        decoder="i2c-sniffer",
+        caption="Watching another master talk to the bus. Nothing is driven.",
+    )
+
+
 def _pullup_voltage(ctx, selection):
     ctx.mode.set_pullup_voltage(selection)
     names = {0: "disconnected", 1: "the 3.3V rail", 2: "the 5V rail"}
@@ -228,6 +239,17 @@ PANEL = Panel(
                 ),
             ],
             handler=_eeprom_read,
+        ),
+        Action(
+            name="sniff",
+            label="Sniff the bus",
+            recipe=True,
+            stream=True,
+            help="Passively watch traffic between two other devices. Wire SDA "
+            "and SCL in parallel with the existing bus and share the ground; "
+            "leave power and pull-ups off if the bus already has them.",
+            params=list(_BUS_PARAMS),
+            handler=_sniff,
         ),
         Action(
             name="pullup_voltage",

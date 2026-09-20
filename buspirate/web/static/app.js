@@ -97,7 +97,8 @@ function renderStatus() {
   box.className =
     "status " + (s.connected ? (s.simulated ? "status--sim" : "status--on") : "status--off");
   $("status-text").textContent = s.connected
-    ? `${s.simulated ? "SIMULATED " : ""}${s.description}${s.mode ? " · " + s.mode : ""}`
+    ? `${s.simulated ? "SIMULATED " : ""}${s.description}` +
+      (s.stream ? ` · ${s.stream.kind} running` : s.mode ? " · " + s.mode : "")
     : "Not connected";
   renderUsb(s.usb || { attached: false });
 }
@@ -344,6 +345,7 @@ function renderResult(result) {
         { class: "data" },
         ...result.pairs.map(([k, v]) => el("tr", {}, el("th", { text: k }), el("td", { text: String(v) })))
       ),
+    stream: () => streamPane(result),
     pins: () =>
       el(
         "div",
@@ -374,6 +376,66 @@ function hexBlock(bytes, start) {
   }
   if (!lines.length) lines.push(el("div", { class: "off", text: "(no data)" }));
   return el("pre", { class: "hexdump" }, ...lines);
+}
+
+/* ----------------------------------------------------------- live streams */
+
+/* A sniffer owns the port until it is stopped, so the pane that started it
+   becomes the place the events land and the only way back out. */
+let activeStream = null;
+
+function streamPane(result) {
+  const events = el("div", { class: "stream__events" });
+  const counter = el("span", { class: "muted", text: "waiting for traffic…" });
+  const stop = el("button", { class: "btn btn--primary", text: "Stop" });
+
+  const pane = el(
+    "div",
+    { class: "stream" },
+    result.warning ? el("p", { class: "msg msg--warn", text: result.warning }) : null,
+    el("div", { class: "stream__bar" }, stop, counter),
+    el("p", { class: "caption", text: result.legend || "" }),
+    events
+  );
+
+  stop.addEventListener("click", async () => {
+    stop.disabled = true;
+    stop.textContent = "Stopping…";
+    try {
+      const body = await api("/api/stream/stop", { method: "POST" });
+      state.status = body.status;
+      state.panels = body.panels;
+      renderStatus();
+    } catch (error) {
+      counter.textContent = error.message;
+    }
+  });
+
+  activeStream = { events, counter, stop };
+  return pane;
+}
+
+function pushStreamEvents(message) {
+  if (!activeStream) return;
+  const { events, counter } = activeStream;
+  for (const event of message.events) {
+    events.append(
+      el("span", { class: `tok tok--${event.kind}`, title: event.ascii || "" }, event.text)
+    );
+  }
+  while (events.childElementCount > 2000) events.firstElementChild.remove();
+  counter.textContent = `${message.total} events`;
+  events.scrollTop = events.scrollHeight;
+}
+
+function endStream(message) {
+  if (!activeStream) return;
+  activeStream.stop.disabled = true;
+  activeStream.stop.textContent = "Stopped";
+  activeStream.counter.textContent =
+    `${message.events} events in ${message.seconds}s` +
+    (message.note ? ` — ${message.note}` : "");
+  activeStream = null;
 }
 
 function progressBar() {
@@ -413,6 +475,8 @@ function connectFeed() {
   socket.onmessage = (message) => {
     const event = JSON.parse(message.data);
     if (event.type === "traffic") addLogLine(event);
+    if (event.type === "stream") pushStreamEvents(event);
+    if (event.type === "stream_stopped") endStream(event);
     if (event.type === "progress" && progressFill) {
       progressFill.style.width = `${(100 * event.done) / Math.max(1, event.total)}%`;
     }

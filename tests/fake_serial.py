@@ -11,6 +11,8 @@ commands and refuses the v3-only ones.
 
 from __future__ import annotations
 
+import time
+
 BANNERS = {
     "v3": (
         "Bus Pirate v3.5\r\n"
@@ -30,6 +32,74 @@ BANNERS = {
 }
 
 
+class FakeFlash:
+    """A 25-series SPI NOR flash, enough of one to exercise the write path.
+
+    Programming only clears bits and erasing only works in 4 KB sectors, the
+    same as the real thing — so a test that forgets to erase fails here too.
+    """
+
+    JEDEC = bytes([0xEF, 0x40, 0x18])  # Winbond, 16 MB
+    SECTOR = 4096
+    PAGE = 256
+
+    def __init__(self, size=1 << 20):
+        self.size = size
+        self.memory = bytearray(b"\xff" * size)
+        self.write_enabled = False
+        self.erases = 0
+        self.programs = 0
+
+    def status(self) -> int:
+        return 0x02 if self.write_enabled else 0x00  # never busy
+
+    def exchange(self, written: bytes, read_count: int) -> bytes:
+        if not written:
+            return b"\x00" * read_count
+        command, body = written[0], written[1:]
+        if command == 0x9F:
+            return (self.JEDEC + b"\x00" * read_count)[:read_count]
+        if command == 0x05:
+            return bytes([self.status()]) * read_count
+        if command == 0x06:
+            self.write_enabled = True
+            return b""
+        if command == 0x04:
+            self.write_enabled = False
+            return b""
+        if command == 0x03:
+            start = int.from_bytes(body[:3], "big")
+            return bytes(self.memory[start : start + read_count]).ljust(read_count, b"\xff")
+        if command == 0x02:
+            start = int.from_bytes(body[:3], "big")
+            payload = body[3:]
+            if not self.write_enabled:
+                return b""  # silently ignored, exactly as the hardware does
+            if (start % self.PAGE) + len(payload) > self.PAGE:
+                raise AssertionError("page program crossed a page boundary")
+            for index, byte in enumerate(payload):
+                # Programming can only turn 1s into 0s.
+                self.memory[start + index] &= byte
+            self.programs += 1
+            self.write_enabled = False
+            return b""
+        if command == 0x20:
+            start = int.from_bytes(body[:3], "big")
+            if self.write_enabled:
+                base = start - (start % self.SECTOR)
+                self.memory[base : base + self.SECTOR] = b"\xff" * self.SECTOR
+                self.erases += 1
+            self.write_enabled = False
+            return b""
+        if command == 0xC7:
+            if self.write_enabled:
+                self.memory[:] = b"\xff" * self.size
+                self.erases += 1
+            self.write_enabled = False
+            return b""
+        raise AssertionError(f"fake flash got an unknown command 0x{command:02X}")
+
+
 class FakeSerial:
     def __init__(
         self,
@@ -42,11 +112,16 @@ class FakeSerial:
     ):
         self.i2c_devices = set(i2c_devices)
         self.spi_fill = spi_fill
+        #: Set to a FakeFlash to make SPI behave like a real flash chip.
+        self.flash = None
         self.variant = variant
         self.banner = BANNERS.get(variant, BANNERS["unknown"]) if banner is None else banner
         self.voltage_counts = voltage_counts
         self.frequency = frequency
 
+        #: Seconds between simulated sniffer bursts.
+        self.burst_interval = 0.05
+        self._last_burst = 0.0
         self.state = "term"
         self.written = bytearray()  # everything the driver sent, for asserts
         self.pins = 0x00  # last pin state written
@@ -70,10 +145,27 @@ class FakeSerial:
         self._process()
         return len(data)
 
+    # A short, realistic burst for each streaming mode, replayed while the
+    # stream runs so the dashboard has something to draw.
+    SNIFFER_BURSTS = {
+        "i2c_sniffer": b"[\\\xa0+\\\x00+\\\x2a+]",
+        "spi_sniffer": b"[\\\x9f\xff\\\x00\xef\\\x00\x40\\\x00\x18]",
+        "voltage_stream": b"\x02\x00\x01\xf4",
+        "uart_bridge": b"bridged\r\n",
+    }
+
     def read(self, count: int) -> bytes:
         if self._echoing and self.uart_rx:
             self._out += self.uart_rx
             self.uart_rx.clear()
+        burst = self.SNIFFER_BURSTS.get(self.state)
+        if burst and not self._out:
+            # Pace it like a real bus rather than a firehose, so the demo is
+            # readable and tests do not spin.
+            now = time.monotonic()
+            if now - self._last_burst >= self.burst_interval:
+                self._last_burst = now
+                self._out += burst
         taken = self._out[:count]
         del self._out[:count]
         return bytes(taken)
@@ -158,6 +250,8 @@ class FakeSerial:
             self._out += b"\x01"
         elif cmd == 0x14:  # voltage probe
             self._out += int(self.voltage_counts).to_bytes(2, "big")
+        elif cmd == 0x15:  # continuous voltage
+            self.state = "voltage_stream"
         elif cmd == 0x16:  # frequency
             self._out += int(self.frequency).to_bytes(4, "big")
         elif 0x40 <= cmd <= 0x5F:  # pin directions
@@ -242,7 +336,21 @@ class FakeSerial:
         raise AssertionError(f"unexpected I2C command 0x{cmd:02X}")
 
     def _state_i2c_sniffer(self, cmd: int) -> int:
+        """Any byte exits the sniffer."""
         self.state = "i2c"
+        self._out.clear()
+        self._out += b"\x01"
+        return 1
+
+    def _state_spi_sniffer(self, cmd: int) -> int:
+        self.state = "spi"
+        self._out.clear()
+        self._out += b"\x01"
+        return 1
+
+    def _state_voltage_stream(self, cmd: int) -> int:
+        self.state = "bbio"
+        self._out.clear()
         self._out += b"\x01"
         return 1
 
@@ -281,6 +389,10 @@ class FakeSerial:
                 return 0
             self._out += b"\x01" + bytes([self.spi_fill]) * count
             return 1 + count
+        if cmd in (0x0D, 0x0E):  # sniff all / sniff while CS low
+            self.state = "spi_sniffer"
+            self._out += b"\x01"
+            return 1
         if cmd in (0x04, 0x05):
             if len(self._in) < 5:
                 return 0
@@ -288,7 +400,12 @@ class FakeSerial:
             read_count = int.from_bytes(self._in[3:5], "big")
             if len(self._in) < 5 + write_count:
                 return 0
-            self._out += b"\x01" + bytes([self.spi_fill]) * read_count
+            written = bytes(self._in[5 : 5 + write_count])
+            if self.flash is not None:
+                reply = self.flash.exchange(written, read_count)
+            else:
+                reply = bytes([self.spi_fill]) * read_count
+            self._out += b"\x01" + reply.ljust(read_count, b"\xff")[:read_count]
             return 5 + write_count
         raise AssertionError(f"unexpected SPI command 0x{cmd:02X}")
 
@@ -310,6 +427,9 @@ class FakeSerial:
         if 0x40 <= cmd <= 0x4F or 0x60 <= cmd <= 0x6F or 0x80 <= cmd <= 0x9F:
             self._out += b"\x01"
             return 1
+        if cmd == 0x0F:  # transparent bridge: only a power cycle ends it
+            self.state = "uart_bridge"
+            return 1
         if cmd == 0x07:  # manual baud rate, 2 more bytes
             if len(self._in) < 3:
                 return 0
@@ -322,6 +442,10 @@ class FakeSerial:
             self._out += b"\x01" + b"\x01" * count
             return 1 + count
         raise AssertionError(f"unexpected UART command 0x{cmd:02X}")
+
+    def _state_uart_bridge(self, cmd: int) -> int:
+        """Bridge mode forwards bytes and never returns to command mode."""
+        return 1
 
     # -- 1-Wire ------------------------------------------------------------
 

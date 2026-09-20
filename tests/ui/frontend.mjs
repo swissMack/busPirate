@@ -41,7 +41,7 @@ check("panel is hidden", $("panel").hidden);
 check("status reads not connected", $("status-text").textContent === "Not connected");
 const options = [...$("port-select").options].map((o) => o.textContent);
 check("port picker offers the simulated device", options.some((o) => o.includes("fake")), options.join("|"));
-check("nav lists every panel plus the guide", $("nav").children.length === 7, `${$("nav").children.length}`);
+check("nav lists every panel plus the guide", $("nav").children.length === 8, `${$("nav").children.length}`);
 
 // --- connect
 $("connect").click();
@@ -124,6 +124,37 @@ await settle(600);
 const pinTiles = setPins.querySelectorAll(".pin");
 check("pins render as tiles", pinTiles.length === 7, `${pinTiles.length}`);
 check("power reads high", [...pinTiles].some((p) => p.textContent === "power high"));
+
+// --- a live sniffer takes the port and streams decoded events
+navButtons.find((b) => b.textContent === "I2C").click();
+await settle(200);
+const sniff = $("panel").querySelector('[data-action="sniff"]');
+sniff.querySelector("button").click();
+await settle(1200);
+const pane = sniff.querySelector(".stream");
+check("sniffer opens a live pane", pane !== null);
+check("sniffer pane explains the notation", /START|start/.test(pane.textContent), pane.textContent.slice(0, 60));
+check("sniffer decodes events", pane.querySelectorAll(".tok").length > 0, `${pane ? pane.querySelectorAll(".tok").length : 0}`);
+check("decoded tokens include a START", [...pane.querySelectorAll(".tok")].some((t) => t.textContent === "START"));
+check("header says a sniffer is running", /sniffer running/.test($("status-text").textContent), $("status-text").textContent);
+
+// other actions must be refused while it holds the port
+const scanAgain = $("panel").querySelector('[data-action="scan"]');
+scanAgain.querySelector("button").click();
+await settle(600);
+check("other actions are refused while sniffing",
+  /has the port/.test(scanAgain.querySelector(".result").textContent),
+  scanAgain.querySelector(".result").textContent.slice(0, 60));
+
+pane.querySelector("button").click();
+await settle(1500);
+check("stopping reports the totals", /events in/.test(pane.textContent), pane.textContent.slice(0, 80));
+check("header clears after stopping", !/sniffer running/.test($("status-text").textContent));
+scanAgain.querySelector("button").click();
+await settle(900);
+check("the device works again after a sniff",
+  scanAgain.querySelector(".result").textContent.includes("0x50"),
+  scanAgain.querySelector(".result").textContent.slice(0, 60));
 
 // --- the guide, rendered in the UI
 // Open it from the I2C panel: the guide follows whichever panel you are on.

@@ -74,10 +74,32 @@ cross over. See [UART](uart.md).
 **Read temperatures** reads every DS18B20-family sensor. See
 [1-Wire](onewire.md).
 
+### Raw wire
+Bit-level control for buses that are nearly SPI or nearly I2C. See
+[Raw wire](rawwire.md).
+
 ### Pins & power
 Drive each pin, set directions, switch the supplies, measure a voltage on the
 ADC pin, measure a frequency on AUX, output PWM. See
 [Pins & power](pins-and-power.md).
+
+## Live streams
+
+Sniffers, the UART monitor and the voltage monitor **take the port over** and
+stream until you press **Stop**. While one runs, every other action is
+refused with a message saying so — a serial port cannot be shared. Connect
+and Disconnect still work, and both stop the stream first.
+
+Events are decoded as they arrive and batched to ten updates a second, so a
+busy bus cannot bury the browser. The counter shows the true total.
+
+Stopping does not rely on the acknowledgement the firmware sends, because
+*where* it sends it changed between versions. Instead the device is drained
+and knocked back into bitbang mode, which behaves the same on every version —
+you can see it happen in the traffic log.
+
+**The UART bridge is the exception**: the firmware has no software exit, so
+it needs a physical power cycle. The dashboard asks first.
 
 ## Things you will wonder about later
 

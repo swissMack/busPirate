@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 import time
 from collections import deque
 from typing import Any, Dict, List, Optional, Set
@@ -17,9 +18,36 @@ from typing import Any, Dict, List, Optional, Set
 from ..base import BusPirate
 from ..exceptions import BusPirateError, ModeError
 from ..ports import discover, resolve
+from .decoders import make_decoder
 from .registry import Action, Panel, load_panels
 
 TRAFFIC_HISTORY = 500
+STREAM_EVENT_CAP = 200  # events per websocket message
+STREAM_FLUSH_SECONDS = 0.1  # at most ten updates a second, however busy the bus
+
+
+class StreamState:
+    """A sniffer or bridge currently holding the port."""
+
+    def __init__(self, kind: str, panel_id: str, action: str, decoder, result):
+        self.kind = kind
+        self.panel_id = panel_id
+        self.action = action
+        self.decoder = decoder
+        self.result = result
+        self.stop_event = threading.Event()
+        self.thread: Optional[threading.Thread] = None
+        self.started_at = time.time()
+        self.events = 0
+
+    def describe(self) -> Dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "panel": self.panel_id,
+            "action": self.action,
+            "events": self.events,
+            "seconds": round(time.time() - self.started_at, 1),
+        }
 
 
 class ActionContext:
@@ -52,6 +80,23 @@ class ActionContext:
         safe = os.path.basename(filename) or "capture.bin"
         return os.path.join(root, safe)
 
+    def read_capture(self, filename: str) -> bytes:
+        """Load a file from ``captures/``, or say what is actually there."""
+        path = self.capture_path(filename)
+        try:
+            with open(path, "rb") as handle:
+                return handle.read()
+        except OSError:
+            root = os.path.dirname(path)
+            existing = sorted(
+                name for name in os.listdir(root) if not name.startswith(".")
+            ) if os.path.isdir(root) else []
+            listing = ", ".join(existing) if existing else "nothing"
+            raise BusPirateError(
+                f"there is no {filename!r} in captures/. It currently holds: "
+                f"{listing}."
+            ) from None
+
 
 class DeviceSession:
     """Owns the port, the current mode, and the live traffic log."""
@@ -71,6 +116,8 @@ class DeviceSession:
         self.panels: List[Panel] = load_panels()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._seq = 0
+        #: The sniffer or bridge holding the port, if any.
+        self.stream: Optional[StreamState] = None
         #: Last pin state the Pins panel drove, so it can be re-applied.
         self.last_pins = {
             "power": False,
@@ -148,6 +195,8 @@ class DeviceSession:
         return self.status()
 
     def disconnect_blocking(self) -> None:
+        if self.stream is not None:
+            self.stop_stream_blocking()
         if self.bp is not None:
             try:
                 self.bp.close()
@@ -200,6 +249,7 @@ class DeviceSession:
                 "connected": False,
                 "simulated": self.use_fake,
                 "usb": {"attached": False},
+                "stream": None,
             }
         profile = self.bp.profile
         return {
@@ -208,6 +258,7 @@ class DeviceSession:
             "port": self.port,
             "usb": self.usb_status(),
             "mode": self.mode_name,
+            "stream": self.stream.describe() if self.stream else None,
             "variant": profile.variant,
             "firmware": profile.firmware,
             "bootloader": profile.bootloader,
@@ -278,11 +329,104 @@ class DeviceSession:
         return sorted(self.bp.profile.capabilities)
 
     def run_blocking(self, panel: Panel, action: Action, params: Dict[str, Any]):
+        if self.stream is not None and not action.allow_while_streaming:
+            raise BusPirateError(
+                f"{self.stream.kind} is running and has the port. Stop it first."
+            )
         if action.requires and self.bp is not None:
             self.bp.profile.require(action.requires)
         mode = self.ensure_mode(panel.mode)
         context = ActionContext(self, mode)
-        return action.handler(context, **params)
+        result = action.handler(context, **params)
+        if action.stream:
+            self._begin_stream(panel, action, result)
+        return result
+
+    # -- streaming ---------------------------------------------------------
+
+    def _begin_stream(self, panel: Panel, action: Action, result: Dict[str, Any]) -> None:
+        """Hand the port to a reader thread until someone stops it."""
+        stream = StreamState(
+            kind=result.get("kind", action.name),
+            panel_id=panel.id,
+            action=action.name,
+            decoder=make_decoder(result.get("decoder", "text")),
+            result=result,
+        )
+        result["legend"] = stream.decoder.legend
+        self.stream = stream
+        stream.thread = threading.Thread(
+            target=self._read_stream, args=(stream,), daemon=True
+        )
+        stream.thread.start()
+        self.emit({"type": "stream_started", **stream.describe()})
+
+    def _read_stream(self, stream: StreamState) -> None:
+        """The only thing touching the port while a stream runs.
+
+        Events are batched before they go out: a busy bus can produce them far
+        faster than a browser can draw them, and a message per read would
+        bury the UI. Ten updates a second is plenty to watch by.
+        """
+        device = self.bp
+        pending: List[Dict[str, Any]] = []
+        last_flush = time.monotonic()
+
+        def flush() -> None:
+            nonlocal pending, last_flush
+            if not pending:
+                return
+            self.emit(
+                {
+                    "type": "stream",
+                    "kind": stream.kind,
+                    "events": pending[-STREAM_EVENT_CAP:],
+                    "dropped": max(0, len(pending) - STREAM_EVENT_CAP),
+                    "total": stream.events,
+                }
+            )
+            pending = []
+            last_flush = time.monotonic()
+
+        while not stream.stop_event.is_set() and device is not None:
+            try:
+                data = device.serial.read(256)
+            except (OSError, AttributeError):
+                break
+            if not data:
+                flush()
+                time.sleep(0.01)
+                continue
+            device._notify("rx", data)
+            events = stream.decoder.feed(data)
+            if events:
+                stream.events += len(events)
+                pending.extend(events)
+            if time.monotonic() - last_flush >= STREAM_FLUSH_SECONDS:
+                flush()
+        flush()
+        self._finish_stream(stream)
+
+    def _finish_stream(self, stream: StreamState) -> None:
+        note = ""
+        try:
+            if self.bp is not None:
+                self.bp.stop_stream()
+        except (BusPirateError, OSError) as exc:
+            note = str(exc)
+        self.mode_name = None
+        self._mode = None
+        self.stream = None
+        self.emit({"type": "stream_stopped", **stream.describe(), "note": note})
+
+    def stop_stream_blocking(self) -> Dict[str, Any]:
+        stream = self.stream
+        if stream is None:
+            return {"stopped": False, "reason": "nothing is streaming"}
+        stream.stop_event.set()
+        if stream.thread is not None:
+            stream.thread.join(timeout=5)
+        return {"stopped": True, **stream.describe()}
 
     async def run(self, panel: Panel, action: Action, params: Dict[str, Any]):
         async with self.lock:

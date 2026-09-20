@@ -25,6 +25,7 @@ ORDER = [
     "spi",
     "uart",
     "onewire",
+    "rawwire",
     "pins-and-power",
     "bus-pirate-v4",
     "troubleshooting",

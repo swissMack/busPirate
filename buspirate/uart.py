@@ -102,6 +102,17 @@ class UART(Mode):
         self._check_active()
         self.bp.command_expect_ack(CMD_ECHO_STOP)
 
+    def start_bridge(self) -> None:
+        """Start the transparent UART bridge.
+
+        **There is no way out in software.** The firmware documents this as
+        "reset to exit" — you have to unplug the Bus Pirate. Everything this
+        library does afterwards will fail until you do.
+        """
+        self._check_active()
+        self.bp.write(bytes([CMD_BRIDGE]))
+        self.bp.streaming = True
+
     def read_available(self, max_bytes: int = 256) -> bytes:
         """Drain whatever the echo has delivered so far. May return ``b""``."""
         self._check_active()

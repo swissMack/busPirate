@@ -18,6 +18,9 @@
   }
 }
 * { box-sizing: border-box; }
+/* A display rule outranks the UA stylesheet's [hidden] rule, so say it here
+   or anything with display:flex ignores the hidden attribute. */
+[hidden] { display: none !important; }
 body {
   margin: 0; background: var(--bg); color: var(--text);
   font: 15px/1.5 var(--sans);
@@ -205,3 +208,18 @@ table.data td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line);
   border: 1px solid var(--line); border-radius: 8px; background: #fff;
 }
 .credit { font-size: 11px; opacity: .8; }
+
+/* live streams */
+.stream__bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.stream__events {
+  max-height: 210px; overflow-y: auto; background: var(--bg-sunken);
+  border-radius: 7px; padding: 9px 11px; font-family: var(--mono);
+  font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px; align-content: flex-start;
+}
+.tok { padding: 1px 6px; border-radius: 4px; background: var(--bg-raised);
+  border: 1px solid var(--line); }
+.tok--start { color: var(--good); border-color: var(--good); }
+.tok--stop { color: var(--warn); border-color: var(--warn); }
+.tok--ack { color: var(--good); border: 0; background: none; padding: 1px 2px; }
+.tok--nack { color: var(--warn); border: 0; background: none; padding: 1px 2px; }
+.tok--value { color: var(--accent); }

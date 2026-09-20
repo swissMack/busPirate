@@ -75,6 +75,16 @@ drop to 100 kHz before suspecting anything else.
   it has **no repeated start** — it writes the exact bytes you give it, then
   reads. Build the address byte yourself with `buspirate.i2c.address_byte()`.
 
+## Sniffing
+
+**Sniff the bus** watches traffic between two other devices without driving
+anything. Wire SDA and SCL in parallel with the existing bus and share the
+ground; leave power and the pull-ups off if the bus already has them.
+
+The stream is decoded as you watch: `START`, the bytes on the bus, `+` for
+each ACK and `-` for each NACK, then `STOP`. That is usually enough to work
+out a register map from a driver you cannot read.
+
 ## When a scan finds nothing
 
 In the order worth checking:

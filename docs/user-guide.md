@@ -28,8 +28,13 @@ yourself how the tool fits together.
 | Dump an SPI flash to a file | Dashboard → SPI → **Dump flash to a file** | lands in `captures/` |
 | Watch a serial line | Dashboard → UART → **Set the line up**, then **Start listening** | [UART](uart.md) |
 | Read DS18B20 temperatures | Dashboard → 1-Wire → **Read temperatures** | needs a 4k7 pull-up |
+| Watch two other devices talk | Dashboard → I2C or SPI → **Sniff the bus** | passive; nothing is driven |
+| Write a file back to SPI flash | Dashboard → SPI → **Write a file to flash** | erases first, then verifies |
+| Erase a flash chip | Dashboard → SPI → **Erase one sector** / **the whole chip** | not reversible |
+| Talk to something odd | Dashboard → Raw wire | [Raw wire](rawwire.md) |
 | Measure a voltage | Dashboard → Pins & power → **Measure a voltage** | [Pins & power](pins-and-power.md) |
 | Drive pins by hand | Dashboard → Pins & power | |
+| Watch a voltage over time | Dashboard → Pins & power → **Watch a voltage** | continuous ADC |
 | Script any of it | `from buspirate import BusPirate` | [CLI](cli.md), and the examples below |
 | Find which port it is on | `buspirate ports` | [macOS setup](macos-setup.md) |
 

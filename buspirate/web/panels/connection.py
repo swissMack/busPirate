@@ -90,8 +90,16 @@ PANEL = Panel(
                 )
             ],
             handler=_connect,
+            allow_while_streaming=True,
         ),
-        Action(name="disconnect", label="Disconnect", handler=_disconnect),
+        Action(
+            name="disconnect",
+            label="Disconnect",
+            handler=_disconnect,
+            allow_while_streaming=True,
+            help="Stops anything that is running, resets the Bus Pirate to "
+            "its terminal, and releases the port.",
+        ),
         Action(
             name="identify",
             label="What is this device?",

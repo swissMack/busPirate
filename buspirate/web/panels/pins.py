@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ... import device as device_module
-from ..registry import Action, Panel, Param, Wire, keyvalue, pins, text
+from ..registry import Action, Panel, Param, Wire, keyvalue, live, pins, text
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
 
 
@@ -31,6 +31,15 @@ def _voltage(ctx):
     return keyvalue(
         [["ADC probe", f"{volts:.2f} V"]],
         caption="Measured on the ADC wire. The input tolerates up to 6 V.",
+    )
+
+
+def _voltage_stream(ctx):
+    ctx.bp.start_voltage_stream()
+    return live(
+        "Voltage monitor",
+        decoder="voltage",
+        caption="Continuous readings from the ADC probe.",
     )
 
 
@@ -116,6 +125,14 @@ PANEL = Panel(
             recipe=True,
             requires=device_module.CAP_ADC,
             handler=_voltage,
+        ),
+        Action(
+            name="voltage_stream",
+            label="Watch a voltage",
+            stream=True,
+            requires=device_module.CAP_ADC,
+            help="Continuous readings, rather than one at a time.",
+            handler=_voltage_stream,
         ),
         Action(
             name="frequency",
