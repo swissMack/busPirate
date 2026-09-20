@@ -17,6 +17,7 @@ from .device import DeviceProfile, capabilities_for, parse_banner
 from .exceptions import (
     BusPirateError,
     ConnectionError,
+    ExternalVoltageError,
     ModeError,
     NackError,
     ProtocolError,
@@ -34,6 +35,7 @@ __all__ = [
     "BusPirateError",
     "ConnectionError",
     "DeviceProfile",
+    "ExternalVoltageError",
     "I2C",
     "ModeError",
     "NackError",

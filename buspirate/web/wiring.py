@@ -33,3 +33,15 @@ CABLE_CAVEAT = (
 
 def colour(signal: str) -> str:
     return COLOURS.get(signal, "")
+
+POWER_NOTE = (
+    "The power switch turns on the 3.3V and 5V supplies together — there is no "
+    "command to pick one. You choose the voltage by which probe wire you "
+    "connect to the target's VCC. Never connect both."
+)
+
+PULLUP_RAIL_NOTE = (
+    "On a Bus Pirate v4 the pull-up rail can be switched between 3.3V and 5V "
+    "in software. On a v3 the pull-ups follow whatever you feed the VPU pin, "
+    "so tie VPU to the target's own supply."
+)

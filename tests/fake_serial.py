@@ -51,6 +51,9 @@ class FakeSerial:
         self.written = bytearray()  # everything the driver sent, for asserts
         self.pins = 0x00  # last pin state written
         self.uart_rx = bytearray()  # queue bytes here to simulate a talker
+        #: Set True to simulate a target already driving the VPU pin, which
+        #: makes a v4 refuse to connect its own pull-up rail.
+        self.vextern_powered = False
         self._in = bytearray()  # bytes awaiting parsing
         self._out = bytearray()  # bytes awaiting the driver's read()
         self._term_line = bytearray()
@@ -193,7 +196,9 @@ class FakeSerial:
         if 0x50 <= cmd <= 0x53:  # pull-up voltage select, v4 only
             if not self._supports("pullup_voltage"):
                 raise AssertionError("v3 hardware has no pull-up voltage select")
-            self._out += b"\x01"
+            # 0x00 means "voltage already present on VEXTERN", no connection made.
+            connecting = (cmd & 0x03) != 0
+            self._out += b"\x00" if (connecting and self.vextern_powered) else b"\x01"
             return 1
         if 0x40 <= cmd <= 0x4F:  # configure peripherals
             self._out += b"\x01"

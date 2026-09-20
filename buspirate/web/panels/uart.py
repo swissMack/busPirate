@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ...uart import UART
 from ..registry import Action, Panel, Param, Wire, hexdump, text
-from ..wiring import CABLE_CAVEAT, colour
+from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
 
 BAUD_CHOICES = [
     {"value": UART.BAUD_300, "label": "300"},
@@ -86,6 +86,7 @@ PANEL = Panel(
         "TX and RX cross over: the Bus Pirate's MISO listens to the target's "
         "TX. If you see nothing, swapping these two is the first thing to try.",
         "Garbled characters mean the baud rate is wrong, not the wiring.",
+        POWER_NOTE,
         CABLE_CAVEAT,
     ],
     actions=[
@@ -104,7 +105,7 @@ PANEL = Panel(
                     default=1,
                     choices=[{"value": 1, "label": "1"}, {"value": 2, "label": "2"}],
                 ),
-                Param("power", "bool", "Power the target", default=False),
+                Param("power", "bool", "Power the target (3.3V + 5V)", default=False),
             ],
             handler=_configure,
         ),

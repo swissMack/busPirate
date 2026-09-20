@@ -14,3 +14,10 @@ venv/
 
 # os
 .DS_Store
+
+# python
+.venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/

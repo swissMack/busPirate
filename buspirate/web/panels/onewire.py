@@ -6,7 +6,7 @@ import time
 
 from ...onewire import ROM_MATCH
 from ..registry import Action, Panel, Param, Wire, hexdump, table, text
-from ..wiring import CABLE_CAVEAT, colour
+from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
 
 FAMILIES = {
     0x01: "DS1990A iButton",
@@ -73,7 +73,7 @@ def _read_rom(ctx, power, pullups):
 
 
 _BUS = [
-    Param("power", "bool", "Power the target", default=True),
+    Param("power", "bool", "Power the target (3.3V + 5V)", default=True),
     Param("pullups", "bool", "Enable the on-board pull-ups", default=True),
 ]
 
@@ -92,6 +92,7 @@ PANEL = Panel(
         "Fit a 4k7 pull-up from DQ to VCC. This is the single commonest reason "
         "a 1-Wire bus finds nothing.",
         "A DS18B20 needs up to 750 ms per conversion, so readings are not instant.",
+        POWER_NOTE,
         CABLE_CAVEAT,
     ],
     actions=[

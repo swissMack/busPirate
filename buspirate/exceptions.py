@@ -23,3 +23,7 @@ class NackError(BusPirateError):
 
 class UnsupportedFeatureError(BusPirateError):
     """The connected hardware or firmware does not have this feature."""
+
+
+class ExternalVoltageError(BusPirateError):
+    """A rail could not be connected because the pin already carries a voltage."""

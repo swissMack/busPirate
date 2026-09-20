@@ -5,7 +5,7 @@ from __future__ import annotations
 from ... import device as device_module
 from ...i2c import I2C
 from ..registry import Action, Panel, Param, Wire, chips, hexdump, text
-from ..wiring import CABLE_CAVEAT, colour
+from ..wiring import CABLE_CAVEAT, POWER_NOTE, PULLUP_RAIL_NOTE, colour
 
 # Addresses common enough to be worth naming in the scan results.
 WELL_KNOWN = {
@@ -120,12 +120,12 @@ def _eeprom_read(ctx, address, offset, length, address_bytes):
 
 def _pullup_voltage(ctx, selection):
     ctx.mode.set_pullup_voltage(selection)
-    names = {0: "off", 1: "3.3V", 2: "5V"}
-    return text(f"Pull-up rail set to {names[selection]}.", tone="good")
+    names = {0: "disconnected", 1: "the 3.3V rail", 2: "the 5V rail"}
+    return text(f"VPU is now connected to {names[selection]}.", tone="good")
 
 
 _BUS_PARAMS = [
-    Param("power", "bool", "Power the target from the Bus Pirate", default=True),
+    Param("power", "bool", "Power the target (3.3V + 5V)", default=True),
     Param("pullups", "bool", "Enable the on-board pull-ups", default=True),
     Param("speed", "enum", "Bus speed", default=2, choices=SPEED_CHOICES),
 ]
@@ -146,6 +146,8 @@ PANEL = Panel(
     notes=[
         "I2C needs pull-ups on both SDA and SCL. The Bus Pirate's are weak but "
         "usually enough — tie VPU to the bus voltage or the pull-ups do nothing.",
+        PULLUP_RAIL_NOTE,
+        POWER_NOTE,
         CABLE_CAVEAT,
     ],
     actions=[
@@ -227,13 +229,15 @@ PANEL = Panel(
         Action(
             name="pullup_voltage",
             label="Set the pull-up rail",
-            help="Bus Pirate v4 only.",
+            help="Bus Pirate v4 only. Connects the VPU pin to an on-board "
+            "rail. It refuses if the target is already driving VPU — that is "
+            "the short-circuit protection doing its job.",
             requires=device_module.CAP_PULLUP_VOLTAGE,
             params=[
                 Param(
                     "selection",
                     "enum",
-                    "Pull-up rail",
+                    "Connect VPU to",
                     default=I2C.PULLUP_3V3,
                     choices=[
                         {"value": I2C.PULLUP_OFF, "label": "Off"},

@@ -250,3 +250,23 @@ def test_enum_params_accept_the_string_a_browser_sends():
     assert coerce(param, "2") == 2
     with pytest.raises(ParamError, match="choose one of"):
         coerce(param, "9")
+
+
+def test_the_power_control_says_what_it_actually_switches(client):
+    body = connect(client)
+    panels = {p["id"]: p for p in body["panels"]}
+    scan = next(a for a in panels["i2c"]["actions"] if a["name"] == "scan")
+    power = next(p for p in scan["params"] if p["name"] == "power")
+    assert "3.3V + 5V" in power["label"]
+    assert any("no command to pick one" in note for note in panels["i2c"]["notes"])
+
+
+def test_the_v4_pullup_rail_refusal_reaches_the_user(client):
+    if client.variant != "v4":
+        pytest.skip("pull-up rail selection is a v4 feature")
+    connect(client)
+    session = client.app.state.session
+    session.bp.serial.vextern_powered = True
+    status, body = run(client, "i2c", "pullup_voltage", selection=2)
+    assert status == 400
+    assert "VPU" in body["error"] and "protection" in body["error"]

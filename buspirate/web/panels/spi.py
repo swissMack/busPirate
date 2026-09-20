@@ -6,7 +6,7 @@ import time
 
 from ...spi import SPI
 from ..registry import Action, Panel, Param, Wire, hexdump, keyvalue, text
-from ..wiring import CABLE_CAVEAT, colour
+from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
 
 CMD_JEDEC_ID = 0x9F
 CMD_READ = 0x03
@@ -42,7 +42,7 @@ MODE_CHOICES = [
 ]
 
 _SETUP = [
-    Param("power", "bool", "Power the target from the Bus Pirate", default=True),
+    Param("power", "bool", "Power the target (3.3V + 5V)", default=True),
     Param("speed", "enum", "Clock", default=3, choices=SPEED_CHOICES),
     Param("spi_mode", "enum", "SPI mode", default=0, choices=MODE_CHOICES),
 ]
@@ -138,6 +138,7 @@ PANEL = Panel(
         "chip may never respond.",
         "A reply of all 0x00 or all 0xFF almost always means MISO is not "
         "connected, not that the chip is blank.",
+        POWER_NOTE,
         CABLE_CAVEAT,
     ],
     actions=[

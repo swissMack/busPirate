@@ -245,3 +245,44 @@ def test_a_wrong_banner_explains_itself():
     with make_device(Confused()) as bp:
         with pytest.raises(ModeError, match="resynchronise"):
             bp.i2c()
+
+
+# -- supply rails and the v4 pull-up selector ------------------------------
+
+
+def test_the_power_bit_switches_both_supplies_together(bp, fake):
+    """There is no command to pick 3.3V or 5V — the bit enables both."""
+    with bp.i2c() as i2c:
+        fake.written.clear()
+        i2c.configure_peripherals(power=True)
+        assert fake.written[0] == 0x48  # 0b0100_1000, w=power only
+
+
+def test_pullup_rail_selection_maps_to_the_documented_bits():
+    fake = FakeSerial(variant="v4")
+    with make_device(fake) as bp:
+        with bp.i2c() as i2c:
+            for selection, expected in ((I2C.PULLUP_OFF, 0x50), (I2C.PULLUP_3V3, 0x51), (I2C.PULLUP_5V, 0x52)):
+                fake.written.clear()
+                i2c.set_pullup_voltage(selection)
+                assert fake.written[0] == expected
+
+
+def test_pullup_rail_refuses_when_the_target_already_drives_vpu():
+    from buspirate import ExternalVoltageError
+
+    fake = FakeSerial(variant="v4")
+    fake.vextern_powered = True
+    with make_device(fake) as bp:
+        with bp.i2c() as i2c:
+            with pytest.raises(ExternalVoltageError, match="already present on the VPU"):
+                i2c.set_pullup_voltage(I2C.PULLUP_5V)
+            # Disconnecting is always allowed.
+            i2c.set_pullup_voltage(I2C.PULLUP_OFF)
+
+
+def test_pullup_rail_rejects_a_nonsense_selection():
+    with make_device(FakeSerial(variant="v4")) as bp:
+        with bp.i2c() as i2c:
+            with pytest.raises(ValueError, match="PULLUP_OFF"):
+                i2c.set_pullup_voltage(7)

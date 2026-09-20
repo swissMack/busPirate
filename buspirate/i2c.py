@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Iterable, List
 
 from . import device as device_module
-from .exceptions import NackError
+from .exceptions import ExternalVoltageError, NackError
 from .mode import Mode
 
 CMD_START = 0x02
@@ -45,6 +45,8 @@ class I2C(Mode):
     SPEED_100KHZ = 2
     SPEED_400KHZ = 3
 
+    #: Pull-up rail selection (Bus Pirate v4 only). These connect the VPU
+    #: (VEXTERN) pin to an on-board rail; they do not change the supplies.
     PULLUP_OFF = 0
     PULLUP_3V3 = 1
     PULLUP_5V = 2
@@ -206,12 +208,34 @@ class I2C(Mode):
     # -- Bus Pirate v4 only ------------------------------------------------
 
     def set_pullup_voltage(self, selection: int) -> None:
-        """Choose the on-board pull-up rail: off, 3.3V or 5V. **BPv4 only.**"""
+        """Connect the VPU pin to an on-board rail: off, 3.3V or 5V.
+
+        **Bus Pirate v4 only.** This switches what the *pull-ups* are pulled
+        up to; it does not change the 3.3V and 5V supplies themselves, which
+        are separate pins and always come on together (see
+        :meth:`~buspirate.mode.Mode.configure_peripherals`).
+
+        The firmware refuses to connect a rail if an external voltage is
+        already present on VPU, which is a deliberate protection — feeding the
+        Bus Pirate's rail into a target's supply would be a short.
+
+        Note that the wiki marked this command "unimplemented" for a long
+        time, so older v4 firmware may ignore it. If the pull-ups do not
+        change, drive VPU from the target's own supply instead.
+        """
         self._check_active()
         self.bp.profile.require(device_module.CAP_PULLUP_VOLTAGE)
         if selection not in (self.PULLUP_OFF, self.PULLUP_3V3, self.PULLUP_5V):
             raise ValueError("use I2C.PULLUP_OFF, PULLUP_3V3 or PULLUP_5V")
-        self.bp.command_expect_ack(PULLUP_VOLTAGE_BASE | selection)
+        self.bp.write(bytes([PULLUP_VOLTAGE_BASE | selection]))
+        if self.bp.read(1)[0] != 0x01:
+            raise ExternalVoltageError(
+                "the Bus Pirate refused to connect its pull-up rail because a "
+                "voltage is already present on the VPU pin. That is the "
+                "protection working: disconnect VPU from the target's supply "
+                "first, or leave VPU driven by the target and set the rail to "
+                "off."
+            )
 
     def extended_aux(self, command: int) -> None:
         """Drive or read AUX/CS directly. **BPv4 only.** See the ``AUX_*`` values."""

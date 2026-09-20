@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ... import device as device_module
 from ..registry import Action, Panel, Param, Wire, keyvalue, pins, text
-from ..wiring import CABLE_CAVEAT, colour
+from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
 
 
 def _set_pins(ctx, power, pullups, aux, mosi, clk, miso, cs):
@@ -76,6 +76,7 @@ PANEL = Panel(
         "whatever protocol mode you were in.",
         "The on-board supplies are modest — a few tens of milliamps. Power a "
         "hungry target from its own supply and connect only the grounds.",
+        POWER_NOTE,
         CABLE_CAVEAT,
     ],
     actions=[
@@ -84,7 +85,7 @@ PANEL = Panel(
             label="Set the pins",
             primary=True,
             params=[
-                Param("power", "bool", "3.3V and 5V supplies", default=False),
+                Param("power", "bool", "3.3V and 5V supplies (both, together)", default=False),
                 Param("pullups", "bool", "Pull-ups", default=False),
                 Param("aux", "bool", "AUX high", default=False),
                 Param("mosi", "bool", "MOSI high", default=False),
