@@ -32,9 +32,11 @@ not something to expose.
 - **Recipe strip** — the jobs worth a single click. Selecting one jumps to it.
 - **Panels** — one per protocol. Each opens with what it is for, a **hook-up
   diagram**, and the warnings that matter for that bus.
-- **Hook-up diagram** — the Bus Pirate's own reference cards with *this* bus
-  marked on them: the protocol's column on the pin-function card, and the
-  probe wires it uses on the cable card. Nothing to translate in your head.
+- **Hook-up diagram** — a photograph of the board with the pins this panel
+  needs ringed and labelled (`CLK → SCL`), above the Bus Pirate's own
+  reference cards with the bus marked on them: the protocol's column on the
+  pin-function card, and the probe wires it uses on the cable card. Nothing to
+  translate in your head.
 - **Guide** — the whole user guide is in the sidebar, and every panel links to
   its own page.
 - **Traffic log** — every byte in both directions, live. `->` is what the Mac
@@ -117,7 +119,13 @@ it needs a physical power cycle. The dashboard asks first.
 ## Credits
 
 The two reference cards shown in the hook-up diagrams are from the Dangerous
-Prototypes wiki (dangerousprototypes.com), used under CC BY-SA. See
-`buspirate/web/static/img/CREDITS.md`.
+Prototypes wiki (dangerousprototypes.com), used under CC BY-SA. The board
+photograph is a Bus Pirate v3.6 supplied by the repository owner and its
+licence has not been established — see
+`buspirate/web/static/img/CREDITS.md` before publishing this repository.
+
+The pin coordinates were measured from the photograph and checked against the
+board's silkscreen; replacing the photo means re-measuring them, in
+`buspirate/web/wiring.py`.
 
 To add a panel of your own, see [extending](extending.md).

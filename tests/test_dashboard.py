@@ -361,3 +361,62 @@ def test_wiring_signals_all_exist_on_the_cable(client):
         for wire in panel["wiring"]:
             assert wire["signal"] in known, (panel["id"], wire["signal"])
             assert wire["colour"].startswith("#"), (panel["id"], wire["signal"])
+
+
+# -- the board photo and its pin map --------------------------------------
+
+
+def test_the_board_geometry_names_every_signal(client):
+    board = client.get("/api/state").json()["board"]
+    cable = {c["signal"] for c in client.get("/api/state").json()["cable"]}
+    assert set(board["pins"]) == cable
+    assert set(board["side"]) == cable
+
+
+def test_board_pins_sit_inside_the_photo(client):
+    board = client.get("/api/state").json()["board"]
+    for signal, (x, y) in board["pins"].items():
+        assert 0 < x < board["width"], signal
+        assert 0 < y < board["height"], signal
+
+
+def test_the_header_is_two_columns_of_five(client):
+    board = client.get("/api/state").json()["board"]
+    columns = {}
+    for signal, (x, y) in board["pins"].items():
+        columns.setdefault(x, []).append(signal)
+    assert len(columns) == 2, "the IDC header has exactly two columns"
+    assert sorted(len(v) for v in columns.values()) == [5, 5]
+
+
+def test_the_columns_match_the_silkscreen(client):
+    """Left column is GND/+5V/VPU/CLK/CS top to bottom; right is the other five."""
+    board = client.get("/api/state").json()["board"]
+    left = sorted(
+        (y, s) for s, (x, y) in board["pins"].items() if board["side"][s] == "left"
+    )
+    right = sorted(
+        (y, s) for s, (x, y) in board["pins"].items() if board["side"][s] == "right"
+    )
+    assert [s for _, s in left] == ["GND", "+5V", "VPU", "CLK", "CS"]
+    assert [s for _, s in right] == ["+3.3V", "ADC", "AUX", "MOSI", "MISO"]
+
+
+def test_the_rows_pair_up_across_the_header(client):
+    board = client.get("/api/state").json()["board"]
+    rows = {}
+    for signal, (x, y) in board["pins"].items():
+        rows.setdefault(y, []).append(signal)
+    assert len(rows) == 5
+    assert all(len(v) == 2 for v in rows.values())
+
+
+def test_the_board_photo_is_served(client):
+    response = client.get("/static/img/board-v3.png")
+    assert response.status_code == 200
+    assert response.content[:4] == b"\x89PNG"
+
+
+def test_the_board_caveat_names_the_variant(client):
+    caveat = client.get("/api/state").json()["board_caveat"]
+    assert "v3.6" in caveat and "v4" in caveat

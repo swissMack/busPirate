@@ -223,3 +223,10 @@ table.data td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line);
 .tok--ack { color: var(--good); border: 0; background: none; padding: 1px 2px; }
 .tok--nack { color: var(--warn); border: 0; background: none; padding: 1px 2px; }
 .tok--value { color: var(--accent); }
+
+.card-img--board { max-width: 840px; display: block; margin-bottom: 4px; }
+/* The viewBox is ~1090 units wide but the card renders at ~760px, so the
+   label needs to be oversized in user units to read at ~16px on screen. */
+.boardlabel { font-family: var(--mono); font-size: 25px; font-weight: 600;
+  fill: var(--text); paint-order: stroke; stroke: var(--bg-raised);
+  stroke-width: 5px; stroke-linejoin: round; }

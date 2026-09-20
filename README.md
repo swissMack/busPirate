@@ -35,9 +35,9 @@ if it has been a while.
 └──────────────────────────────────────────────┘
 ```
 
-Every panel shows the Bus Pirate's own reference cards with *your* bus marked
-on them — which probe wire becomes SDA, which becomes SCL — plus the warnings
-that matter for that bus. The full user guide is in the sidebar too, so you
+Every panel shows a photograph of the board with the pins it needs ringed and
+labelled — `CLK → SCL`, `MOSI → SDA` — above the Bus Pirate's own reference
+cards with your bus marked on them, plus the warnings that matter for it. The full user guide is in the sidebar too, so you
 never have to leave the page to look something up. One-click recipes cover the
 jobs worth coming back for: scan a bus, read a 24Cxx, identify and dump SPI
 flash, read DS18B20 temperatures, sniff traffic between two other devices.
@@ -95,9 +95,10 @@ device back to its terminal, so an interrupted script never strands it.
 ## Credits
 
 The reference cards in the hook-up diagrams come from the Dangerous Prototypes
-wiki (dangerousprototypes.com), used under CC BY-SA — see
-`buspirate/web/static/img/CREDITS.md`. The colour table and the per-bus pin
-names in this project are read from those cards.
+wiki (dangerousprototypes.com), used under CC BY-SA. The colour table and the
+per-bus pin names in this project are read from those cards. The board
+photograph's licence has not been established — see
+`buspirate/web/static/img/CREDITS.md` before publishing this repository.
 
 ## Development
 

@@ -11,6 +11,8 @@ const state = {
   cableCaveat: "",
   refcard: null,
   cableCard: null,
+  board: null,
+  boardCaveat: "",
   current: localStorage.getItem("bp.panel") || null,
   guide: { open: false, pages: [], page: null },
   busy: false,
@@ -71,6 +73,8 @@ async function loadState() {
   state.cableCaveat = data.cable_caveat || "";
   state.refcard = data.refcard || null;
   state.cableCard = data.cable_card || null;
+  state.board = data.board || null;
+  state.boardCaveat = data.board_caveat || "";
   if (!state.panels.some((p) => p.id === state.current)) {
     state.current = state.panels.length ? state.panels[0].id : null;
   }
@@ -628,14 +632,80 @@ function cableDiagram(panel) {
   );
 }
 
+/* The board photo with the pins this panel uses ringed and named. The photo
+   crops the right-hand silkscreen, so the labels are redrawn in a gutter
+   beside it rather than relying on what the picture happens to show. */
+function boardDiagram(panel) {
+  const board = state.board;
+  if (!board) return null;
+  // Ring only the pins this panel actually names a target for, so the picture
+  // never suggests connecting a rail the panel did not ask for.
+  const byTarget = new Map(panel.wiring.map((w) => [w.signal, w]));
+  const left = board.gutter_left || 0;
+  const width = board.width + (board.gutter || 0) + left;
+  const marks = [];
+
+  for (const [signal, [x, y]] of Object.entries(board.pins)) {
+    const wire = byTarget.get(signal);
+    const onRight = board.side[signal] === "right";
+    const colour = wire ? "var(--accent)" : "var(--muted)";
+
+    marks.push(
+      svg("circle", {
+        cx: x, cy: y, r: wire ? 11 : 7,
+        fill: "none", stroke: colour,
+        "stroke-width": wire ? 3.5 : 1.5,
+        "stroke-opacity": wire ? 1 : 0.4,
+      })
+    );
+    if (!wire) continue;
+
+    // Callouts go into the gutters, never onto the board, where the
+    // silkscreen would swallow them.
+    const endX = onRight ? board.width + 16 : -16;
+    marks.push(
+      svg("line", {
+        x1: onRight ? x + 12 : x - 12, y1: y, x2: endX, y2: y,
+        stroke: colour, "stroke-width": 2.5, "stroke-opacity": 0.9,
+      })
+    );
+    marks.push(
+      svg("text", {
+        x: onRight ? endX + 8 : endX - 8, y: y + 6,
+        "text-anchor": onRight ? "start" : "end",
+        class: "boardlabel",
+      }, `${signal} → ${wire.target}`)
+    );
+  }
+
+  return svg(
+    "svg",
+    { viewBox: `${-left} 0 ${width} ${board.height}`, width, height: board.height,
+      class: "card-img card-img--board", role: "img",
+      "aria-label": `${board.label} header, pins used by ${panel.title} marked` },
+    svg("image", { href: board.image, x: 0, y: 0, width: board.width, height: board.height }),
+    ...marks
+  );
+}
+
 function hookupDiagram(panel) {
   const board = state.status.variant === "v4" ? "Bus Pirate v4" : "Bus Pirate v3";
   const columnNote = panel.refcard_column
     ? `Highlighted: the ${panel.refcard_column} column — what each probe wire becomes on this bus.`
     : "Highlighted: the pins this panel drives.";
+  const mismatch = state.status.variant === "v4" && state.board;
   return el(
     "div",
     { class: "diagram" },
+    panel.wiring.length ? boardDiagram(panel) : null,
+    panel.wiring.length
+      ? el("p", {
+          class: "caption",
+          text: mismatch
+            ? `Photo is a ${state.board.label}. ${state.boardCaveat}`
+            : `${state.board ? state.board.label : board} — the ringed pins are the ones this panel uses.`,
+        })
+      : null,
     el("div", { class: "diagram__cards" }, refcardDiagram(panel), cableDiagram(panel)),
     el("p", { class: "caption", text: `${board} · ${columnNote}` }),
     el("p", { class: "caption", text: state.cableCaveat }),

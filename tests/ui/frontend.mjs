@@ -64,8 +64,24 @@ check("wiring block names SDA", panelText.includes("SDA"));
 check("cable caveat is shown", panelText.includes("SparkFun"));
 check("wiring swatch has a colour", $("panel").querySelector(".swatch").getAttribute("style").includes("background"));
 
-// --- hook-up diagram, built from the reference cards
-const cards = $("panel").querySelectorAll(".card-img");
+// --- hook-up diagram: the board photo with this panel's pins ringed
+const boardSvg = $("panel").querySelector(".card-img--board");
+check("the board photo is drawn", boardSvg !== null);
+check("board photo is the bundled one",
+  boardSvg && boardSvg.querySelector("image").getAttribute("href") === "/static/img/board-v3.png");
+const rings = boardSvg ? [...boardSvg.querySelectorAll("circle")] : [];
+check("all ten header pins are marked", rings.length === 10, `${rings.length}`);
+const callouts = boardSvg ? [...boardSvg.querySelectorAll(".boardlabel")].map((t) => t.textContent) : [];
+check("I2C callouts name the target pins",
+  callouts.includes("MOSI → SDA") && callouts.includes("CLK → SCL"), callouts.join(" | "));
+check("only the pins this panel uses are called out",
+  callouts.length === $("panel").querySelectorAll(".wiring tr").length,
+  `${callouts.length} callouts vs ${$("panel").querySelectorAll(".wiring tr").length} wires`);
+check("callouts sit outside the photo",
+  boardSvg && boardSvg.getAttribute("viewBox").startsWith("-"),
+  boardSvg && boardSvg.getAttribute("viewBox"));
+
+const cards = $("panel").querySelectorAll(".card-img:not(.card-img--board)");
 check("both reference cards are drawn", cards.length === 2, `${cards.length}`);
 const images = [...cards].map((c) => c.querySelector("image").getAttribute("href"));
 check("cards use the bundled artwork", images.join(",") === "/static/img/refcard.png,/static/img/seeed-cable.png", images.join(","));

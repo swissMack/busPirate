@@ -101,6 +101,46 @@ CABLE_CARD = {
     },
 }
 
+# Pixel geometry of static/img/board-v3.png (700x525), measured from the file
+# and checked against the board's own silkscreen.
+#
+# The IDC header is 2x5. The left column is labelled GND, +5V, VPU, CLK, CS
+# from the top; the right column is +3.3V, ADC, AUX, MOSI, MISO, though the
+# photo crops those labels, which is why the diagram redraws them.
+BOARD_V3 = {
+    "image": "/static/img/board-v3.png",
+    "width": 700,
+    "height": 525,
+    # Label space either side of the photo. Wide enough for the longest
+    # callout, which is SPI's "CLK \u2192 SCK / CLK".
+    "gutter": 290,
+    "gutter_left": 290,
+    "label": "Bus Pirate v3.6",
+    "pins": {
+        "GND": [570, 202],
+        "+3.3V": [599, 202],
+        "+5V": [570, 228],
+        "ADC": [599, 228],
+        "VPU": [570, 256],
+        "AUX": [599, 256],
+        "CLK": [570, 283],
+        "MOSI": [599, 283],
+        "CS": [570, 311],
+        "MISO": [599, 311],
+    },
+    #: Which side of the header each column sits on, for label placement.
+    "side": {
+        "GND": "left", "+5V": "left", "VPU": "left", "CLK": "left", "CS": "left",
+        "+3.3V": "right", "ADC": "right", "AUX": "right", "MOSI": "right",
+        "MISO": "right",
+    },
+}
+
+BOARD_CAVEAT = (
+    "This is a Bus Pirate v3.6. The v4 is laid out differently — check the "
+    "silkscreen next to your own header before trusting the positions."
+)
+
 CABLE_CAVEAT = (
     "Colours and pin order are the Seeed/Adafruit cable, which is the "
     "firmware reference — pin 1 is MISO (black) and pin 10 is GND (brown). "

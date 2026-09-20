@@ -99,5 +99,26 @@ This is the Seeed Studio / Adafruit cable, which is the order the firmware
 itself uses. **SparkFun cables are usually reversed and the v2go differs** —
 check yours with Connection → **Show the cable legend**, or the `i` command.
 
-The dashboard shows this on the reference card for every panel, with the
-wires that bus uses marked, so you do not have to hold it in your head.
+## The board's header
+
+The probe header is a 2×5 IDC. On a **v3.6** the silkscreen names every pin,
+and they sit like this with the USB socket on the left:
+
+```
+        left column        right column
+   ┌──────────────────────────────────┐
+   │  GND   ●          ●   +3.3V      │
+   │  +5V   ●          ●   ADC        │
+   │  VPU   ●          ●   AUX        │
+   │  CLK   ●          ●   MOSI       │
+   │  CS    ●          ●   MISO       │
+   └──────────────────────────────────┘
+```
+
+The dashboard draws this on a photograph of the board, with the pins the
+current panel needs ringed and labelled with what they connect to — so you do
+not have to hold any of it in your head. The reference card and the cable
+card sit underneath it.
+
+**A Bus Pirate v4 is laid out differently.** Read your own silkscreen before
+trusting a picture of someone else's board.
