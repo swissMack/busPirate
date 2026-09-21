@@ -175,6 +175,19 @@ table.data td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line);
 .usb { font-family: var(--mono); font-size: 11px; }
 .usb--gone { color: var(--warn); }
 
+/* Which board's geometry and LED rules the dashboard is showing. */
+.variantpick { display: flex; align-items: center; gap: 6px; }
+.variantpick select {
+  font-family: var(--mono); font-size: 11px;
+  background: var(--bg-sunken); color: var(--text);
+  border: 1px solid var(--line); border-radius: 3px; padding: 1px 3px;
+}
+.variant-warning {
+  font-family: var(--mono); font-size: 10px;
+  color: var(--warn); border: 1px solid var(--warn);
+  border-radius: 2px; padding: 0 4px;
+}
+
 /* The four board LEDs. Inferred from what we have asked the board to do, so
    a dark one is deliberately flat rather than "off-looking but plausible". */
 .leds { display: flex; gap: 4px; }

@@ -75,6 +75,12 @@ check("PWR and MODE light up once connected", /PWR:on/.test(leds()) && /MODE:on/
 check("VREG stays dark until the supplies are switched on", /VREG:off/.test(leds()), leds());
 check("USB is not steadily lit — it only flashes on traffic", /USB:off/.test(leds()), leds());
 
+// --- the variant switch
+check("variant selector offers both boards",
+  $("variant") && [...$("variant").options].map((o) => o.value).join(",") === "auto,v3,v4",
+  $("variant") ? [...$("variant").options].map((o) => o.value).join(",") : "no #variant");
+check("no mismatch warning while following detection", $("variant-warning").hidden);
+
 // --- I2C panel
 const navButtons = [...$("nav").children];
 navButtons.find((b) => b.textContent === "I2C").click();
@@ -107,6 +113,21 @@ check("the LEDs sit along the top edge of the photo",
   ledMarks.every((r) => Number(r.getAttribute("y")) < 120), ledMarks.map((r) => r.getAttribute("y")).join(","));
 check("the board photo says the LED states are inferred",
   $("panel").textContent.includes("no command that reads the LEDs back"));
+
+$("variant").value = "v4";
+$("variant").dispatchEvent(new window.Event("change"));
+await settle(600);
+check("switching to v4 redraws the diagram with the v4 board",
+  $("panel").querySelector(".card-img--board image").getAttribute("href") === "/static/img/board-v4.jpg",
+  $("panel").querySelector(".card-img--board image").getAttribute("href"));
+check("the v4 header shows twelve pins",
+  $("panel").querySelectorAll(".card-img--board circle").length === 12,
+  `${$("panel").querySelectorAll(".card-img--board circle").length}`);
+check("overriding onto the wrong board warns", !$("variant-warning").hidden);
+$("variant").value = "auto";
+$("variant").dispatchEvent(new window.Event("change"));
+await settle(600);
+check("returning to auto clears the warning", $("variant-warning").hidden);
 
 const cards = $("panel").querySelectorAll(".card-img:not(.card-img--board)");
 check("both reference cards are drawn", cards.length === 2, `${cards.length}`);

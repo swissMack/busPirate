@@ -27,6 +27,7 @@ from .wiring import (
     CABLE_CARD,
     CABLE_CAVEAT,
     LED_NOTES,
+    LED_RULES,
     REFCARD,
     SEEED_CABLE,
     SIGNAL_NOTES,
@@ -107,6 +108,7 @@ def create_app(
             "variant_source": session.variant_source(),
             "variants": sorted(BOARDS),
             "led_note": LED_NOTES[variant],
+            "led_rules": LED_RULES[variant],
         }
 
     @app.get("/api/ports")

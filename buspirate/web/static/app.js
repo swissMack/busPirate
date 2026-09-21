@@ -14,6 +14,11 @@ const state = {
   board: null,
   boardCaveat: "",
   ledNote: "",
+  variant: "v3",
+  variantDetected: null,
+  variantSource: "default",
+  variants: [],
+  ledRules: {},
   current: localStorage.getItem("bp.panel") || null,
   guide: { open: false, pages: [], page: null },
   busy: false,
@@ -77,6 +82,11 @@ async function loadState() {
   state.board = data.board || null;
   state.boardCaveat = data.board_caveat || "";
   state.ledNote = data.led_note || "";
+  state.variant = data.variant;
+  state.variantDetected = data.variant_detected;
+  state.variantSource = data.variant_source;
+  state.variants = data.variants || [];
+  state.ledRules = data.led_rules || {};
   if (!state.panels.some((p) => p.id === state.current)) {
     state.current = state.panels.length ? state.panels[0].id : null;
   }
@@ -108,24 +118,56 @@ function renderStatus() {
     : "Not connected";
   renderUsb(s.usb || { attached: false });
   renderLeds(s.leds || {});
+  renderVariant();
 }
 
 /* The four indicator LEDs along the top of the board. Inferred, not read —
-   see state.ledNote, which the hook-up diagram prints in full. */
+   see state.ledNote, which the hook-up diagram prints in full. Their
+   tooltips come from state.ledRules, which the server serves per variant —
+   a v3 and a v4 do not mean the same thing by the same LED. */
 const LED_ORDER = ["PWR", "USB", "MODE", "VREG"];
-const LED_MEANS = {
-  PWR: "USB power is reaching the board",
-  USB: "the port is open",
-  MODE: "a bus mode is active — dark in HiZ",
-  VREG: "the on-board 3.3V and 5V supplies are on",
-};
 
-/* LED4 is the FT232RL's RXLED# pin: a pulse on traffic, not a state. So it is
-   driven from the traffic feed rather than from the status the server sends,
-   which always reports USB dark. */
+function ledMeans(name) {
+  return (state.ledRules[name] || {}).means || "";
+}
+
+const VARIANT_LABELS = { v3: "Bus Pirate v3", v4: "Bus Pirate v4" };
+
+function renderVariant() {
+  const select = $("variant");
+  if (!select) return;
+  const wanted = ["auto", ...state.variants];
+  if ([...select.options].map((o) => o.value).join() !== wanted.join()) {
+    select.replaceChildren(
+      el("option", { value: "auto" }, "Follow the board"),
+      ...state.variants.map((v) => el("option", { value: v }, VARIANT_LABELS[v] || v))
+    );
+  }
+  select.value = state.variantSource === "override" ? state.variant : "auto";
+
+  // Only a genuine disagreement is worth a warning: an override that matches
+  // what is plugged in is harmless.
+  const warning = $("variant-warning");
+  const wrong =
+    state.variantSource === "override" &&
+    state.variantDetected &&
+    state.variantDetected !== state.variant;
+  warning.hidden = !wrong;
+  warning.textContent = wrong
+    ? `showing ${state.variant} — a ${state.variantDetected} is connected`
+    : "";
+}
+
+/* LED4 is the FT232RL's RXLED# pin: a pulse on traffic, not a state — and
+   only on a v3. A v4 holds USB steady once enumerated, so flashing it there
+   would be a lie; state.ledRules says which behaviour applies. It is {}
+   before the first state load, so guard rather than throw and break the
+   live log. */
 let usbFlashTimer = null;
 
 function flashUsbLed() {
+  const rule = (state.ledRules.USB || {}).inference;
+  if (rule !== "flash_on_traffic") return;
   const marks = [...document.querySelectorAll('[data-led="USB"]')];
   if (!marks.length) return;
   for (const mark of marks) mark.classList.add("led--flash");
@@ -144,7 +186,7 @@ function renderLeds(leds) {
     const on = leds[name] === true;
     rect.classList.toggle("led--on", on);
     const title = rect.querySelector("title");
-    if (title) title.textContent = `${name}: ${on ? "lit" : "dark"} — ${LED_MEANS[name]}`;
+    if (title) title.textContent = `${name}: ${on ? "lit" : "dark"} — ${ledMeans(name)}`;
   }
 
   const box = $("leds");
@@ -156,7 +198,7 @@ function renderLeds(leds) {
         class: on ? "led led--on" : "led",
         "data-led": name,
         text: name,
-        title: `${name}: ${on ? "lit" : "dark"} — ${LED_MEANS[name]}`,
+        title: `${name}: ${on ? "lit" : "dark"} — ${ledMeans(name)}`,
       });
     })
   );
@@ -598,6 +640,18 @@ $("log-toggle").addEventListener("click", (event) => {
   log.classList.toggle("collapsed");
   event.target.textContent = log.classList.contains("collapsed") ? "Show" : "Hide";
 });
+$("variant").addEventListener("change", async (event) => {
+  await api("/api/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      panel: "connection",
+      action: "set_variant",
+      params: { variant: event.target.value },
+    }),
+  });
+  await loadState();
+});
 
 refreshPorts();
 loadState();
@@ -744,7 +798,7 @@ function boardDiagram(panel) {
         x: x - 9, y: y - 6, width: 18, height: 12, rx: 2,
         class: on ? "led led--on" : "led",
         "data-led": name,
-      }, svg("title", {}, `${name}: ${on ? "lit" : "dark"} — ${LED_MEANS[name]}`))
+      }, svg("title", {}, `${name}: ${on ? "lit" : "dark"} — ${ledMeans(name)}`))
     );
   }
 
