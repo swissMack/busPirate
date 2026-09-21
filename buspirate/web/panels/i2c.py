@@ -135,6 +135,28 @@ def _pullup_voltage(ctx, selection):
     return text(f"VPU is now connected to {names[selection]}.", tone="good")
 
 
+_AUX_PINS = [{"value": "aux", "label": "AUX"}, {"value": "cs", "label": "CS"}]
+_AUX_LEVELS = [
+    {"value": "low", "label": "Drive low"},
+    {"value": "high", "label": "Drive high"},
+    {"value": "hiz", "label": "Release (HiZ)"},
+    {"value": "read", "label": "Read"},
+]
+
+# Sub-command bytes from Firmware/I2C.c:935.
+_AUX_SELECT = {"aux": 0x10, "cs": 0x20}
+_AUX_ACTION = {"low": 0x00, "high": 0x01, "hiz": 0x02, "read": 0x03}
+
+
+def _extended_aux(ctx, pin, level):
+    ctx.mode.extended_aux(_AUX_SELECT[pin])
+    ctx.mode.extended_aux(_AUX_ACTION[level])
+    name = pin.upper()
+    if level == "read":
+        return text(f"{name} read back.")
+    return text(f"{name} set {level}.", tone="good")
+
+
 _BUS_PARAMS = [
     Param("power", "bool", "Power the target (3.3V + 5V)", default=True),
     Param("pullups", "bool", "Enable the on-board pull-ups", default=True),
@@ -272,6 +294,19 @@ PANEL = Panel(
                 )
             ],
             handler=_pullup_voltage,
+        ),
+        Action(
+            name="extended_aux",
+            label="Drive AUX or CS",
+            help="Bus Pirate v4 only. Drives the AUX or CS pin directly while "
+            "in I2C mode. AUX1 and AUX2 on the v4 header are not reachable "
+            "this way — they are terminal-mode only.",
+            requires=device_module.CAP_EXTENDED_AUX,
+            params=[
+                Param("pin", "enum", "Pin", default="aux", choices=_AUX_PINS),
+                Param("level", "enum", "Do what", default="high", choices=_AUX_LEVELS),
+            ],
+            handler=_extended_aux,
         ),
     ],
 )

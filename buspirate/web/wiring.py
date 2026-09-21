@@ -45,6 +45,10 @@ SIGNAL_ROLES = {
 
 SIGNAL_NOTES = {
     "AUX": "Auxiliary I/O, frequency probe, PWM",
+    "AUX1": "Second auxiliary pin, v4 only. Terminal mode only — the binary "
+            "protocol has no command for it, so the dashboard cannot drive it.",
+    "AUX2": "Third auxiliary pin, v4 only. Terminal mode only — the binary "
+            "protocol has no command for it, so the dashboard cannot drive it.",
     "VPU": "Input for the pull-up resistors, 0-5V",
     "ADC": "A/D converter, max 6V, 10-bit, 500 ksps",
     "+5V": "Switchable supply, max 150 mA",

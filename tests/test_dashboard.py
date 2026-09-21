@@ -669,3 +669,29 @@ def test_a_v4_is_served_the_v4_board(client):
     connect(client)
     label = client.get("/api/state").json()["board"]["label"]
     assert label == ("Bus Pirate v4.0" if client.variant == "v4" else "Bus Pirate v3.6")
+
+
+def test_the_aux_control_is_offered_on_v4_only(client):
+    body = connect(client)
+    panels = {p["id"]: p for p in body["panels"]}
+    actions = {a["name"] for a in panels["i2c"]["actions"]}
+    if client.variant == "v4":
+        assert "extended_aux" in actions
+    else:
+        assert "extended_aux" not in actions
+
+
+def test_driving_aux_high_on_a_v4_reports_what_it_did(client):
+    if client.variant != "v4":
+        pytest.skip("extended AUX is a v4 command")
+    connect(client)
+    status, body = run(client, "i2c", "extended_aux", pin="aux", level="high")
+    assert status == 200, body
+    assert "AUX" in body["result"]["text"]
+
+
+def test_the_v4_aux_pins_say_they_are_terminal_only():
+    from buspirate.web.wiring import SIGNAL_NOTES
+
+    for signal in ("AUX1", "AUX2"):
+        assert "terminal" in SIGNAL_NOTES[signal].lower(), signal
