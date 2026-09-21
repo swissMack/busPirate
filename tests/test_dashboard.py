@@ -541,3 +541,36 @@ def test_the_board_registry_is_keyed_by_variant():
     assert len(board["pins"]) == 10
     assert set(board["leds"]) == {"PWR", "USB", "MODE", "VREG"}
     assert "v3.6" in board["caveat"]
+
+
+# -- the effective variant --------------------------------------------------
+
+
+def test_the_state_reports_the_detected_variant(client):
+    connect(client)
+    body = client.get("/api/state").json()
+    if client.variant == "v3":
+        assert body["variant"] == client.variant
+        assert body["variant_detected"] == client.variant
+        assert body["variant_source"] == "detected"
+    else:
+        # "v4" isn't in BOARDS yet — that's Task 5 — so detected_variant()'s
+        # guard filters it out and the session falls back to the default.
+        assert body["variant"] == "v3"
+        assert body["variant_detected"] is None
+        assert body["variant_source"] == "default"
+    assert body["variants"] == ["v3"]
+
+
+def test_an_unconnected_dashboard_defaults_to_v3_and_says_so(client):
+    body = client.get("/api/state").json()
+    assert body["variant"] == "v3"
+    assert body["variant_detected"] is None
+    assert body["variant_source"] == "default"
+
+
+def test_the_board_served_follows_the_detected_variant(client):
+    connect(client)
+    body = client.get("/api/state").json()
+    if client.variant == "v3":
+        assert body["board"]["label"] == "Bus Pirate v3.6"

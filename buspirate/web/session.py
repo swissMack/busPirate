@@ -20,6 +20,7 @@ from ..exceptions import BusPirateError, ModeError
 from ..ports import discover, resolve
 from .decoders import make_decoder
 from .registry import Action, Panel, load_panels
+from .wiring import BOARDS, DEFAULT_VARIANT
 
 TRAFFIC_HISTORY = 500
 STREAM_EVENT_CAP = 200  # events per websocket message
@@ -128,6 +129,9 @@ class DeviceSession:
             "miso": False,
             "cs": False,
         }
+        #: Manual override of the variant the UI presents. None = follow
+        #: whatever the banner said.
+        self.display_variant: Optional[str] = None
 
     # -- events ------------------------------------------------------------
 
@@ -284,6 +288,27 @@ class DeviceSession:
             # protocol mode or the pins panel can have been the one to do it.
             "VREG": live and self._supplies_on(),
         }
+
+    def detected_variant(self) -> Optional[str]:
+        """What the banner said, or None if nothing is connected."""
+        if self.bp is None or not self.bp.is_open:
+            return None
+        variant = self.bp.profile.variant
+        return variant if variant in BOARDS else None
+
+    def effective_variant(self) -> str:
+        """The variant the UI should present: override, else detected, else v3."""
+        if self.display_variant is not None:
+            return self.display_variant
+        return self.detected_variant() or DEFAULT_VARIANT
+
+    def variant_source(self) -> str:
+        """Why effective_variant() is what it is: override, detected or default."""
+        if self.display_variant is not None:
+            return "override"
+        if self.detected_variant() is not None:
+            return "detected"
+        return "default"
 
     def status(self) -> Dict[str, Any]:
         if self.bp is None or not self.bp.is_open:

@@ -80,6 +80,8 @@ def create_app(
 
     @app.get("/api/state")
     async def state() -> Dict[str, Any]:
+        variant = session.effective_variant()
+        board = BOARDS[variant]
         return {
             "status": session.status(),
             "panels": _panels_json(),
@@ -98,8 +100,12 @@ def create_app(
             "cable_caveat": CABLE_CAVEAT,
             "refcard": REFCARD,
             "cable_card": CABLE_CARD,
-            "board": BOARDS["v3"],
-            "board_caveat": BOARDS["v3"]["caveat"],
+            "board": board,
+            "board_caveat": board["caveat"],
+            "variant": variant,
+            "variant_detected": session.detected_variant(),
+            "variant_source": session.variant_source(),
+            "variants": sorted(BOARDS),
             "led_note": LED_NOTE,
         }
 

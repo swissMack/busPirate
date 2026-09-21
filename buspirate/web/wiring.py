@@ -154,6 +154,9 @@ _BOARD_V3 = {
 #: DeviceSession.effective_variant().
 BOARDS: Dict[str, Dict[str, Any]] = {"v3": _BOARD_V3}
 
+#: What to present when nothing is connected, or the banner was unreadable.
+DEFAULT_VARIANT = "v3"
+
 LED_NOTE = (
     "There is no command that reads the LEDs back, so these are inferred from "
     "what the dashboard believes it has asked the board to do, not measured. "
