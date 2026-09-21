@@ -15,6 +15,8 @@ Image credit: reference cards from the Dangerous Prototypes wiki
 
 from __future__ import annotations
 
+from typing import Any, Dict
+
 # Probe cable, pin 1 first, with the colours sampled from the Seeed cable card.
 # Pin 1 is MISO and pin 10 is GND — the opposite end from what you might guess.
 SEEED_CABLE = [
@@ -107,7 +109,7 @@ CABLE_CARD = {
 # The IDC header is 2x5. The left column is labelled GND, +5V, VPU, CLK, CS
 # from the top; the right column is +3.3V, ADC, AUX, MOSI, MISO, though the
 # photo crops those labels, which is why the diagram redraws them.
-BOARD_V3 = {
+_BOARD_V3 = {
     "image": "/static/img/board-v3.png",
     "width": 700,
     "height": 525,
@@ -142,12 +144,15 @@ BOARD_V3 = {
         "+3.3V": "right", "ADC": "right", "AUX": "right", "MOSI": "right",
         "MISO": "right",
     },
+    "caveat": (
+        "This is a Bus Pirate v3.6. The v4 is laid out differently — check the "
+        "silkscreen next to your own header before trusting the positions."
+    ),
 }
 
-BOARD_CAVEAT = (
-    "This is a Bus Pirate v3.6. The v4 is laid out differently — check the "
-    "silkscreen next to your own header before trusting the positions."
-)
+#: Board geometry by variant. The dashboard serves one of these, chosen by
+#: DeviceSession.effective_variant().
+BOARDS: Dict[str, Dict[str, Any]] = {"v3": _BOARD_V3}
 
 LED_NOTE = (
     "There is no command that reads the LEDs back, so these are inferred from "

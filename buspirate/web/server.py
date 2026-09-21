@@ -23,8 +23,7 @@ from . import docs as docs_module
 from .params import ParamError, coerce_all
 from .session import DeviceSession
 from .wiring import (
-    BOARD_CAVEAT,
-    BOARD_V3,
+    BOARDS,
     CABLE_CARD,
     CABLE_CAVEAT,
     LED_NOTE,
@@ -99,8 +98,8 @@ def create_app(
             "cable_caveat": CABLE_CAVEAT,
             "refcard": REFCARD,
             "cable_card": CABLE_CARD,
-            "board": BOARD_V3,
-            "board_caveat": BOARD_CAVEAT,
+            "board": BOARDS["v3"],
+            "board_caveat": BOARDS["v3"]["caveat"],
             "led_note": LED_NOTE,
         }
 

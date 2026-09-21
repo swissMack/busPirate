@@ -530,3 +530,14 @@ def test_a_protocol_panel_leaving_the_power_off_keeps_vreg_dark(client):
     status, body = run(client, "i2c", "scan", power=False, pullups=True, speed=2)
     assert status == 200, body
     assert client.get("/api/state").json()["status"]["leds"]["VREG"] is False
+
+
+def test_the_board_registry_is_keyed_by_variant():
+    from buspirate.web.wiring import BOARDS
+
+    assert set(BOARDS) == {"v3"}
+    board = BOARDS["v3"]
+    assert board["label"] == "Bus Pirate v3.6"
+    assert len(board["pins"]) == 10
+    assert set(board["leds"]) == {"PWR", "USB", "MODE", "VREG"}
+    assert "v3.6" in board["caveat"]
