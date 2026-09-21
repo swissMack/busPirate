@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Dict, Optional
 
 from .exceptions import ModeError, ProtocolError
 from .protocol import BANNER_BITBANG, banner_length, match_banner
@@ -32,6 +32,11 @@ class Mode:
         self._active = False
         #: Protocol version digit from the mode's banner, e.g. 1 for "I2C1".
         self.version: Optional[int] = None
+        #: The last peripheral state sent, so callers can tell what the board
+        #: ought to be doing. Nothing reads it back off the hardware.
+        self.peripherals: Dict[str, bool] = {
+            "power": False, "pullups": False, "aux": False, "cs": False,
+        }
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -88,6 +93,9 @@ class Mode:
             if flag:
                 value |= bit
         self.bp.command_expect_ack(value)
+        self.peripherals = {
+            "power": power, "pullups": pullups, "aux": aux, "cs": cs,
+        }
 
     def mode_version(self) -> int:
         """Ask the mode to re-announce its version banner."""

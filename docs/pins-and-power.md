@@ -16,6 +16,50 @@ with only the grounds tied together.
 The probe cable's supply wires are **+5V orange (pin 8)** and **+3.3V red
 (pin 9)**.
 
+## The four LEDs
+
+Along the top edge of a **v3.6**, left to right, the silkscreen names them
+**PWR**, **USB**, **MODE** and **VREG**. Only one of the four is under
+software control:
+
+| LED | Driven by | Lit when |
+|-----|-----------|----------|
+| **PWR** (LED1) | hardware — `VCC → R2 1K1 → LED → GND` | The board has power. Nothing can turn it off. Dark means a dead cable, a dead port or a dead board — check this before anything else. |
+| **USB** (LED4) | hardware — the FT232RL's **RXLED#** pin, through R3 | Data is arriving from the host. It **pulses**; at idle it is dark. A permanently dark USB LED with PWR lit is a driver or cable problem — see [macOS setup](macos-setup.md). |
+| **MODE** (LED2) | **firmware** — PIC GPIO **RA1** (`BP_LEDMODE`) | Binary mode has been entered. See below. |
+| **VREG** (LED3) | hardware — the switched 3.3V regulator VR2's own output (`SWV33 → R6 1K1 → LED → GND`) | The on-board supplies are on. `configure_peripherals(power=True)` drives **VREGEN** (RA0), which enables VR2 (3.3V) and VR3 (5V) together; the LED simply runs off VR2's output. |
+
+### MODE does not mean "in a protocol"
+
+This trips people up. The firmware sets `BP_LEDMODE = 1` in `binBB()` — the
+moment **binary mode** is entered — and it stays lit for the whole binary
+session, HiZ included. The "on when a protocol is active" behaviour belongs to
+`procMenu.c`, the **terminal** UI. Anything speaking the binary protocol, this
+library and dashboard included, sees MODE lit from the moment it connects.
+
+The firmware turns it **off** to signal trouble, and these are the cases worth
+knowing:
+
+- an SPI sniff that cannot keep up (`SPI.c`) — see [SPI](spi.md)
+- a UART overrun (`UART.c`)
+- the input buffer filling and a byte being dropped (`baseIO.c`)
+
+So **MODE going dark mid-session is a fault indication, not a mode change.**
+
+A **Bus Pirate v4** is different in kind, not just in layout: it drives its USB
+LED from firmware too (`BP_USBLED_*`). Read your own silkscreen.
+
+### The dashboard draws them
+
+The hook-up diagram lights the same LEDs on the board photograph, and the
+status bar carries a compact copy visible on every panel. USB is flashed from
+the traffic feed, matching the RXLED# pulse.
+
+**They are inferred, not measured.** No command reads LED state back, so the
+dashboard shows what the board *ought* to be doing. It is wrong in exactly the
+cases you most want to catch — the overruns above turn MODE off and the
+dashboard would still show it lit. **Trust the board over the picture.**
+
 ## The pull-up rail (VPU)
 
 The built-in pull-ups pull up to whatever voltage is on the **VPU** pin, so

@@ -2,6 +2,11 @@
 
 ## The port
 
+**Look at the board first.** The four LEDs along the top edge answer the first
+question for free: **PWR** dark is power or cable, **USB** dark with PWR lit is
+drivers or enumeration, and neither is a Bus Pirate fault. The full table is in
+[Pins & power](pins-and-power.md#the-four-leds).
+
 ### "no USB serial ports found"
 
 The Mac cannot see the adapter at all.

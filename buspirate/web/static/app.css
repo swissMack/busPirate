@@ -6,6 +6,8 @@
   --text: #dfe3ec;
   --muted: #8b93a7;
   --accent: #f0a11e;
+  --led-on: #39ff14;
+  --led-on-ink: #062b00;
   --good: #4ec98a;
   --warn: #f0714e;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
@@ -172,6 +174,24 @@ table.data td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line);
 .statusblock { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .usb { font-family: var(--mono); font-size: 11px; }
 .usb--gone { color: var(--warn); }
+
+/* The four board LEDs. Inferred from what we have asked the board to do, so
+   a dark one is deliberately flat rather than "off-looking but plausible". */
+.leds { display: flex; gap: 4px; }
+.leds .led {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.04em;
+  padding: 1px 4px; border-radius: 2px;
+  border: 1px solid var(--line); color: var(--muted); background: var(--bg-sunken);
+}
+.leds .led--on,
+.leds .led--flash {
+  border-color: var(--led-on); color: var(--led-on-ink);
+  background: var(--led-on); box-shadow: 0 0 6px var(--led-on);
+}
+/* The same four, drawn on the board photograph. */
+svg .led { fill: #2b2118; stroke: var(--muted); stroke-width: 1; opacity: 0.75; }
+svg .led--on,
+svg .led--flash { fill: var(--led-on); stroke: #eaffe4; stroke-width: 1.5; opacity: 1; }
 
 /* hookup diagram */
 .diagram { margin: 4px 0 2px; }

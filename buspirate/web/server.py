@@ -27,6 +27,7 @@ from .wiring import (
     BOARD_V3,
     CABLE_CARD,
     CABLE_CAVEAT,
+    LED_NOTE,
     REFCARD,
     SEEED_CABLE,
     SIGNAL_NOTES,
@@ -100,6 +101,7 @@ def create_app(
             "cable_card": CABLE_CARD,
             "board": BOARD_V3,
             "board_caveat": BOARD_CAVEAT,
+            "led_note": LED_NOTE,
         }
 
     @app.get("/api/ports")

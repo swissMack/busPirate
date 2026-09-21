@@ -128,6 +128,14 @@ BOARD_V3 = {
         "CS": [570, 311],
         "MISO": [599, 311],
     },
+    # The four indicator LEDs along the top edge, left to right, each sitting
+    # just above its own silkscreen label.
+    "leds": {
+        "PWR": [198, 98],
+        "USB": [300, 98],
+        "MODE": [402, 98],
+        "VREG": [505, 98],
+    },
     #: Which side of the header each column sits on, for label placement.
     "side": {
         "GND": "left", "+5V": "left", "VPU": "left", "CLK": "left", "CS": "left",
@@ -139,6 +147,13 @@ BOARD_V3 = {
 BOARD_CAVEAT = (
     "This is a Bus Pirate v3.6. The v4 is laid out differently — check the "
     "silkscreen next to your own header before trusting the positions."
+)
+
+LED_NOTE = (
+    "There is no command that reads the LEDs back, so these are inferred from "
+    "what the dashboard believes it has asked the board to do, not measured. "
+    "The firmware can change them on its own — an overrun sniff turns MODE "
+    "off — so trust the board over this picture."
 )
 
 CABLE_CAVEAT = (

@@ -207,6 +207,9 @@ class DeviceSession:
         self.port_info = None
         self.mode_name = None
         self._mode = None
+        # Whatever we drove the pins to is no longer true of the board, and
+        # keeping it would light VREG on the next connect.
+        self.last_pins = dict.fromkeys(self.last_pins, False)
 
     def _describe_port(self, device: str) -> Dict[str, Any]:
         """What USB discovery can tell us about one device path."""
@@ -243,6 +246,45 @@ class DeviceSession:
         )
         return dict(self.port_info or {"device": self.port}, attached=attached)
 
+    def _supplies_on(self) -> bool:
+        """Whether the last thing we told the board was 'supplies on'.
+
+        A protocol mode switches them through ``configure_peripherals``; the
+        pins panel goes round it with a bitbang ``set_pins``. Whichever spoke
+        last is the one to believe, and entering a mode resets the board's
+        peripheral bits, so an active mode wins.
+        """
+        if self._mode is not None:
+            return bool(self._mode.peripherals.get("power"))
+        return bool(self.last_pins.get("power"))
+
+    def leds(self) -> Dict[str, bool]:
+        """What the four indicator LEDs should be showing.
+
+        Inferred, never read: the binary protocol has no command that reports
+        LED state, so this is what the board ought to be doing given what we
+        have asked of it. The firmware can disagree — see ``LED_NOTE``.
+        """
+        live = self.bp is not None and self.bp.is_open
+        return {
+            # LED1 is wired VCC -> R2 -> LED -> GND, so it is lit whenever the
+            # board has power. An open port is the closest we can get.
+            "PWR": live,
+            # LED4 hangs off the FT232RL's RXLED# pin, which pulses on traffic
+            # and is dark at idle — never a steady state we could report. The
+            # dashboard flashes it from the traffic feed instead.
+            "USB": False,
+            # LED2 is GPIO RA1, and binBB() sets it as soon as binary mode is
+            # entered — which is what connecting does. It is *not* gated on a
+            # protocol mode: that logic lives in procMenu.c, the terminal UI
+            # the dashboard never uses. The firmware clears it on an overrun,
+            # which we cannot see.
+            "MODE": live,
+            # The on-board 3.3V and 5V supplies, switched together. Either a
+            # protocol mode or the pins panel can have been the one to do it.
+            "VREG": live and self._supplies_on(),
+        }
+
     def status(self) -> Dict[str, Any]:
         if self.bp is None or not self.bp.is_open:
             return {
@@ -250,10 +292,12 @@ class DeviceSession:
                 "simulated": self.use_fake,
                 "usb": {"attached": False},
                 "stream": None,
+                "leds": self.leds(),
             }
         profile = self.bp.profile
         return {
             "connected": True,
+            "leds": self.leds(),
             "simulated": self.use_fake,
             "port": self.port,
             "usb": self.usb_status(),

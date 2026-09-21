@@ -33,6 +33,16 @@ const settle = (ms = 400) => new Promise((r) => setTimeout(r, ms));
 window.eval(js);
 await settle();
 
+// The USB LED is a pulse, not a state, so watch for it rather than sampling.
+let usbFlashes = 0;
+new window.MutationObserver((records) => {
+  for (const r of records) {
+    if (r.target.dataset?.led === "USB" && r.target.classList.contains("led--flash")) usbFlashes++;
+  }
+}).observe(window.document.body, {
+  subtree: true, attributes: true, attributeFilter: ["class"],
+});
+
 const $ = (id) => window.document.getElementById(id);
 
 // --- before connecting
@@ -53,6 +63,17 @@ check("recipe strip appeared", !$("recipes").hidden && $("recipes").children.len
 
 // --- USB indicator
 check("USB indicator names the port", /USB: fake/.test($("usb").textContent), $("usb").textContent);
+
+// --- the indicator LEDs, inferred from what we have asked the board to do
+const leds = () => [...$("leds").children]
+  .map((n) => `${n.dataset.led}:${n.classList.contains("led--on") ? "on" : "off"}`)
+  .join(" ");
+check("LED strip names all four LEDs",
+  $("leds") && [...$("leds").children].map((n) => n.dataset.led).join(",") === "PWR,USB,MODE,VREG",
+  $("leds") ? leds() : "no #leds element");
+check("PWR and MODE light up once connected", /PWR:on/.test(leds()) && /MODE:on/.test(leds()), leds());
+check("VREG stays dark until the supplies are switched on", /VREG:off/.test(leds()), leds());
+check("USB is not steadily lit — it only flashes on traffic", /USB:off/.test(leds()), leds());
 
 // --- I2C panel
 const navButtons = [...$("nav").children];
@@ -80,6 +101,12 @@ check("only the pins this panel uses are called out",
 check("callouts sit outside the photo",
   boardSvg && boardSvg.getAttribute("viewBox").startsWith("-"),
   boardSvg && boardSvg.getAttribute("viewBox"));
+const ledMarks = boardSvg ? [...boardSvg.querySelectorAll("rect.led")] : [];
+check("all four LEDs are drawn on the board photo", ledMarks.length === 4, `${ledMarks.length}`);
+check("the LEDs sit along the top edge of the photo",
+  ledMarks.every((r) => Number(r.getAttribute("y")) < 120), ledMarks.map((r) => r.getAttribute("y")).join(","));
+check("the board photo says the LED states are inferred",
+  $("panel").textContent.includes("no command that reads the LEDs back"));
 
 const cards = $("panel").querySelectorAll(".card-img:not(.card-img--board)");
 check("both reference cards are drawn", cards.length === 2, `${cards.length}`);
@@ -99,6 +126,15 @@ await settle(800);
 const scanText = scan.querySelector(".result").textContent;
 check("scan found 0x50 and 0x68", scanText.includes("0x50") && scanText.includes("0x68"), scanText.slice(0, 80));
 check("scan names the EEPROM", scanText.includes("24Cxx EEPROM"));
+check("the MODE LED is still lit in a bus mode", /MODE:on/.test(leds()), leds());
+check("the VREG LED follows the supplies the scan switched on", /VREG:on/.test(leds()), leds());
+check("the USB LED flashed while the scan was talking to the board",
+  usbFlashes > 0, `${usbFlashes} flashes seen`);
+const boardLitCount = () =>
+  [...$("panel").querySelectorAll(".card-img--board rect.led")]
+    .filter((r) => r.classList.contains("led--on")).length;
+check("the LEDs on the board photo keep up with the status strip",
+  boardLitCount() === 3, `${boardLitCount()} of 3 lit on the photo`);
 
 // --- hex rendering
 const reg = $("panel").querySelector('[data-action="read_register"]');

@@ -13,6 +13,7 @@ const state = {
   cableCard: null,
   board: null,
   boardCaveat: "",
+  ledNote: "",
   current: localStorage.getItem("bp.panel") || null,
   guide: { open: false, pages: [], page: null },
   busy: false,
@@ -75,6 +76,7 @@ async function loadState() {
   state.cableCard = data.cable_card || null;
   state.board = data.board || null;
   state.boardCaveat = data.board_caveat || "";
+  state.ledNote = data.led_note || "";
   if (!state.panels.some((p) => p.id === state.current)) {
     state.current = state.panels.length ? state.panels[0].id : null;
   }
@@ -105,6 +107,59 @@ function renderStatus() {
       (s.stream ? ` · ${s.stream.kind} running` : s.mode ? " · " + s.mode : "")
     : "Not connected";
   renderUsb(s.usb || { attached: false });
+  renderLeds(s.leds || {});
+}
+
+/* The four indicator LEDs along the top of the board. Inferred, not read —
+   see state.ledNote, which the hook-up diagram prints in full. */
+const LED_ORDER = ["PWR", "USB", "MODE", "VREG"];
+const LED_MEANS = {
+  PWR: "USB power is reaching the board",
+  USB: "the port is open",
+  MODE: "a bus mode is active — dark in HiZ",
+  VREG: "the on-board 3.3V and 5V supplies are on",
+};
+
+/* LED4 is the FT232RL's RXLED# pin: a pulse on traffic, not a state. So it is
+   driven from the traffic feed rather than from the status the server sends,
+   which always reports USB dark. */
+let usbFlashTimer = null;
+
+function flashUsbLed() {
+  const marks = [...document.querySelectorAll('[data-led="USB"]')];
+  if (!marks.length) return;
+  for (const mark of marks) mark.classList.add("led--flash");
+  clearTimeout(usbFlashTimer);
+  usbFlashTimer = setTimeout(() => {
+    for (const mark of marks) mark.classList.remove("led--flash");
+  }, 120);
+}
+
+function renderLeds(leds) {
+  // The board photo is drawn once per panel render, which does not happen on
+  // every status push — so repaint its LEDs in place rather than leaving a
+  // picture that disagrees with the strip beside it.
+  for (const rect of document.querySelectorAll(".card-img--board rect.led")) {
+    const name = rect.dataset.led;
+    const on = leds[name] === true;
+    rect.classList.toggle("led--on", on);
+    const title = rect.querySelector("title");
+    if (title) title.textContent = `${name}: ${on ? "lit" : "dark"} — ${LED_MEANS[name]}`;
+  }
+
+  const box = $("leds");
+  if (!box) return;
+  box.replaceChildren(
+    ...LED_ORDER.map((name) => {
+      const on = leds[name] === true;
+      return el("span", {
+        class: on ? "led led--on" : "led",
+        "data-led": name,
+        text: name,
+        title: `${name}: ${on ? "lit" : "dark"} — ${LED_MEANS[name]}`,
+      });
+    })
+  );
 }
 
 function renderUsb(usb) {
@@ -458,6 +513,7 @@ let logCount = 0;
 
 function addLogLine(event) {
   if (event.type !== "traffic") return;
+  flashUsbLed();
   const lines = $("log-lines");
   lines.append(
     el(
@@ -678,6 +734,20 @@ function boardDiagram(panel) {
     );
   }
 
+  // The indicator LEDs, drawn as the rectangles they physically are so the
+  // ten round pin rings above stay the only circles on the picture.
+  const lit = state.status.leds || {};
+  for (const [name, [x, y]] of Object.entries(board.leds || {})) {
+    const on = lit[name] === true;
+    marks.push(
+      svg("rect", {
+        x: x - 9, y: y - 6, width: 18, height: 12, rx: 2,
+        class: on ? "led led--on" : "led",
+        "data-led": name,
+      }, svg("title", {}, `${name}: ${on ? "lit" : "dark"} — ${LED_MEANS[name]}`))
+    );
+  }
+
   return svg(
     "svg",
     { viewBox: `${-left} 0 ${width} ${board.height}`, width, height: board.height,
@@ -709,6 +779,7 @@ function hookupDiagram(panel) {
     el("div", { class: "diagram__cards" }, refcardDiagram(panel), cableDiagram(panel)),
     el("p", { class: "caption", text: `${board} · ${columnNote}` }),
     el("p", { class: "caption", text: state.cableCaveat }),
+    el("p", { class: "caption", text: `LEDs — ${state.ledNote}` }),
     el("p", {
       class: "caption credit",
       text: "Reference cards: Dangerous Prototypes wiki (dangerousprototypes.com), CC BY-SA.",

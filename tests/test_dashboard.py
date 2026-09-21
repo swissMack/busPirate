@@ -420,3 +420,113 @@ def test_the_board_photo_is_served(client):
 def test_the_board_caveat_names_the_variant(client):
     caveat = client.get("/api/state").json()["board_caveat"]
     assert "v3.6" in caveat and "v4" in caveat
+
+
+# -- the indicator LEDs ----------------------------------------------------
+
+
+def test_the_board_geometry_places_all_four_leds(client):
+    board = client.get("/api/state").json()["board"]
+    assert set(board["leds"]) == {"PWR", "USB", "MODE", "VREG"}
+    for name, (x, y) in board["leds"].items():
+        assert 0 < x < board["width"], name
+        assert 0 < y < board["height"], name
+
+
+def test_the_leds_sit_in_one_row_left_to_right(client):
+    leds = client.get("/api/state").json()["board"]["leds"]
+    ys = {y for _, y in leds.values()}
+    assert len(ys) == 1
+    order = [n for n, _ in sorted(leds.items(), key=lambda kv: kv[1][0])]
+    assert order == ["PWR", "USB", "MODE", "VREG"]
+
+
+def test_every_led_is_dark_before_the_device_is_connected(client):
+    leds = client.get("/api/state").json()["status"]["leds"]
+    assert leds == {"PWR": False, "USB": False, "MODE": False, "VREG": False}
+
+
+def test_connecting_lights_power_and_mode_but_not_vreg(client):
+    # binBB() in the firmware sets BP_LEDMODE = 1 the moment binary mode is
+    # entered, which is what connecting does — so MODE is lit from connect,
+    # not from entering a protocol.
+    connect(client)
+    leds = client.get("/api/state").json()["status"]["leds"]
+    assert leds["PWR"] is True
+    assert leds["MODE"] is True
+    assert leds["VREG"] is False
+
+
+def test_the_usb_led_is_never_steadily_lit(client):
+    # It is the FT232RL's RXLED# pin, which pulses on traffic and is dark at
+    # idle. The dashboard flashes it client-side instead.
+    connect(client)
+    assert client.get("/api/state").json()["status"]["leds"]["USB"] is False
+
+
+def test_the_mode_led_stays_lit_in_a_bus_mode(client):
+    connect(client)
+    status, body = run(client, "i2c", "scan", power=True, pullups=True, speed=2)
+    assert status == 200, body
+    assert client.get("/api/state").json()["status"]["leds"]["MODE"] is True
+
+
+def test_the_mode_led_stays_lit_with_no_protocol_mode(client):
+    # The pins panel drops back to bitbang, which is still binary mode.
+    connect(client)
+    run(client, "pins", "set_pins", power=False, pullups=False,
+        aux=False, mosi=False, clk=False, miso=False, cs=False)
+    state = client.get("/api/state").json()["status"]
+    assert state["mode"] is None
+    assert state["leds"]["MODE"] is True
+
+
+def test_switching_the_supplies_on_lights_the_vreg_led(client):
+    connect(client)
+    status, body = run(
+        client, "pins", "set_pins", power=True, pullups=False,
+        aux=False, mosi=False, clk=False, miso=False, cs=False,
+    )
+    assert status == 200, body
+    assert client.get("/api/state").json()["status"]["leds"]["VREG"] is True
+
+
+def test_switching_the_supplies_off_again_darkens_the_vreg_led(client):
+    connect(client)
+    status, body = run(client, "pins", "set_pins", power=True, pullups=False,
+                       aux=False, mosi=False, clk=False, miso=False, cs=False)
+    assert status == 200, body
+    assert client.get("/api/state").json()["status"]["leds"]["VREG"] is True
+    status, body = run(client, "pins", "set_pins", power=False, pullups=False,
+                       aux=False, mosi=False, clk=False, miso=False, cs=False)
+    assert status == 200, body
+    assert client.get("/api/state").json()["status"]["leds"]["VREG"] is False
+
+
+def test_the_led_caveat_says_the_states_are_inferred(client):
+    note = client.get("/api/state").json()["led_note"]
+    assert "cannot" in note.lower() or "no command" in note.lower()
+
+
+def test_reconnecting_does_not_carry_the_old_vreg_state_over(client):
+    connect(client)
+    run(client, "pins", "set_pins", power=True, pullups=False,
+        aux=False, mosi=False, clk=False, miso=False, cs=False)
+    status, body = run(client, "connection", "disconnect")
+    assert status == 200, body
+    connect(client)
+    assert client.get("/api/state").json()["status"]["leds"]["VREG"] is False
+
+
+def test_a_protocol_panel_powering_the_target_lights_vreg(client):
+    connect(client)
+    status, body = run(client, "i2c", "scan", power=True, pullups=True, speed=2)
+    assert status == 200, body
+    assert client.get("/api/state").json()["status"]["leds"]["VREG"] is True
+
+
+def test_a_protocol_panel_leaving_the_power_off_keeps_vreg_dark(client):
+    connect(client)
+    status, body = run(client, "i2c", "scan", power=False, pullups=True, speed=2)
+    assert status == 200, body
+    assert client.get("/api/state").json()["status"]["leds"]["VREG"] is False
