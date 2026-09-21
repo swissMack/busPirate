@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from ... import device as device_module
-from ...i2c import I2C
+from ...i2c import (
+    AUX_HIGH,
+    AUX_HIZ,
+    AUX_LOW,
+    AUX_READ,
+    AUX_USE_AUX,
+    AUX_USE_CS,
+    I2C,
+)
 from ..registry import Action, Panel, Param, Wire, chips, hexdump, live, text
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, PULLUP_RAIL_NOTE, colour
 
@@ -143,9 +151,9 @@ _AUX_LEVELS = [
     {"value": "read", "label": "Read"},
 ]
 
-# Sub-command bytes from Firmware/I2C.c:935.
-_AUX_SELECT = {"aux": 0x10, "cs": 0x20}
-_AUX_ACTION = {"low": 0x00, "high": 0x01, "hiz": 0x02, "read": 0x03}
+# Sub-command bytes from Firmware/I2C.c:935, named in buspirate/i2c.py.
+_AUX_SELECT = {"aux": AUX_USE_AUX, "cs": AUX_USE_CS}
+_AUX_ACTION = {"low": AUX_LOW, "high": AUX_HIGH, "hiz": AUX_HIZ, "read": AUX_READ}
 
 
 def _extended_aux(ctx, pin, level):

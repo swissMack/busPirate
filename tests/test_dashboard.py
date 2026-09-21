@@ -560,7 +560,7 @@ def test_a_protocol_panel_leaving_the_power_off_keeps_vreg_dark(client):
     assert client.get("/api/state").json()["status"]["leds"]["VREG"] is False
 
 
-def test_the_led_rules_cover_every_led_on_every_board(client):
+def test_the_led_rules_cover_every_led_on_every_board():
     from buspirate.web.wiring import BOARDS, LED_RULES
 
     for variant, board in BOARDS.items():
@@ -657,18 +657,25 @@ def test_disconnecting_clears_the_override(client):
     assert state["variant_source"] == "detected"
 
 
+def test_set_variant_works_while_a_stream_is_running(client):
+    # It only sets a display field, never touches the port, so it must not be
+    # refused the way an action that does need the port would be.
+    connect(client)
+    status, body = run(client, "i2c", "sniff", power=False, pullups=False, speed=2)
+    assert status == 200, body
+    status, body = run(client, "connection", "set_variant", variant="v4")
+    assert status == 200, body
+    state = client.get("/api/state").json()
+    assert state["variant"] == "v4"
+    assert state["variant_source"] == "override"
+
+
 def test_the_board_served_follows_the_detected_variant(client):
     connect(client)
     body = client.get("/api/state").json()
     assert body["board"]["label"] == (
         "Bus Pirate v4.0" if client.variant == "v4" else "Bus Pirate v3.6"
     )
-
-
-def test_a_v4_is_served_the_v4_board(client):
-    connect(client)
-    label = client.get("/api/state").json()["board"]["label"]
-    assert label == ("Bus Pirate v4.0" if client.variant == "v4" else "Bus Pirate v3.6")
 
 
 def test_the_aux_control_is_offered_on_v4_only(client):

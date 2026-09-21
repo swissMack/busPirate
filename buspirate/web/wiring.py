@@ -170,7 +170,7 @@ _BOARD_V4 = {
     "gutter_left": 290,
     "label": "Bus Pirate v4.0",
     # Twelve pins: the v4 header is a 2x6, not the v3's 2x5, and it carries
-    # three AUX lines. Confirmed against hardware/v4/BusPirate-v4.brd.png and
+    # three AUX lines. Confirmed against hardware/v4/BusPirate-v4e.brd.png and
     # the firmware's own pin list in procMenu.c.
     "pins": {
         "GND": [525, 220],

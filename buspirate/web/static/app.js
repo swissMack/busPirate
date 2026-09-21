@@ -13,6 +13,7 @@ const state = {
   cableCard: null,
   board: null,
   boardCaveat: "",
+  boardPinNotes: {},
   ledNote: "",
   variant: null,
   variantDetected: null,
@@ -81,6 +82,7 @@ async function loadState() {
   state.cableCard = data.cable_card || null;
   state.board = data.board || null;
   state.boardCaveat = data.board_caveat || "";
+  state.boardPinNotes = data.board_pin_notes || {};
   state.ledNote = data.led_note || "";
   state.variant = data.variant;
   state.variantDetected = data.variant_detected;
@@ -641,16 +643,26 @@ $("log-toggle").addEventListener("click", (event) => {
   event.target.textContent = log.classList.contains("collapsed") ? "Show" : "Hide";
 });
 $("variant").addEventListener("change", async (event) => {
-  await api("/api/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      panel: "connection",
-      action: "set_variant",
-      params: { variant: event.target.value },
-    }),
-  });
-  await loadState();
+  try {
+    await api("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        panel: "connection",
+        action: "set_variant",
+        params: { variant: event.target.value },
+      }),
+    });
+    await loadState();
+  } catch (error) {
+    // Nothing changed server-side, so state is still accurate — resync the
+    // select to it rather than leaving it showing the pick that failed, and
+    // surface the failure the way other action failures do.
+    renderVariant();
+    const warning = $("variant-warning");
+    warning.hidden = false;
+    warning.textContent = error.message;
+  }
 });
 
 refreshPorts();
@@ -759,6 +771,9 @@ function boardDiagram(panel) {
     const wire = byTarget.get(signal);
     const onRight = board.side[signal] === "right";
     const colour = wire ? "var(--accent)" : "var(--muted)";
+    // Pins the probe cable has no note for (the v4's AUX1/AUX2) still get one
+    // here, so it reaches the user even when the pin renders unlabelled grey.
+    const note = state.boardPinNotes[signal];
 
     marks.push(
       svg("circle", {
@@ -766,7 +781,7 @@ function boardDiagram(panel) {
         fill: "none", stroke: colour,
         "stroke-width": wire ? 3.5 : 1.5,
         "stroke-opacity": wire ? 1 : 0.4,
-      })
+      }, note ? svg("title", {}, `${signal}: ${note}`) : null)
     );
     if (!wire) continue;
 
@@ -813,11 +828,15 @@ function boardDiagram(panel) {
 }
 
 function hookupDiagram(panel) {
-  const board = state.status.variant === "v4" ? "Bus Pirate v4" : "Bus Pirate v3";
+  // state.variant is the EFFECTIVE variant — override if one is set,
+  // otherwise the detected board — which is what state.board and the rest of
+  // this page are drawn from. state.status.variant is the raw detected
+  // hardware and disagrees with the photo whenever an override is active or
+  // nothing is connected, so it must not drive the caption.
+  const board = state.variant === "v4" ? "Bus Pirate v4" : "Bus Pirate v3";
   const columnNote = panel.refcard_column
     ? `Highlighted: the ${panel.refcard_column} column — what each probe wire becomes on this bus.`
     : "Highlighted: the pins this panel drives.";
-  const mismatch = state.status.variant === "v4" && state.board;
   return el(
     "div",
     { class: "diagram" },
@@ -825,9 +844,7 @@ function hookupDiagram(panel) {
     panel.wiring.length
       ? el("p", {
           class: "caption",
-          text: mismatch
-            ? `Photo is a ${state.board.label}. ${state.boardCaveat}`
-            : `${state.board ? state.board.label : board} — the ringed pins are the ones this panel uses.`,
+          text: `${state.board ? state.board.label : board} — the ringed pins are the ones this panel uses.`,
         })
       : null,
     el("div", { class: "diagram__cards" }, refcardDiagram(panel), cableDiagram(panel)),

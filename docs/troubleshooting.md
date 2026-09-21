@@ -149,5 +149,8 @@ time you use real hardware, and a bug report here if they are wrong:
 - [ ] v4: the measured LED and pin coordinates land on the real parts
 - [ ] v4: AUX and CS actually move from the I2C panel's "Drive AUX or CS"
 - [ ] v4: AUX1 and AUX2 stay inert — nothing in the dashboard should move them
+- [ ] v4: extended AUX's `read` sub-command (`0x03`) reply is the pin state
+      (0 or 1), not an ack — every other sub-command replies `0x01`. Taken
+      from a reading of the firmware, not observed on hardware.
 - [ ] v3: the LED model — MODE lit from connect, USB flickering on traffic,
       VREG following the supplies

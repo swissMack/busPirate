@@ -123,6 +123,13 @@ check("switching to v4 redraws the diagram with the v4 board",
 check("the v4 header shows twelve pins",
   $("panel").querySelectorAll(".card-img--board circle").length === 12,
   `${$("panel").querySelectorAll(".card-img--board circle").length}`);
+// Regression check: the caption used to read the DETECTED variant rather
+// than the effective one, so it kept saying "Bus Pirate v3" under a v4
+// photo whenever an override was active.
+const v4Captions = [...$("panel").querySelectorAll(".caption")].map((p) => p.textContent).join(" | ");
+check("the caption under the v4 photo names the v4 board, not v3",
+  v4Captions.includes("Bus Pirate v4.0") && !v4Captions.includes("Bus Pirate v3.6"),
+  v4Captions);
 check("overriding onto the wrong board warns", !$("variant-warning").hidden);
 $("variant").value = "v3";
 $("variant").dispatchEvent(new window.Event("change"));

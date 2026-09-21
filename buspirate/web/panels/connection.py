@@ -134,14 +134,20 @@ PANEL = Panel(
                     "enum",
                     "Board to show",
                     default="auto",
+                    # Derived from BOARDS rather than hardcoded, so a future
+                    # entry there is offered here instead of being accepted
+                    # by the select and then rejected by the coercer.
                     choices=[
                         {"value": "auto", "label": "Follow the connected board"},
-                        {"value": "v3", "label": "Bus Pirate v3"},
-                        {"value": "v4", "label": "Bus Pirate v4"},
+                        *(
+                            {"value": variant, "label": BOARDS[variant]["label"]}
+                            for variant in sorted(BOARDS)
+                        ),
                     ],
                 ),
             ],
             handler=_set_variant,
+            allow_while_streaming=True,
         ),
         Action(
             name="legend",

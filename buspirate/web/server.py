@@ -83,6 +83,17 @@ def create_app(
     async def state() -> Dict[str, Any]:
         variant = session.effective_variant()
         board = BOARDS[variant]
+        # Signals the probe cable already carries a note for elsewhere (the
+        # cable legend); board pins outside that set — currently only the v4's
+        # AUX1/AUX2 — have nowhere else to surface SIGNAL_NOTES, so pipe those
+        # through here instead. Keeps the v3 response unchanged, since every
+        # v3 pin is one of the ten cable signals.
+        cable_signals = {signal for signal, _, _ in SEEED_CABLE}
+        board_pin_notes = {
+            signal: SIGNAL_NOTES[signal]
+            for signal in board["pins"]
+            if signal in SIGNAL_NOTES and signal not in cable_signals
+        }
         return {
             "status": session.status(),
             "panels": _panels_json(),
@@ -103,6 +114,7 @@ def create_app(
             "cable_card": CABLE_CARD,
             "board": board,
             "board_caveat": board["caveat"],
+            "board_pin_notes": board_pin_notes,
             "variant": variant,
             "variant_detected": session.detected_variant(),
             "variant_source": session.variant_source(),
