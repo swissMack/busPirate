@@ -150,9 +150,60 @@ _BOARD_V3 = {
     ),
 }
 
+# Pixel geometry of static/img/board-v4.jpg (700x525), measured from the file
+# with sips crops and a brightness profile across the header and the LED strip.
+#
+# The IO header is a 2x6 on 0.1" pitch. Its columns fall on x=525 and x=545 and
+# its rows on y=220..325 in steps of 21. Left column top to bottom is
+# GND, +3.3V, ADC, AUX1, CS, CLK; right column is +5V, VPU, AUX2, AUX,
+# MISO, MOSI. The four LEDs sit on y=134, each directly above its silkscreen
+# label: PWR 193, USB 280, MODE 367, VREG 453.
+_BOARD_V4 = {
+    "image": "/static/img/board-v4.jpg",
+    "width": 700,
+    "height": 525,
+    "gutter": 290,
+    "gutter_left": 290,
+    "label": "Bus Pirate v4.0",
+    # Twelve pins: the v4 header is a 2x6, not the v3's 2x5, and it carries
+    # three AUX lines. Confirmed against hardware/v4/BusPirate-v4.brd.png and
+    # the firmware's own pin list in procMenu.c.
+    "pins": {
+        "GND": [525, 220],
+        "+5V": [545, 220],
+        "+3.3V": [525, 241],
+        "VPU": [545, 241],
+        "ADC": [525, 262],
+        "AUX2": [545, 262],
+        "AUX1": [525, 283],
+        "AUX": [545, 283],
+        "CS": [525, 304],
+        "MISO": [545, 304],
+        "CLK": [525, 325],
+        "MOSI": [545, 325],
+    },
+    "leds": {
+        "PWR": [193, 134],
+        "USB": [280, 134],
+        "MODE": [367, 134],
+        "VREG": [453, 134],
+    },
+    "side": {
+        "GND": "left", "+3.3V": "left", "ADC": "left",
+        "AUX1": "left", "CS": "left", "CLK": "left",
+        "+5V": "right", "VPU": "right", "AUX2": "right",
+        "AUX": "right", "MISO": "right", "MOSI": "right",
+    },
+    "caveat": (
+        "This is a Bus Pirate v4.0. Its header is a 2x6 with three AUX lines, "
+        "not the v3's 2x5 \u2014 check the silkscreen next to your own header "
+        "before trusting the positions."
+    ),
+}
+
 #: Board geometry by variant. The dashboard serves one of these, chosen by
 #: DeviceSession.effective_variant().
-BOARDS: Dict[str, Dict[str, Any]] = {"v3": _BOARD_V3}
+BOARDS: Dict[str, Dict[str, Any]] = {"v3": _BOARD_V3, "v4": _BOARD_V4}
 
 #: What to present when nothing is connected, or the banner was unreadable.
 DEFAULT_VARIANT = "v3"

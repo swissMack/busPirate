@@ -417,6 +417,34 @@ def test_the_board_photo_is_served(client):
     assert response.content[:4] == b"\x89PNG"
 
 
+def test_the_v4_photo_is_served(client):
+    response = client.get("/static/img/board-v4.jpg")
+    assert response.status_code == 200
+    assert response.content[:3] == b"\xff\xd8\xff"  # JPEG magic
+
+
+def test_the_v4_header_is_a_two_by_six_with_three_aux_lines():
+    from buspirate.web.wiring import BOARDS
+
+    pins = BOARDS["v4"]["pins"]
+    assert len(pins) == 12
+    assert {"AUX", "AUX1", "AUX2"} <= set(pins)
+    rows = {}
+    for signal, (x, y) in pins.items():
+        rows.setdefault(y, []).append(signal)
+    assert len(rows) == 6
+    assert all(len(v) == 2 for v in rows.values())
+
+
+def test_every_board_pin_sits_inside_its_image():
+    from buspirate.web.wiring import BOARDS
+
+    for variant, board in BOARDS.items():
+        for signal, (x, y) in {**board["pins"], **board["leds"]}.items():
+            assert 0 < x < board["width"], (variant, signal)
+            assert 0 < y < board["height"], (variant, signal)
+
+
 def test_the_board_caveat_names_the_variant(client):
     caveat = client.get("/api/state").json()["board_caveat"]
     assert "v3.6" in caveat and "v4" in caveat
@@ -552,13 +580,20 @@ def test_the_v3_usb_led_is_traffic_driven_and_the_v4_one_is_not():
 def test_the_led_note_is_per_variant(client):
     connect(client)
     note = client.get("/api/state").json()["led_note"]
-    assert "cannot" in note.lower() or "no command" in note.lower()
+    assert "no command" in note.lower()
+    # The two notes share a prefix, so assert the tail that diverges.
+    if client.variant == "v4":
+        assert "goes dark once" in note and "enumerated" in note
+        assert "FT232RL" not in note
+    else:
+        assert "FT232RL" in note and "receive" in note
+        assert "enumerated" not in note
 
 
 def test_the_board_registry_is_keyed_by_variant():
     from buspirate.web.wiring import BOARDS
 
-    assert set(BOARDS) == {"v3"}
+    assert set(BOARDS) == {"v3", "v4"}
     board = BOARDS["v3"]
     assert board["label"] == "Bus Pirate v3.6"
     assert len(board["pins"]) == 10
@@ -572,17 +607,10 @@ def test_the_board_registry_is_keyed_by_variant():
 def test_the_state_reports_the_detected_variant(client):
     connect(client)
     body = client.get("/api/state").json()
-    if client.variant == "v3":
-        assert body["variant"] == client.variant
-        assert body["variant_detected"] == client.variant
-        assert body["variant_source"] == "detected"
-    else:
-        # "v4" isn't in BOARDS yet — that's Task 5 — so detected_variant()'s
-        # guard filters it out and the session falls back to the default.
-        assert body["variant"] == "v3"
-        assert body["variant_detected"] is None
-        assert body["variant_source"] == "default"
-    assert body["variants"] == ["v3"]
+    assert body["variant"] == client.variant
+    assert body["variant_detected"] == client.variant
+    assert body["variant_source"] == "detected"
+    assert body["variants"] == ["v3", "v4"]
 
 
 def test_an_unconnected_dashboard_defaults_to_v3_and_says_so(client):
@@ -599,12 +627,7 @@ def test_overriding_the_variant_changes_what_is_served(client):
     state = client.get("/api/state").json()
     assert state["variant"] == "v3"
     assert state["variant_source"] == "override"
-    if client.variant == "v3":
-        assert state["variant_detected"] == client.variant
-    else:
-        # "v4" isn't in BOARDS yet — detected_variant() filters it out
-        # regardless of what the override says.
-        assert state["variant_detected"] is None
+    assert state["variant_detected"] == client.variant
 
 
 def test_auto_restores_detection(client):
@@ -613,13 +636,8 @@ def test_auto_restores_detection(client):
     status, body = run(client, "connection", "set_variant", variant="auto")
     assert status == 200, body
     state = client.get("/api/state").json()
-    if client.variant == "v3":
-        assert state["variant"] == client.variant
-        assert state["variant_source"] == "detected"
-    else:
-        # v4 isn't in BOARDS yet, so detection falls back to the default.
-        assert state["variant"] == "v3"
-        assert state["variant_source"] == "default"
+    assert state["variant"] == client.variant
+    assert state["variant_source"] == "detected"
 
 
 def test_an_unknown_variant_is_refused_in_a_sentence(client):
@@ -636,14 +654,18 @@ def test_disconnecting_clears_the_override(client):
     run(client, "connection", "disconnect")
     connect(client)
     state = client.get("/api/state").json()
-    if client.variant == "v3":
-        assert state["variant_source"] == "detected"
-    else:
-        assert state["variant_source"] == "default"
+    assert state["variant_source"] == "detected"
 
 
 def test_the_board_served_follows_the_detected_variant(client):
     connect(client)
     body = client.get("/api/state").json()
-    if client.variant == "v3":
-        assert body["board"]["label"] == "Bus Pirate v3.6"
+    assert body["board"]["label"] == (
+        "Bus Pirate v4.0" if client.variant == "v4" else "Bus Pirate v3.6"
+    )
+
+
+def test_a_v4_is_served_the_v4_board(client):
+    connect(client)
+    label = client.get("/api/state").json()["board"]["label"]
+    assert label == ("Bus Pirate v4.0" if client.variant == "v4" else "Bus Pirate v3.6")
