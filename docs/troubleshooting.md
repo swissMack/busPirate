@@ -3,8 +3,11 @@
 ## The port
 
 **Look at the board first.** The four LEDs along the top edge answer the first
-question for free: **PWR** dark is power or cable, **USB** dark with PWR lit is
-drivers or enumeration, and neither is a Bus Pirate fault. The full table is in
+question for free, and neither result is a Bus Pirate fault: **PWR** dark is
+power or cable, on either board. **USB** dark with PWR lit means drivers or
+enumeration **on a v3** — but on a **v4** it's firmware-driven and goes out
+once enumeration completes, so dark there is the healthy state, not a
+symptom. The full table is in
 [Pins & power](pins-and-power.md#the-four-leds).
 
 ### "no USB serial ports found"
