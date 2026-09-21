@@ -532,6 +532,29 @@ def test_a_protocol_panel_leaving_the_power_off_keeps_vreg_dark(client):
     assert client.get("/api/state").json()["status"]["leds"]["VREG"] is False
 
 
+def test_the_led_rules_cover_every_led_on_every_board(client):
+    from buspirate.web.wiring import BOARDS, LED_RULES
+
+    for variant, board in BOARDS.items():
+        assert set(LED_RULES[variant]) == set(board["leds"]), variant
+        for name, rule in LED_RULES[variant].items():
+            assert rule["driver"] in {"hardware", "firmware"}, (variant, name)
+            assert rule["means"], (variant, name)
+
+
+def test_the_v3_usb_led_is_traffic_driven_and_the_v4_one_is_not():
+    from buspirate.web.wiring import LED_RULES
+
+    assert LED_RULES["v3"]["USB"]["inference"] == "flash_on_traffic"
+    assert LED_RULES["v4"]["USB"]["inference"] == "always_dark"
+
+
+def test_the_led_note_is_per_variant(client):
+    connect(client)
+    note = client.get("/api/state").json()["led_note"]
+    assert "cannot" in note.lower() or "no command" in note.lower()
+
+
 def test_the_board_registry_is_keyed_by_variant():
     from buspirate.web.wiring import BOARDS
 

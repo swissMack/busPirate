@@ -20,7 +20,7 @@ from ..exceptions import BusPirateError, ModeError
 from ..ports import discover, resolve
 from .decoders import make_decoder
 from .registry import Action, Panel, load_panels
-from .wiring import BOARDS, DEFAULT_VARIANT
+from .wiring import BOARDS, DEFAULT_VARIANT, LED_RULES
 
 TRAFFIC_HISTORY = 500
 STREAM_EVENT_CAP = 200  # events per websocket message
@@ -266,31 +266,22 @@ class DeviceSession:
         return bool(self.last_pins.get("power"))
 
     def leds(self) -> Dict[str, bool]:
-        """What the four indicator LEDs should be showing.
+        """What the indicator LEDs should be showing, for the shown variant.
 
-        Inferred, never read: the binary protocol has no command that reports
-        LED state, so this is what the board ought to be doing given what we
-        have asked of it. The firmware can disagree — see ``LED_NOTE``.
+        Inferred, never read: no command reports LED state. See LED_NOTES.
         """
         live = self.bp is not None and self.bp.is_open
-        return {
-            # LED1 is wired VCC -> R2 -> LED -> GND, so it is lit whenever the
-            # board has power. An open port is the closest we can get.
-            "PWR": live,
-            # LED4 hangs off the FT232RL's RXLED# pin, which pulses on traffic
-            # and is dark at idle — never a steady state we could report. The
-            # dashboard flashes it from the traffic feed instead.
-            "USB": False,
-            # LED2 is GPIO RA1, and binBB() sets it as soon as binary mode is
-            # entered — which is what connecting does. It is *not* gated on a
-            # protocol mode: that logic lives in procMenu.c, the terminal UI
-            # the dashboard never uses. The firmware clears it on an overrun,
-            # which we cannot see.
-            "MODE": live,
-            # The on-board 3.3V and 5V supplies, switched together. Either a
-            # protocol mode or the pins panel can have been the one to do it.
-            "VREG": live and self._supplies_on(),
-        }
+        rules = LED_RULES[self.effective_variant()]
+        state = {}
+        for name, rule in rules.items():
+            how = rule["inference"]
+            if how == "supplies":
+                state[name] = live and self._supplies_on()
+            elif how in {"powered", "connected"}:
+                state[name] = live
+            else:  # flash_on_traffic, always_dark
+                state[name] = False
+        return state
 
     def detected_variant(self) -> Optional[str]:
         """What the banner said, or None if nothing is connected."""

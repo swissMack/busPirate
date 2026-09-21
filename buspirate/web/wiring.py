@@ -157,12 +157,77 @@ BOARDS: Dict[str, Dict[str, Any]] = {"v3": _BOARD_V3}
 #: What to present when nothing is connected, or the banner was unreadable.
 DEFAULT_VARIANT = "v3"
 
-LED_NOTE = (
+#: What drives each LED, and how the dashboard should infer its state.
+#:
+#: ``inference`` is one of:
+#:   "powered"          — lit whenever the port is open
+#:   "connected"        — lit whenever the port is open (binary mode entered)
+#:   "supplies"         — follows the on-board 3.3V/5V regulators
+#:   "flash_on_traffic" — a pulse the client drives from the traffic feed
+#:   "always_dark"      — never reported lit
+LED_RULES: Dict[str, Dict[str, Dict[str, str]]] = {
+    "v3": {
+        "PWR": {
+            "driver": "hardware",
+            "inference": "powered",
+            "means": "USB power is reaching the board",
+        },
+        "USB": {
+            "driver": "hardware",
+            "inference": "flash_on_traffic",
+            "means": "data arriving from the host — the FT232RL's RXLED#",
+        },
+        "MODE": {
+            "driver": "firmware",
+            "inference": "connected",
+            "means": "binary mode is active — the firmware clears it on an overrun",
+        },
+        "VREG": {
+            "driver": "hardware",
+            "inference": "supplies",
+            "means": "the on-board 3.3V and 5V supplies are on",
+        },
+    },
+    "v4": {
+        "PWR": {
+            "driver": "hardware",
+            "inference": "powered",
+            "means": "USB power is reaching the board",
+        },
+        "USB": {
+            "driver": "firmware",
+            "inference": "always_dark",
+            "means": "lit only while enumerating — dark once configured, "
+            "which is the healthy state",
+        },
+        "MODE": {
+            "driver": "firmware",
+            "inference": "connected",
+            "means": "binary mode is active — the firmware clears it on an overrun",
+        },
+        "VREG": {
+            "driver": "hardware",
+            "inference": "supplies",
+            "means": "the on-board 3.3V and 5V supplies are on",
+        },
+    },
+}
+
+_LED_NOTE_COMMON = (
     "There is no command that reads the LEDs back, so these are inferred from "
     "what the dashboard believes it has asked the board to do, not measured. "
-    "The firmware can change them on its own — an overrun sniff turns MODE "
-    "off — so trust the board over this picture."
+    "The firmware can change them on its own — an overrun turns MODE off — so "
+    "trust the board over this picture."
 )
+
+LED_NOTES: Dict[str, str] = {
+    "v3": _LED_NOTE_COMMON
+    + " On a v3 only MODE is software-driven; USB is the FT232RL's receive "
+    "indicator and flickers on traffic.",
+    "v4": _LED_NOTE_COMMON
+    + " On a v4 both MODE and USB are software-driven, and USB goes dark once "
+    "the board has enumerated — dark is the healthy state, not a fault.",
+}
 
 CABLE_CAVEAT = (
     "Colours and pin order are the Seeed/Adafruit cable, which is the "
