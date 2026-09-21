@@ -569,6 +569,56 @@ def test_an_unconnected_dashboard_defaults_to_v3_and_says_so(client):
     assert body["variant_source"] == "default"
 
 
+def test_overriding_the_variant_changes_what_is_served(client):
+    connect(client)
+    status, body = run(client, "connection", "set_variant", variant="v3")
+    assert status == 200, body
+    state = client.get("/api/state").json()
+    assert state["variant"] == "v3"
+    assert state["variant_source"] == "override"
+    if client.variant == "v3":
+        assert state["variant_detected"] == client.variant
+    else:
+        # "v4" isn't in BOARDS yet — detected_variant() filters it out
+        # regardless of what the override says.
+        assert state["variant_detected"] is None
+
+
+def test_auto_restores_detection(client):
+    connect(client)
+    run(client, "connection", "set_variant", variant="v3")
+    status, body = run(client, "connection", "set_variant", variant="auto")
+    assert status == 200, body
+    state = client.get("/api/state").json()
+    if client.variant == "v3":
+        assert state["variant"] == client.variant
+        assert state["variant_source"] == "detected"
+    else:
+        # v4 isn't in BOARDS yet, so detection falls back to the default.
+        assert state["variant"] == "v3"
+        assert state["variant_source"] == "default"
+
+
+def test_an_unknown_variant_is_refused_in_a_sentence(client):
+    connect(client)
+    status, body = run(client, "connection", "set_variant", variant="v9")
+    assert status == 400
+    assert "auto" in body["error"] and "v3" in body["error"]
+    assert "Traceback" not in body["error"]
+
+
+def test_disconnecting_clears_the_override(client):
+    connect(client)
+    run(client, "connection", "set_variant", variant="v3")
+    run(client, "connection", "disconnect")
+    connect(client)
+    state = client.get("/api/state").json()
+    if client.variant == "v3":
+        assert state["variant_source"] == "detected"
+    else:
+        assert state["variant_source"] == "default"
+
+
 def test_the_board_served_follows_the_detected_variant(client):
     connect(client)
     body = client.get("/api/state").json()

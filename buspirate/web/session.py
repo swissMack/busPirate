@@ -214,6 +214,9 @@ class DeviceSession:
         # Whatever we drove the pins to is no longer true of the board, and
         # keeping it would light VREG on the next connect.
         self.last_pins = dict.fromkeys(self.last_pins, False)
+        # An override set while inspecting one board must not follow you onto
+        # the next one you plug in.
+        self.display_variant = None
 
     def _describe_port(self, device: str) -> Dict[str, Any]:
         """What USB discovery can tell us about one device path."""
