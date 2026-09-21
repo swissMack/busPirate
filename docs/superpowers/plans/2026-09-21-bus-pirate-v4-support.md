@@ -511,10 +511,13 @@ git commit -m "feat: drive the LED model from per-variant rules"
 
 ### Task 5: The v4 board entry
 
-**BLOCKED** until `buspirate/web/static/img/board-v4.png` exists. Everything before this task can proceed without it.
+**Unblocked 2026-09-21:** the photograph is committed at
+`buspirate/web/static/img/board-v4.jpg`, 700x525 — the same dimensions as
+`board-v3.png`, so the measurement method transfers directly. It is a `.jpg`,
+not a `.png`; the served path must match.
 
 **Files:**
-- Create: `buspirate/web/static/img/board-v4.png` (supplied by the repo owner)
+- Already present: `buspirate/web/static/img/board-v4.jpg` (supplied by the repo owner)
 - Modify: `buspirate/web/wiring.py`
 - Test: `tests/test_dashboard.py`
 
@@ -525,7 +528,7 @@ git commit -m "feat: drive the LED model from per-variant rules"
 - [ ] **Step 1: Confirm the image is present and 700×525**
 
 ```bash
-sips -g pixelWidth -g pixelHeight buspirate/web/static/img/board-v4.png
+sips -g pixelWidth -g pixelHeight buspirate/web/static/img/board-v4.jpg
 ```
 Expected: `pixelWidth: 700`, `pixelHeight: 525`. If it differs, use the real numbers for `width`/`height` and scale the measurements accordingly.
 
@@ -535,7 +538,7 @@ Crop the top strip and enlarge it 3×, then read the LED centres off the enlarge
 
 ```bash
 S=/tmp/bpmeasure && mkdir -p $S
-sips -c 160 700 --cropOffset 60 0 buspirate/web/static/img/board-v4.png --out $S/leds.png
+sips -c 160 700 --cropOffset 60 0 buspirate/web/static/img/board-v4.jpg --out $S/leds.png
 sips -z 480 2100 $S/leds.png --out $S/leds_big.png
 ```
 
@@ -549,7 +552,7 @@ y = 60 + yb / 3        # 60 is the --cropOffset row
 Cross-check against the silkscreen: PWR, USB, MODE and VREG sit left to right, each directly above its own label. Verify with a tight crop before trusting the numbers:
 
 ```bash
-sips -c 30 360 --cropOffset 84 180 buspirate/web/static/img/board-v4.png --out $S/v.png
+sips -c 30 360 --cropOffset 84 180 buspirate/web/static/img/board-v4.jpg --out $S/v.png
 sips -z 240 2880 $S/v.png --out $S/v_big.png
 ```
 
@@ -563,7 +566,7 @@ In `wiring.py`, beside `_BOARD_V3`:
 
 ```python
 _BOARD_V4 = {
-    "image": "/static/img/board-v4.png",
+    "image": "/static/img/board-v4.jpg",
     "width": 700,
     "height": 525,
     "gutter": 290,
@@ -636,9 +639,9 @@ def test_every_board_pin_sits_inside_its_image():
 
 
 def test_the_v4_photo_is_served(client):
-    response = client.get("/static/img/board-v4.png")
+    response = client.get("/static/img/board-v4.jpg")
     assert response.status_code == 200
-    assert response.content[:4] == b"\x89PNG"
+    assert response.content[:3] == b"\xff\xd8\xff"  # JPEG magic
 ```
 
 Also update Task 2's `variants` assertion back to `["v3", "v4"]`, and add:
@@ -658,7 +661,7 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add buspirate/web/wiring.py buspirate/web/static/img/board-v4.png tests/test_dashboard.py
+git add buspirate/web/wiring.py buspirate/web/static/img/board-v4.jpg tests/test_dashboard.py
 git commit -m "feat: add the Bus Pirate v4 board geometry"
 ```
 
@@ -695,7 +698,7 @@ $("variant").value = "v4";
 $("variant").dispatchEvent(new window.Event("change"));
 await settle(600);
 check("switching to v4 redraws the diagram with the v4 board",
-  $("panel").querySelector(".card-img--board image").getAttribute("href") === "/static/img/board-v4.png",
+  $("panel").querySelector(".card-img--board image").getAttribute("href") === "/static/img/board-v4.jpg",
   $("panel").querySelector(".card-img--board image").getAttribute("href"));
 check("the v4 header shows twelve pins",
   $("panel").querySelectorAll(".card-img--board circle").length === 12,
@@ -833,30 +836,45 @@ git commit -m "feat: add the board switch and warn when it disagrees with the ha
 
 ---
 
-### Task 7: Retire the dead AUX capability
+### Task 7: Surface the v4 AUX/CS command, and label AUX1/AUX2 honestly
 
-`CAP_EXTENDED_AUX` is declared for v4 and unusable: AUX2 is not reachable over the binary protocol (see spec section 5). Remove it rather than leave a capability promising what the transport cannot deliver.
+`buspirate/i2c.py:251-256` implements `I2C.extended_aux()`, gated on
+`CAP_EXTENDED_AUX` and backed by a real binary command (`Firmware/I2C.c:935`,
+I2C subcommand `0b1001`). No panel exposes it. Meanwhile AUX1 and AUX2, the
+extra v4 header pins, genuinely are unreachable over binary and must say so.
+
+**Do NOT remove `CAP_EXTENDED_AUX`** — `i2c.py:254` and `tests/test_device.py:35`
+both depend on it, and it is correctly named for what it gates.
 
 **Files:**
-- Modify: `buspirate/device.py:107-116`
+- Modify: `buspirate/web/panels/i2c.py`
 - Modify: `buspirate/web/wiring.py`
-- Test: `tests/test_device.py`, `tests/test_dashboard.py`
+- Test: `tests/test_dashboard.py`
 
 **Interfaces:**
-- Consumes: `BOARDS["v4"]` from Task 5
-- Produces: `CAP_EXTENDED_AUX` no longer exists. `SIGNAL_NOTES` gains entries for `AUX1` and `AUX2`.
+- Consumes: `BOARDS["v4"]` from Task 5; `device_module.CAP_EXTENDED_AUX`
+- Produces: an `extended_aux` action on the `i2c` panel. `SIGNAL_NOTES` gains `AUX1`, `AUX2`.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-def test_no_capability_promises_aux2():
-    import buspirate.device as device_module
+def test_the_aux_control_is_offered_on_v4_only(client):
+    body = connect(client)
+    panels = {p["id"]: p for p in body["panels"]}
+    actions = {a["name"] for a in panels["i2c"]["actions"]}
+    if client.variant == "v4":
+        assert "extended_aux" in actions
+    else:
+        assert "extended_aux" not in actions
 
-    assert not hasattr(device_module, "CAP_EXTENDED_AUX")
-    for variant in ("v3", "v4", "unknown"):
-        assert all(
-            "aux" not in cap for cap in device_module.capabilities_for(variant)
-        ), variant
+
+def test_driving_aux_high_on_a_v4_reports_what_it_did(client):
+    if client.variant != "v4":
+        pytest.skip("extended AUX is a v4 command")
+    connect(client)
+    status, body = run(client, "i2c", "extended_aux", pin="aux", level="high")
+    assert status == 200, body
+    assert "AUX" in body["result"]["text"]
 
 
 def test_the_v4_aux_pins_say_they_are_terminal_only():
@@ -868,21 +886,59 @@ def test_the_v4_aux_pins_say_they_are_terminal_only():
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `.venv/bin/python -m pytest tests/ -k "aux" -q`
-Expected: FAIL — `CAP_EXTENDED_AUX` still exists
+Run: `.venv/bin/python -m pytest tests/test_dashboard.py -k "aux" -q`
+Expected: FAIL — `extended_aux` not in actions
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Implement the handler**
 
-In `buspirate/device.py`, delete the `CAP_EXTENDED_AUX` definition and remove it from the v4 frozenset, leaving:
+In `buspirate/web/panels/i2c.py`, read how the existing `pullup_voltage` action
+is written (it is the other `CAP_`-gated action in this file) and follow it.
+Add:
 
 ```python
-    if variant == "v4":
-        # The wiki notes binary self-tests are v2go/v3 hardware only. AUX2 is
-        # deliberately absent: the binary protocol has no command for it, so a
-        # capability would promise something we cannot deliver. See
-        # Firmware/binIO.c:268 and :308 — five pins only.
-        return frozenset({CAP_PWM, CAP_ADC, CAP_FREQUENCY, CAP_PULLUP_VOLTAGE})
+_AUX_PINS = [{"value": "aux", "label": "AUX"}, {"value": "cs", "label": "CS"}]
+_AUX_LEVELS = [
+    {"value": "low", "label": "Drive low"},
+    {"value": "high", "label": "Drive high"},
+    {"value": "hiz", "label": "Release (HiZ)"},
+    {"value": "read", "label": "Read"},
+]
+
+# Sub-command bytes from Firmware/I2C.c:935.
+_AUX_SELECT = {"aux": 0x10, "cs": 0x20}
+_AUX_ACTION = {"low": 0x00, "high": 0x01, "hiz": 0x02, "read": 0x03}
+
+
+def _extended_aux(ctx, pin, level):
+    ctx.mode.extended_aux(_AUX_SELECT[pin])
+    ctx.mode.extended_aux(_AUX_ACTION[level])
+    name = pin.upper()
+    if level == "read":
+        return text(f"{name} read back.")
+    return text(f"{name} set {level}.", tone="good")
 ```
+
+Register it in the i2c panel's action list:
+
+```python
+        Action(
+            name="extended_aux",
+            label="Drive AUX or CS",
+            help="Bus Pirate v4 only. Drives the AUX or CS pin directly while "
+            "in I2C mode. AUX1 and AUX2 on the v4 header are not reachable "
+            "this way — they are terminal-mode only.",
+            requires=device_module.CAP_EXTENDED_AUX,
+            params=[
+                Param("pin", "enum", "Pin", default="aux", choices=_AUX_PINS),
+                Param("level", "enum", "Do what", default="high", choices=_AUX_LEVELS),
+            ],
+            handler=_extended_aux,
+        ),
+```
+
+Confirm `device_module` and `text` are already imported in this file; add them if not.
+
+- [ ] **Step 4: Add the signal notes**
 
 In `wiring.py`, add to `SIGNAL_NOTES`:
 
@@ -893,16 +949,16 @@ In `wiring.py`, add to `SIGNAL_NOTES`:
             "protocol has no command for it, so the dashboard cannot drive it.",
 ```
 
-- [ ] **Step 4: Run the full suite**
+- [ ] **Step 5: Run the full suite**
 
 Run: `.venv/bin/python -m pytest tests/ -q`
-Expected: PASS. If anything imported `CAP_EXTENDED_AUX`, fix the import — `grep -rn CAP_EXTENDED_AUX` should return nothing.
+Expected: PASS. `tests/test_device.py:35` (`profile.has(CAP_EXTENDED_AUX)`) must still pass — the capability stays.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add buspirate/device.py buspirate/web/wiring.py tests/
-git commit -m "fix: drop the AUX capability the binary protocol cannot deliver"
+git add buspirate/web/panels/i2c.py buspirate/web/wiring.py tests/test_dashboard.py
+git commit -m "feat: expose the v4 AUX/CS command and label AUX1/AUX2 terminal-only"
 ```
 
 ---
@@ -965,7 +1021,7 @@ Append to the `## Not yet verified against hardware` list at the end of `docs/tr
 
 - [ ] **Step 7: Record the photo's provenance**
 
-In `buspirate/web/static/img/CREDITS.md`, add a `board-v4.png` entry mirroring the existing `board-v3.png` one: supplied by the repository owner, licence not established, same pre-public action. Note that its pin and LED coordinates were measured from this exact file and must be re-measured if it is replaced.
+In `buspirate/web/static/img/CREDITS.md`, add a `board-v4.jpg` entry mirroring the existing `board-v3.png` one: supplied by the repository owner, licence not established, same pre-public action. Note that its pin and LED coordinates were measured from this exact file and must be re-measured if it is replaced.
 
 - [ ] **Step 8: Run the full suite**
 
@@ -984,5 +1040,5 @@ git commit -m "docs: document the v4 header, LEDs and what is still unverified"
 ## Self-review notes
 
 - **Spec coverage:** section 1 → Task 1 + 5; section 2 → Tasks 2, 3, 4; section 3 → Tasks 2, 6; section 4 → Task 6; section 5 → Task 7; section 6 → Task 8; section 7 → tests inside each task. Verification list → Task 8 Step 6.
-- **Known ordering constraint:** Task 5 is the only one blocked on an external input (the photo). Tasks 1–4 and 7's device.py change can all land before it. Task 6 needs Task 5, because its jsdom checks assert the v4 image path and twelve pins.
+- **Known ordering constraint:** Task 5 needed the photo, which arrived 2026-09-21. No task is now blocked on an external input. Task 6 needs Task 5, because its jsdom checks assert the v4 image path and twelve pins.
 - **Type consistency:** `effective_variant()`, `detected_variant()`, `variant_source()` and `display_variant` are named identically everywhere. `BOARDS`, `LED_RULES`, `LED_NOTES` and `DEFAULT_VARIANT` all live in `wiring.py`.

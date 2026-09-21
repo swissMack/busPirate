@@ -27,7 +27,7 @@ So a v4 owner gets a dashboard that shows them the wrong board.
 | What does the switch control? | Auto-detect from the banner, with a manual override |
 | v4 board artwork | The owner's own v4.0 photograph (700×525, matching `board-v3.png`) |
 | v3 board artwork | Unchanged — keep the v3.6 photograph, which matches the owner's board |
-| Scope | Presentation, plus resolving the already-declared `CAP_EXTENDED_AUX` — which planning showed to be undeliverable, so it is removed rather than wired up (see section 5) |
+| Scope | Presentation, plus surfacing the `CAP_EXTENDED_AUX` command the driver already implements (see section 5) |
 | Guided LED verification UI | No — the existing markdown checklist is enough |
 
 Rejected: shipping every variant's data to the client and switching there (bloats
@@ -162,32 +162,42 @@ parameter coercion and error handling rather than needing a bespoke endpoint.
   with a v3 plugged in. This is the safety property that makes a manual override
   acceptable at all.
 
-### 5. AUX2 — not drivable, and the capability is a lie
+### 5. AUX — two different things, and only one is a problem
 
-**Finding, 2026-09-21 during planning: AUX2 is unreachable over the binary
-protocol on a v4.** The spec previously assumed it needed confirming; it is now
-confirmed, negatively:
+Two separate findings, reached in that order during planning. The second
+corrects the first.
+
+**AUX2 (the third header pin) is not reachable over the binary protocol.**
 
 - `Firmware/binIOhelpers.c:20-25` — `BP_AUX2_HI/LOW` is wrapped in
   `#if defined(BUSPIRATEV1A)`. On every other board that bit is the pull-ups.
 - `Firmware/binIO.c:268` and `:308` — `binBBpindirectionset` and `binBBpinset`
-  cover exactly five pins: AUX0, MOSI, CLK, MISO, CS. There is no AUX2 bit.
+  cover exactly five pins: AUX0, MOSI, CLK, MISO, CS. No AUX2 bit.
 - `Firmware/binIO.c:261-265` — `binReset` touches `BP_AUX2_IN()` only under
   `BUSPIRATEV1A`.
-- The AUX2 handling in `AUXpin.c` is reached from `procMenu.c`, the **terminal**
-  menu. The dashboard speaks binary and never enters it.
+- The AUX2 handling in `AUXpin.c` is reached from `procMenu.c`, the terminal
+  menu, which the dashboard never enters.
 
-So `CAP_EXTENDED_AUX`, declared for v4 at `device.py:111`, describes something no
-binary-mode client can use. It is dead, and worse, it is misleading.
+So AUX1 and AUX2 get drawn on the v4 diagram — they are physically there and
+people will look for them — labelled terminal-mode only.
 
-**Revised plan:** draw AUX2 on the v4 diagram, because it is physically on the
-header and people will look for it, but label it as terminal-mode only and
-unreachable from here. Delete `CAP_EXTENDED_AUX` rather than leave a capability
-that promises something the transport cannot deliver.
+**`CAP_EXTENDED_AUX` is NOT dead, and must not be removed.** An earlier draft
+of this spec said it was. That was wrong: `buspirate/i2c.py:251-256` implements
+`I2C.extended_aux()`, gated on that capability, and it maps to a real binary
+command — `Firmware/I2C.c:935`, I2C subcommand `0b1001`:
 
-Implementing AUX2 properly would mean leaving binary mode, driving the text
-menu, and returning — a different piece of work with its own risks, and out of
-scope here.
+| Sub-byte | Effect |
+|---|---|
+| `0x00` / `0x01` / `0x02` | AUX/CS low / high / HiZ |
+| `0x03` | AUX read |
+| `0x10` / `0x20` | select which pin the above act on: AUX or CS |
+
+That is genuine v4-only binary AUX control, already in the driver and correctly
+gated. It is simply unrelated to AUX2.
+
+**The real gap** is that `extended_aux()` has no panel action, so a capability
+the driver implements is unreachable from the dashboard. The I2C panel gains
+one, gated on `CAP_EXTENDED_AUX` as the driver already is.
 
 ### 6. Documentation
 
@@ -226,8 +236,8 @@ The owner has a v4 to test against. Add to the existing checklist at the end of
 - [ ] v4: USB LED **dark** once enumerated — the inverse of v3
 - [ ] v4: the 2×6 header order against your own silkscreen
 - [ ] v4: the measured LED pixel coordinates land on the real LEDs
-- [ ] v4: confirm AUX2 really is inert over the binary protocol — the
-      Pins panel should leave it alone, and nothing should move it
+- [ ] v4: AUX/CS control from the I2C panel actually moves the pin
+- [ ] v4: confirm AUX1/AUX2 really are inert over the binary protocol
 - [ ] v3: the LED model shipped 2026-09-21 — MODE lit from connect, USB
       flickering on traffic, VREG following the supplies
 
