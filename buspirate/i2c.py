@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Iterable, List
 
 from . import device as device_module
-from .exceptions import ExternalVoltageError, NackError
-from .mode import Mode
+from .exceptions import ExternalVoltageError, NackError, ProtocolError
+from .mode import ACK, Mode
 
 CMD_START = 0x02
 CMD_STOP = 0x03
@@ -248,12 +248,21 @@ class I2C(Mode):
                 "off."
             )
 
-    def extended_aux(self, command: int) -> None:
-        """Drive or read AUX/CS directly. **BPv4 only.** See the ``AUX_*`` values."""
+    def extended_aux(self, command: int) -> int:
+        """Drive or read AUX/CS directly. **BPv4 only.** Returns the reply byte.
+
+        For ``AUX_READ`` the reply is the pin state, 0 or 1. Every other
+        sub-command replies 0x01 to acknowledge.
+        """
         self._check_active()
         self.bp.profile.require(device_module.CAP_EXTENDED_AUX)
         self.bp.write(bytes([CMD_EXTENDED_AUX, command & 0xFF]))
-        self._expect_ack("extended AUX command")
+        response = self.bp.read(1)[0]
+        if command != AUX_READ and response != ACK:
+            raise ProtocolError(
+                f"extended AUX command: got 0x{response:02X}, want 0x01"
+            )
+        return response
 
 
 def address_byte(address: int, read: bool) -> int:

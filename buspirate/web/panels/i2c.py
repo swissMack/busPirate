@@ -150,10 +150,10 @@ _AUX_ACTION = {"low": 0x00, "high": 0x01, "hiz": 0x02, "read": 0x03}
 
 def _extended_aux(ctx, pin, level):
     ctx.mode.extended_aux(_AUX_SELECT[pin])
-    ctx.mode.extended_aux(_AUX_ACTION[level])
+    reply = ctx.mode.extended_aux(_AUX_ACTION[level])
     name = pin.upper()
     if level == "read":
-        return text(f"{name} read back.")
+        return text(f"{name} reads {'high' if reply else 'low'}.")
     return text(f"{name} set {level}.", tone="good")
 
 

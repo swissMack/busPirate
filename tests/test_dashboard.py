@@ -690,6 +690,30 @@ def test_driving_aux_high_on_a_v4_reports_what_it_did(client):
     assert "AUX" in body["result"]["text"]
 
 
+@pytest.mark.parametrize("pin", ["aux", "cs"])
+@pytest.mark.parametrize("level", ["low", "high", "hiz"])
+def test_driving_every_aux_pin_and_level_combination_on_a_v4(client, pin, level):
+    if client.variant != "v4":
+        pytest.skip("extended AUX is a v4 command")
+    connect(client)
+    status, body = run(client, "i2c", "extended_aux", pin=pin, level=level)
+    assert status == 200, body
+    assert pin.upper() in body["result"]["text"]
+
+
+@pytest.mark.parametrize("pin", ["aux", "cs"])
+@pytest.mark.parametrize("level", ["low", "high"])
+def test_reading_an_aux_pin_back_on_a_v4_reports_the_level_just_driven(client, pin, level):
+    if client.variant != "v4":
+        pytest.skip("extended AUX is a v4 command")
+    connect(client)
+    status, body = run(client, "i2c", "extended_aux", pin=pin, level=level)
+    assert status == 200, body
+    status, body = run(client, "i2c", "extended_aux", pin=pin, level="read")
+    assert status == 200, body
+    assert level in body["result"]["text"].lower()
+
+
 def test_the_v4_aux_pins_say_they_are_terminal_only():
     from buspirate.web.wiring import SIGNAL_NOTES
 
