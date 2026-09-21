@@ -124,6 +124,11 @@ check("the v4 header shows twelve pins",
   $("panel").querySelectorAll(".card-img--board circle").length === 12,
   `${$("panel").querySelectorAll(".card-img--board circle").length}`);
 check("overriding onto the wrong board warns", !$("variant-warning").hidden);
+$("variant").value = "v3";
+$("variant").dispatchEvent(new window.Event("change"));
+await settle(600);
+check("an override that agrees with the hardware does not warn",
+  $("variant-warning").hidden, `warning text: ${$("variant-warning").textContent}`);
 $("variant").value = "auto";
 $("variant").dispatchEvent(new window.Event("change"));
 await settle(600);

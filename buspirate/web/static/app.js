@@ -14,7 +14,7 @@ const state = {
   board: null,
   boardCaveat: "",
   ledNote: "",
-  variant: "v3",
+  variant: null,
   variantDetected: null,
   variantSource: "default",
   variants: [],
