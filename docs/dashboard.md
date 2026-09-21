@@ -108,6 +108,13 @@ it needs a physical power cycle. The dashboard asks first.
 - **Controls that are missing** are missing on purpose: an action declares the
   capability it needs, and the dashboard hides what your hardware cannot do.
   The pull-up rail selector appears only on a v4; the self-test only on a v3.
+- **The board follows what is plugged in.** Connect, and the dashboard
+  detects v3 or v4 and serves that board's photo, pinout and LED behaviour
+  from then on. The **Board to show** picker (top bar and Connection panel)
+  overrides this if you want to read about the other version without owning
+  one. Override to something that disagrees with what is actually connected
+  and a badge next to the picker says so, naming both — that badge is the
+  only warning; nothing else in the page second-guesses it.
 - **State lives on the server.** Reloading the browser does not disconnect the
   Bus Pirate, which is what you want when a page gets into a mess.
 - **One caller at a time.** A serial port cannot be shared, so actions are

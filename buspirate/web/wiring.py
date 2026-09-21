@@ -15,6 +15,8 @@ Image credit: reference cards from the Dangerous Prototypes wiki
 
 from __future__ import annotations
 
+from typing import Any, Dict
+
 # Probe cable, pin 1 first, with the colours sampled from the Seeed cable card.
 # Pin 1 is MISO and pin 10 is GND — the opposite end from what you might guess.
 SEEED_CABLE = [
@@ -43,6 +45,10 @@ SIGNAL_ROLES = {
 
 SIGNAL_NOTES = {
     "AUX": "Auxiliary I/O, frequency probe, PWM",
+    "AUX1": "Second auxiliary pin, v4 only. Terminal mode only — the binary "
+            "protocol has no command for it, so the dashboard cannot drive it.",
+    "AUX2": "Third auxiliary pin, v4 only. Terminal mode only — the binary "
+            "protocol has no command for it, so the dashboard cannot drive it.",
     "VPU": "Input for the pull-up resistors, 0-5V",
     "ADC": "A/D converter, max 6V, 10-bit, 500 ksps",
     "+5V": "Switchable supply, max 150 mA",
@@ -107,7 +113,7 @@ CABLE_CARD = {
 # The IDC header is 2x5. The left column is labelled GND, +5V, VPU, CLK, CS
 # from the top; the right column is +3.3V, ADC, AUX, MOSI, MISO, though the
 # photo crops those labels, which is why the diagram redraws them.
-BOARD_V3 = {
+_BOARD_V3 = {
     "image": "/static/img/board-v3.png",
     "width": 700,
     "height": 525,
@@ -128,18 +134,155 @@ BOARD_V3 = {
         "CS": [570, 311],
         "MISO": [599, 311],
     },
+    # The four indicator LEDs along the top edge, left to right, each sitting
+    # just above its own silkscreen label.
+    "leds": {
+        "PWR": [198, 98],
+        "USB": [300, 98],
+        "MODE": [402, 98],
+        "VREG": [505, 98],
+    },
     #: Which side of the header each column sits on, for label placement.
     "side": {
         "GND": "left", "+5V": "left", "VPU": "left", "CLK": "left", "CS": "left",
         "+3.3V": "right", "ADC": "right", "AUX": "right", "MOSI": "right",
         "MISO": "right",
     },
+    "caveat": (
+        "This is a Bus Pirate v3.6. The v4 is laid out differently — check the "
+        "silkscreen next to your own header before trusting the positions."
+    ),
 }
 
-BOARD_CAVEAT = (
-    "This is a Bus Pirate v3.6. The v4 is laid out differently — check the "
-    "silkscreen next to your own header before trusting the positions."
+# Pixel geometry of static/img/board-v4.jpg (700x525), measured from the file
+# with sips crops and a brightness profile across the header and the LED strip.
+#
+# The IO header is a 2x6 on 0.1" pitch. Its columns fall on x=525 and x=545 and
+# its rows on y=220..325 in steps of 21. Left column top to bottom is
+# GND, +3.3V, ADC, AUX1, CS, CLK; right column is +5V, VPU, AUX2, AUX,
+# MISO, MOSI. The four LEDs sit on y=134, each directly above its silkscreen
+# label: PWR 193, USB 280, MODE 367, VREG 453.
+_BOARD_V4 = {
+    "image": "/static/img/board-v4.jpg",
+    "width": 700,
+    "height": 525,
+    "gutter": 290,
+    "gutter_left": 290,
+    "label": "Bus Pirate v4.0",
+    # Twelve pins: the v4 header is a 2x6, not the v3's 2x5, and it carries
+    # three AUX lines. Confirmed against hardware/v4/BusPirate-v4e.brd.png and
+    # the firmware's own pin list in procMenu.c.
+    "pins": {
+        "GND": [525, 220],
+        "+5V": [545, 220],
+        "+3.3V": [525, 241],
+        "VPU": [545, 241],
+        "ADC": [525, 262],
+        "AUX2": [545, 262],
+        "AUX1": [525, 283],
+        "AUX": [545, 283],
+        "CS": [525, 304],
+        "MISO": [545, 304],
+        "CLK": [525, 325],
+        "MOSI": [545, 325],
+    },
+    "leds": {
+        "PWR": [193, 134],
+        "USB": [280, 134],
+        "MODE": [367, 134],
+        "VREG": [453, 134],
+    },
+    "side": {
+        "GND": "left", "+3.3V": "left", "ADC": "left",
+        "AUX1": "left", "CS": "left", "CLK": "left",
+        "+5V": "right", "VPU": "right", "AUX2": "right",
+        "AUX": "right", "MISO": "right", "MOSI": "right",
+    },
+    "caveat": (
+        "This is a Bus Pirate v4.0. Its header is a 2x6 with three AUX lines, "
+        "not the v3's 2x5 \u2014 check the silkscreen next to your own header "
+        "before trusting the positions."
+    ),
+}
+
+#: Board geometry by variant. The dashboard serves one of these, chosen by
+#: DeviceSession.effective_variant().
+BOARDS: Dict[str, Dict[str, Any]] = {"v3": _BOARD_V3, "v4": _BOARD_V4}
+
+#: What to present when nothing is connected, or the banner was unreadable.
+DEFAULT_VARIANT = "v3"
+
+#: What drives each LED, and how the dashboard should infer its state.
+#:
+#: ``inference`` is one of:
+#:   "powered"          — lit whenever the port is open
+#:   "connected"        — lit whenever the port is open (binary mode entered)
+#:   "supplies"         — follows the on-board 3.3V/5V regulators
+#:   "flash_on_traffic" — a pulse the client drives from the traffic feed
+#:   "always_dark"      — never reported lit
+LED_RULES: Dict[str, Dict[str, Dict[str, str]]] = {
+    "v3": {
+        "PWR": {
+            "driver": "hardware",
+            "inference": "powered",
+            "means": "USB power is reaching the board",
+        },
+        "USB": {
+            "driver": "hardware",
+            "inference": "flash_on_traffic",
+            "means": "data arriving from the host — the FT232RL's RXLED#",
+        },
+        "MODE": {
+            "driver": "firmware",
+            "inference": "connected",
+            "means": "binary mode is active — the firmware clears it on an overrun",
+        },
+        "VREG": {
+            "driver": "hardware",
+            "inference": "supplies",
+            "means": "the on-board 3.3V and 5V supplies are on",
+        },
+    },
+    "v4": {
+        "PWR": {
+            "driver": "hardware",
+            "inference": "powered",
+            "means": "USB power is reaching the board",
+        },
+        "USB": {
+            "driver": "firmware",
+            "inference": "always_dark",
+            "means": "lit only while enumerating — dark once configured, "
+            "which is the healthy state",
+        },
+        "MODE": {
+            "driver": "firmware",
+            "inference": "connected",
+            "means": "binary mode is active — the firmware clears it on an overrun",
+        },
+        "VREG": {
+            "driver": "hardware",
+            "inference": "supplies",
+            "means": "the on-board 3.3V and 5V supplies are on",
+        },
+    },
+}
+
+_LED_NOTE_COMMON = (
+    "There is no command that reads the LEDs back, so these are inferred from "
+    "what the dashboard believes it has asked the board to do, not measured. "
+    "The firmware can change them on its own — an overrun turns MODE off — so "
+    "trust the board over this picture."
 )
+
+LED_NOTES: Dict[str, str] = {
+    "v3": _LED_NOTE_COMMON
+    + " On a v3 only MODE is software-driven; USB is the FT232RL's receive "
+    "indicator and flickers on traffic.",
+    "v4": _LED_NOTE_COMMON
+    + " On a v4 both MODE and USB are software-driven, and USB goes dark once "
+    "the board has enumerated — dark is the healthy state, not a fault.",
+}
 
 CABLE_CAVEAT = (
     "Colours and pin order are the Seeed/Adafruit cable, which is the "

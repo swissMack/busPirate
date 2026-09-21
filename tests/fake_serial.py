@@ -134,6 +134,8 @@ class FakeSerial:
         self._term_line = bytearray()
         self._i2c_expect_address = False
         self._i2c_read_value = 0x00
+        self._aux_pin = "aux"  # last pin selected via extended AUX 0x10/0x20
+        self._aux_levels = {"aux": 0, "cs": 0}
         self._echoing = False
         self.closed = False
 
@@ -309,7 +311,27 @@ class FakeSerial:
                 return 0
             if not self._supports("extended_aux"):
                 raise AssertionError("v3 hardware has no extended AUX command")
-            self._out += b"\x01"
+            sub = self._in[1]
+            if sub == 0x10:  # select AUX
+                self._aux_pin = "aux"
+                self._out += b"\x01"
+            elif sub == 0x20:  # select CS
+                self._aux_pin = "cs"
+                self._out += b"\x01"
+            elif sub == 0x00:  # drive low
+                self._aux_levels[self._aux_pin] = 0
+                self._out += b"\x01"
+            elif sub == 0x01:  # drive high
+                self._aux_levels[self._aux_pin] = 1
+                self._out += b"\x01"
+            elif sub == 0x02:  # release to HiZ; level unchanged, just ack
+                self._out += b"\x01"
+            elif sub == 0x03:  # read the selected pin's current level
+                self._out += bytes([self._aux_levels[self._aux_pin]])
+            else:
+                raise AssertionError(
+                    f"fake extended AUX got an unknown sub-command 0x{sub:02X}"
+                )
             return 2
         if 0x10 <= cmd <= 0x1F:  # bulk write
             count = (cmd & 0x0F) + 1

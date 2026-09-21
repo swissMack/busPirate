@@ -225,6 +225,19 @@ def test_configure_peripherals_packs_its_flags(bp, fake):
         assert fake.written[0] == 0x4C
 
 
+def test_configure_peripherals_remembers_what_it_last_sent(bp, fake):
+    with bp.i2c() as i2c:
+        assert i2c.peripherals == {
+            "power": False, "pullups": False, "aux": False, "cs": False,
+        }
+        i2c.configure_peripherals(power=True, pullups=True)
+        assert i2c.peripherals == {
+            "power": True, "pullups": True, "aux": False, "cs": False,
+        }
+        i2c.configure_peripherals(power=False, pullups=True)
+        assert i2c.peripherals["power"] is False
+
+
 def test_set_pins_packs_its_flags(bp, fake):
     fake.written.clear()
     bp.set_pins(power=True, cs=True)

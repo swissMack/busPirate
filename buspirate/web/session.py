@@ -20,6 +20,7 @@ from ..exceptions import BusPirateError, ModeError
 from ..ports import discover, resolve
 from .decoders import make_decoder
 from .registry import Action, Panel, load_panels
+from .wiring import BOARDS, DEFAULT_VARIANT, LED_RULES
 
 TRAFFIC_HISTORY = 500
 STREAM_EVENT_CAP = 200  # events per websocket message
@@ -128,6 +129,9 @@ class DeviceSession:
             "miso": False,
             "cs": False,
         }
+        #: Manual override of the variant the UI presents. None = follow
+        #: whatever the banner said.
+        self.display_variant: Optional[str] = None
 
     # -- events ------------------------------------------------------------
 
@@ -207,6 +211,12 @@ class DeviceSession:
         self.port_info = None
         self.mode_name = None
         self._mode = None
+        # Whatever we drove the pins to is no longer true of the board, and
+        # keeping it would light VREG on the next connect.
+        self.last_pins = dict.fromkeys(self.last_pins, False)
+        # An override set while inspecting one board must not follow you onto
+        # the next one you plug in.
+        self.display_variant = None
 
     def _describe_port(self, device: str) -> Dict[str, Any]:
         """What USB discovery can tell us about one device path."""
@@ -243,6 +253,57 @@ class DeviceSession:
         )
         return dict(self.port_info or {"device": self.port}, attached=attached)
 
+    def _supplies_on(self) -> bool:
+        """Whether the last thing we told the board was 'supplies on'.
+
+        A protocol mode switches them through ``configure_peripherals``; the
+        pins panel goes round it with a bitbang ``set_pins``. Whichever spoke
+        last is the one to believe, and entering a mode resets the board's
+        peripheral bits, so an active mode wins.
+        """
+        if self._mode is not None:
+            return bool(self._mode.peripherals.get("power"))
+        return bool(self.last_pins.get("power"))
+
+    def leds(self) -> Dict[str, bool]:
+        """What the indicator LEDs should be showing, for the shown variant.
+
+        Inferred, never read: no command reports LED state. See LED_NOTES.
+        """
+        live = self.bp is not None and self.bp.is_open
+        rules = LED_RULES[self.effective_variant()]
+        state = {}
+        for name, rule in rules.items():
+            how = rule["inference"]
+            if how == "supplies":
+                state[name] = live and self._supplies_on()
+            elif how in {"powered", "connected"}:
+                state[name] = live
+            else:  # flash_on_traffic, always_dark
+                state[name] = False
+        return state
+
+    def detected_variant(self) -> Optional[str]:
+        """What the banner said, or None if nothing is connected."""
+        if self.bp is None or not self.bp.is_open:
+            return None
+        variant = self.bp.profile.variant
+        return variant if variant in BOARDS else None
+
+    def effective_variant(self) -> str:
+        """The variant the UI should present: override, else detected, else v3."""
+        if self.display_variant is not None:
+            return self.display_variant
+        return self.detected_variant() or DEFAULT_VARIANT
+
+    def variant_source(self) -> str:
+        """Why effective_variant() is what it is: override, detected or default."""
+        if self.display_variant is not None:
+            return "override"
+        if self.detected_variant() is not None:
+            return "detected"
+        return "default"
+
     def status(self) -> Dict[str, Any]:
         if self.bp is None or not self.bp.is_open:
             return {
@@ -250,10 +311,12 @@ class DeviceSession:
                 "simulated": self.use_fake,
                 "usb": {"attached": False},
                 "stream": None,
+                "leds": self.leds(),
             }
         profile = self.bp.profile
         return {
             "connected": True,
+            "leds": self.leds(),
             "simulated": self.use_fake,
             "port": self.port,
             "usb": self.usb_status(),

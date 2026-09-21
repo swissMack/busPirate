@@ -33,6 +33,16 @@ const settle = (ms = 400) => new Promise((r) => setTimeout(r, ms));
 window.eval(js);
 await settle();
 
+// The USB LED is a pulse, not a state, so watch for it rather than sampling.
+let usbFlashes = 0;
+new window.MutationObserver((records) => {
+  for (const r of records) {
+    if (r.target.dataset?.led === "USB" && r.target.classList.contains("led--flash")) usbFlashes++;
+  }
+}).observe(window.document.body, {
+  subtree: true, attributes: true, attributeFilter: ["class"],
+});
+
 const $ = (id) => window.document.getElementById(id);
 
 // --- before connecting
@@ -53,6 +63,23 @@ check("recipe strip appeared", !$("recipes").hidden && $("recipes").children.len
 
 // --- USB indicator
 check("USB indicator names the port", /USB: fake/.test($("usb").textContent), $("usb").textContent);
+
+// --- the indicator LEDs, inferred from what we have asked the board to do
+const leds = () => [...$("leds").children]
+  .map((n) => `${n.dataset.led}:${n.classList.contains("led--on") ? "on" : "off"}`)
+  .join(" ");
+check("LED strip names all four LEDs",
+  $("leds") && [...$("leds").children].map((n) => n.dataset.led).join(",") === "PWR,USB,MODE,VREG",
+  $("leds") ? leds() : "no #leds element");
+check("PWR and MODE light up once connected", /PWR:on/.test(leds()) && /MODE:on/.test(leds()), leds());
+check("VREG stays dark until the supplies are switched on", /VREG:off/.test(leds()), leds());
+check("USB is not steadily lit — it only flashes on traffic", /USB:off/.test(leds()), leds());
+
+// --- the variant switch
+check("variant selector offers both boards",
+  $("variant") && [...$("variant").options].map((o) => o.value).join(",") === "auto,v3,v4",
+  $("variant") ? [...$("variant").options].map((o) => o.value).join(",") : "no #variant");
+check("no mismatch warning while following detection", $("variant-warning").hidden);
 
 // --- I2C panel
 const navButtons = [...$("nav").children];
@@ -80,6 +107,39 @@ check("only the pins this panel uses are called out",
 check("callouts sit outside the photo",
   boardSvg && boardSvg.getAttribute("viewBox").startsWith("-"),
   boardSvg && boardSvg.getAttribute("viewBox"));
+const ledMarks = boardSvg ? [...boardSvg.querySelectorAll("rect.led")] : [];
+check("all four LEDs are drawn on the board photo", ledMarks.length === 4, `${ledMarks.length}`);
+check("the LEDs sit along the top edge of the photo",
+  ledMarks.every((r) => Number(r.getAttribute("y")) < 120), ledMarks.map((r) => r.getAttribute("y")).join(","));
+check("the board photo says the LED states are inferred",
+  $("panel").textContent.includes("no command that reads the LEDs back"));
+
+$("variant").value = "v4";
+$("variant").dispatchEvent(new window.Event("change"));
+await settle(600);
+check("switching to v4 redraws the diagram with the v4 board",
+  $("panel").querySelector(".card-img--board image").getAttribute("href") === "/static/img/board-v4.jpg",
+  $("panel").querySelector(".card-img--board image").getAttribute("href"));
+check("the v4 header shows twelve pins",
+  $("panel").querySelectorAll(".card-img--board circle").length === 12,
+  `${$("panel").querySelectorAll(".card-img--board circle").length}`);
+// Regression check: the caption used to read the DETECTED variant rather
+// than the effective one, so it kept saying "Bus Pirate v3" under a v4
+// photo whenever an override was active.
+const v4Captions = [...$("panel").querySelectorAll(".caption")].map((p) => p.textContent).join(" | ");
+check("the caption under the v4 photo names the v4 board, not v3",
+  v4Captions.includes("Bus Pirate v4.0") && !v4Captions.includes("Bus Pirate v3.6"),
+  v4Captions);
+check("overriding onto the wrong board warns", !$("variant-warning").hidden);
+$("variant").value = "v3";
+$("variant").dispatchEvent(new window.Event("change"));
+await settle(600);
+check("an override that agrees with the hardware does not warn",
+  $("variant-warning").hidden, `warning text: ${$("variant-warning").textContent}`);
+$("variant").value = "auto";
+$("variant").dispatchEvent(new window.Event("change"));
+await settle(600);
+check("returning to auto clears the warning", $("variant-warning").hidden);
 
 const cards = $("panel").querySelectorAll(".card-img:not(.card-img--board)");
 check("both reference cards are drawn", cards.length === 2, `${cards.length}`);
@@ -99,6 +159,15 @@ await settle(800);
 const scanText = scan.querySelector(".result").textContent;
 check("scan found 0x50 and 0x68", scanText.includes("0x50") && scanText.includes("0x68"), scanText.slice(0, 80));
 check("scan names the EEPROM", scanText.includes("24Cxx EEPROM"));
+check("the MODE LED is still lit in a bus mode", /MODE:on/.test(leds()), leds());
+check("the VREG LED follows the supplies the scan switched on", /VREG:on/.test(leds()), leds());
+check("the USB LED flashed while the scan was talking to the board",
+  usbFlashes > 0, `${usbFlashes} flashes seen`);
+const boardLitCount = () =>
+  [...$("panel").querySelectorAll(".card-img--board rect.led")]
+    .filter((r) => r.classList.contains("led--on")).length;
+check("the LEDs on the board photo keep up with the status strip",
+  boardLitCount() === 3, `${boardLitCount()} of 3 lit on the photo`);
 
 // --- hex rendering
 const reg = $("panel").querySelector('[data-action="read_register"]');

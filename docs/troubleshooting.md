@@ -2,6 +2,14 @@
 
 ## The port
 
+**Look at the board first.** The four LEDs along the top edge answer the first
+question for free, and neither result is a Bus Pirate fault: **PWR** dark is
+power or cable, on either board. **USB** dark with PWR lit means drivers or
+enumeration **on a v3** — but on a **v4** it's firmware-driven and goes out
+once enumeration completes, so dark there is the healthy state, not a
+symptom. The full table is in
+[Pins & power](pins-and-power.md#the-four-leds).
+
 ### "no USB serial ports found"
 
 The Mac cannot see the adapter at all.
@@ -133,3 +141,16 @@ time you use real hardware, and a bug report here if they are wrong:
 - [ ] The v4 pull-up rail command on firmware that actually implements it
 - [ ] The probe cable colour table against your own cable
       (Connection → **Show the cable legend**)
+- [ ] v4: MODE lit from the moment the dashboard connects, not from entering
+      a protocol
+- [ ] v4: the USB LED **dark** once enumerated — the inverse of a v3, and the
+      claim most likely to be wrong
+- [ ] v4: the 2x6 header order against your own silkscreen
+- [ ] v4: the measured LED and pin coordinates land on the real parts
+- [ ] v4: AUX and CS actually move from the I2C panel's "Drive AUX or CS"
+- [ ] v4: AUX1 and AUX2 stay inert — nothing in the dashboard should move them
+- [ ] v4: extended AUX's `read` sub-command (`0x03`) reply is the pin state
+      (0 or 1), not an ack — every other sub-command replies `0x01`. Taken
+      from a reading of the firmware, not observed on hardware.
+- [ ] v3: the LED model — MODE lit from connect, USB flickering on traffic,
+      VREG following the supplies

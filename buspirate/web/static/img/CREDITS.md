@@ -25,5 +25,19 @@ public, either confirm the licence, replace it with your own photograph of
 your own board, or remove it — `buspirate/web/wiring.py` holds the pin
 coordinates, and the diagram degrades gracefully without the image.
 
-The pin coordinates in `BOARD_V3` were measured from this file and checked
-against the board's own silkscreen. If you replace the photo, re-measure them.
+The pin coordinates in `BOARDS["v3"]` (in `buspirate/web/wiring.py`) were
+measured from this file and checked against the board's own silkscreen. If
+you replace the photo, re-measure them.
+
+`board-v4.jpg` is a photograph of a **Bus Pirate v4.0**, supplied by the
+repository owner. Same situation as `board-v3.png`: it looks like a product
+photograph, but **its licence has not been established**.
+
+That is fine while this repository is private. Before making the repository
+public, either confirm the licence, replace it with your own photograph of
+your own board, or remove it — `buspirate/web/wiring.py` holds the pin
+coordinates, and the diagram degrades gracefully without the image.
+
+The pin and LED coordinates in `BOARDS["v4"]` (in `buspirate/web/wiring.py`)
+were measured from this exact file. If you replace the photo, re-measure
+them.

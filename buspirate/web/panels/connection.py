@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from ... import device as device_module
+from ...exceptions import BusPirateError
 from ..registry import Action, Panel, Param, keyvalue, table, text
-from ..wiring import SEEED_CABLE
+from ..wiring import BOARDS, SEEED_CABLE
 
 
 def _connect(ctx, port):
@@ -48,6 +49,21 @@ def _legend(ctx):
             "wiring anything — a reversed cable is the commonest mistake."
         ),
     )
+
+
+def _set_variant(ctx, variant):
+    if variant == "auto":
+        ctx.session.display_variant = None
+        return text(
+            "Following the connected board again.", tone="good"
+        )
+    if variant not in BOARDS:
+        raise BusPirateError(
+            f"{variant!r} is not a board this dashboard knows — "
+            f"pick one of: auto, {', '.join(sorted(BOARDS))}"
+        )
+    ctx.session.display_variant = variant
+    return text(f"Showing {BOARDS[variant]['label']}.", tone="good")
 
 
 def _self_test(ctx):
@@ -105,6 +121,33 @@ PANEL = Panel(
             label="What is this device?",
             help="Everything the firmware told us about itself.",
             handler=_identify,
+        ),
+        Action(
+            name="set_variant",
+            label="Show a different board",
+            help="The dashboard follows whatever is plugged in. Override this "
+            "to read about the other version — the header pinout and the LED "
+            "behaviour both differ.",
+            params=[
+                Param(
+                    "variant",
+                    "enum",
+                    "Board to show",
+                    default="auto",
+                    # Derived from BOARDS rather than hardcoded, so a future
+                    # entry there is offered here instead of being accepted
+                    # by the select and then rejected by the coercer.
+                    choices=[
+                        {"value": "auto", "label": "Follow the connected board"},
+                        *(
+                            {"value": variant, "label": BOARDS[variant]["label"]}
+                            for variant in sorted(BOARDS)
+                        ),
+                    ],
+                ),
+            ],
+            handler=_set_variant,
+            allow_while_streaming=True,
         ),
         Action(
             name="legend",

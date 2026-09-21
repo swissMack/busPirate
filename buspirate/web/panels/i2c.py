@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from ... import device as device_module
-from ...i2c import I2C
+from ...i2c import (
+    AUX_HIGH,
+    AUX_HIZ,
+    AUX_LOW,
+    AUX_READ,
+    AUX_USE_AUX,
+    AUX_USE_CS,
+    I2C,
+)
 from ..registry import Action, Panel, Param, Wire, chips, hexdump, live, text
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, PULLUP_RAIL_NOTE, colour
 
@@ -133,6 +141,28 @@ def _pullup_voltage(ctx, selection):
     ctx.mode.set_pullup_voltage(selection)
     names = {0: "disconnected", 1: "the 3.3V rail", 2: "the 5V rail"}
     return text(f"VPU is now connected to {names[selection]}.", tone="good")
+
+
+_AUX_PINS = [{"value": "aux", "label": "AUX"}, {"value": "cs", "label": "CS"}]
+_AUX_LEVELS = [
+    {"value": "low", "label": "Drive low"},
+    {"value": "high", "label": "Drive high"},
+    {"value": "hiz", "label": "Release (HiZ)"},
+    {"value": "read", "label": "Read"},
+]
+
+# Sub-command bytes from Firmware/I2C.c:935, named in buspirate/i2c.py.
+_AUX_SELECT = {"aux": AUX_USE_AUX, "cs": AUX_USE_CS}
+_AUX_ACTION = {"low": AUX_LOW, "high": AUX_HIGH, "hiz": AUX_HIZ, "read": AUX_READ}
+
+
+def _extended_aux(ctx, pin, level):
+    ctx.mode.extended_aux(_AUX_SELECT[pin])
+    reply = ctx.mode.extended_aux(_AUX_ACTION[level])
+    name = pin.upper()
+    if level == "read":
+        return text(f"{name} reads {'high' if reply else 'low'}.")
+    return text(f"{name} set {level}.", tone="good")
 
 
 _BUS_PARAMS = [
@@ -272,6 +302,19 @@ PANEL = Panel(
                 )
             ],
             handler=_pullup_voltage,
+        ),
+        Action(
+            name="extended_aux",
+            label="Drive AUX or CS",
+            help="Bus Pirate v4 only. Drives the AUX or CS pin directly while "
+            "in I2C mode. AUX1 and AUX2 on the v4 header are not reachable "
+            "this way — they are terminal-mode only.",
+            requires=device_module.CAP_EXTENDED_AUX,
+            params=[
+                Param("pin", "enum", "Pin", default="aux", choices=_AUX_PINS),
+                Param("level", "enum", "Do what", default="high", choices=_AUX_LEVELS),
+            ],
+            handler=_extended_aux,
         ),
     ],
 )

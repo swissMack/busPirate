@@ -13,6 +13,13 @@ const state = {
   cableCard: null,
   board: null,
   boardCaveat: "",
+  boardPinNotes: {},
+  ledNote: "",
+  variant: null,
+  variantDetected: null,
+  variantSource: "default",
+  variants: [],
+  ledRules: {},
   current: localStorage.getItem("bp.panel") || null,
   guide: { open: false, pages: [], page: null },
   busy: false,
@@ -75,6 +82,13 @@ async function loadState() {
   state.cableCard = data.cable_card || null;
   state.board = data.board || null;
   state.boardCaveat = data.board_caveat || "";
+  state.boardPinNotes = data.board_pin_notes || {};
+  state.ledNote = data.led_note || "";
+  state.variant = data.variant;
+  state.variantDetected = data.variant_detected;
+  state.variantSource = data.variant_source;
+  state.variants = data.variants || [];
+  state.ledRules = data.led_rules || {};
   if (!state.panels.some((p) => p.id === state.current)) {
     state.current = state.panels.length ? state.panels[0].id : null;
   }
@@ -105,6 +119,91 @@ function renderStatus() {
       (s.stream ? ` · ${s.stream.kind} running` : s.mode ? " · " + s.mode : "")
     : "Not connected";
   renderUsb(s.usb || { attached: false });
+  renderLeds(s.leds || {});
+  renderVariant();
+}
+
+/* The four indicator LEDs along the top of the board. Inferred, not read —
+   see state.ledNote, which the hook-up diagram prints in full. Their
+   tooltips come from state.ledRules, which the server serves per variant —
+   a v3 and a v4 do not mean the same thing by the same LED. */
+const LED_ORDER = ["PWR", "USB", "MODE", "VREG"];
+
+function ledMeans(name) {
+  return (state.ledRules[name] || {}).means || "";
+}
+
+const VARIANT_LABELS = { v3: "Bus Pirate v3", v4: "Bus Pirate v4" };
+
+function renderVariant() {
+  const select = $("variant");
+  if (!select) return;
+  const wanted = ["auto", ...state.variants];
+  if ([...select.options].map((o) => o.value).join() !== wanted.join()) {
+    select.replaceChildren(
+      el("option", { value: "auto" }, "Follow the board"),
+      ...state.variants.map((v) => el("option", { value: v }, VARIANT_LABELS[v] || v))
+    );
+  }
+  select.value = state.variantSource === "override" ? state.variant : "auto";
+
+  // Only a genuine disagreement is worth a warning: an override that matches
+  // what is plugged in is harmless.
+  const warning = $("variant-warning");
+  const wrong =
+    state.variantSource === "override" &&
+    state.variantDetected &&
+    state.variantDetected !== state.variant;
+  warning.hidden = !wrong;
+  warning.textContent = wrong
+    ? `showing ${state.variant} — a ${state.variantDetected} is connected`
+    : "";
+}
+
+/* LED4 is the FT232RL's RXLED# pin: a pulse on traffic, not a state — and
+   only on a v3. A v4 holds USB steady once enumerated, so flashing it there
+   would be a lie; state.ledRules says which behaviour applies. It is {}
+   before the first state load, so guard rather than throw and break the
+   live log. */
+let usbFlashTimer = null;
+
+function flashUsbLed() {
+  const rule = (state.ledRules.USB || {}).inference;
+  if (rule !== "flash_on_traffic") return;
+  const marks = [...document.querySelectorAll('[data-led="USB"]')];
+  if (!marks.length) return;
+  for (const mark of marks) mark.classList.add("led--flash");
+  clearTimeout(usbFlashTimer);
+  usbFlashTimer = setTimeout(() => {
+    for (const mark of marks) mark.classList.remove("led--flash");
+  }, 120);
+}
+
+function renderLeds(leds) {
+  // The board photo is drawn once per panel render, which does not happen on
+  // every status push — so repaint its LEDs in place rather than leaving a
+  // picture that disagrees with the strip beside it.
+  for (const rect of document.querySelectorAll(".card-img--board rect.led")) {
+    const name = rect.dataset.led;
+    const on = leds[name] === true;
+    rect.classList.toggle("led--on", on);
+    const title = rect.querySelector("title");
+    if (title) title.textContent = `${name}: ${on ? "lit" : "dark"} — ${ledMeans(name)}`;
+  }
+
+  const box = $("leds");
+  if (!box) return;
+  box.replaceChildren(
+    ...LED_ORDER.map((name) => {
+      const on = leds[name] === true;
+      return el("span", {
+        class: on ? "led led--on" : "led",
+        "data-led": name,
+        text: name,
+        title: `${name}: ${on ? "lit" : "dark"} — ${ledMeans(name)}`,
+      });
+    })
+  );
 }
 
 function renderUsb(usb) {
@@ -458,6 +557,7 @@ let logCount = 0;
 
 function addLogLine(event) {
   if (event.type !== "traffic") return;
+  flashUsbLed();
   const lines = $("log-lines");
   lines.append(
     el(
@@ -541,6 +641,28 @@ $("log-toggle").addEventListener("click", (event) => {
   const log = document.querySelector(".log");
   log.classList.toggle("collapsed");
   event.target.textContent = log.classList.contains("collapsed") ? "Show" : "Hide";
+});
+$("variant").addEventListener("change", async (event) => {
+  try {
+    await api("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        panel: "connection",
+        action: "set_variant",
+        params: { variant: event.target.value },
+      }),
+    });
+    await loadState();
+  } catch (error) {
+    // Nothing changed server-side, so state is still accurate — resync the
+    // select to it rather than leaving it showing the pick that failed, and
+    // surface the failure the way other action failures do.
+    renderVariant();
+    const warning = $("variant-warning");
+    warning.hidden = false;
+    warning.textContent = error.message;
+  }
 });
 
 refreshPorts();
@@ -649,6 +771,9 @@ function boardDiagram(panel) {
     const wire = byTarget.get(signal);
     const onRight = board.side[signal] === "right";
     const colour = wire ? "var(--accent)" : "var(--muted)";
+    // Pins the probe cable has no note for (the v4's AUX1/AUX2) still get one
+    // here, so it reaches the user even when the pin renders unlabelled grey.
+    const note = state.boardPinNotes[signal];
 
     marks.push(
       svg("circle", {
@@ -656,7 +781,7 @@ function boardDiagram(panel) {
         fill: "none", stroke: colour,
         "stroke-width": wire ? 3.5 : 1.5,
         "stroke-opacity": wire ? 1 : 0.4,
-      })
+      }, note ? svg("title", {}, `${signal}: ${note}`) : null)
     );
     if (!wire) continue;
 
@@ -678,6 +803,20 @@ function boardDiagram(panel) {
     );
   }
 
+  // The indicator LEDs, drawn as the rectangles they physically are so the
+  // ten round pin rings above stay the only circles on the picture.
+  const lit = state.status.leds || {};
+  for (const [name, [x, y]] of Object.entries(board.leds || {})) {
+    const on = lit[name] === true;
+    marks.push(
+      svg("rect", {
+        x: x - 9, y: y - 6, width: 18, height: 12, rx: 2,
+        class: on ? "led led--on" : "led",
+        "data-led": name,
+      }, svg("title", {}, `${name}: ${on ? "lit" : "dark"} — ${ledMeans(name)}`))
+    );
+  }
+
   return svg(
     "svg",
     { viewBox: `${-left} 0 ${width} ${board.height}`, width, height: board.height,
@@ -689,11 +828,15 @@ function boardDiagram(panel) {
 }
 
 function hookupDiagram(panel) {
-  const board = state.status.variant === "v4" ? "Bus Pirate v4" : "Bus Pirate v3";
+  // state.variant is the EFFECTIVE variant — override if one is set,
+  // otherwise the detected board — which is what state.board and the rest of
+  // this page are drawn from. state.status.variant is the raw detected
+  // hardware and disagrees with the photo whenever an override is active or
+  // nothing is connected, so it must not drive the caption.
+  const board = state.variant === "v4" ? "Bus Pirate v4" : "Bus Pirate v3";
   const columnNote = panel.refcard_column
     ? `Highlighted: the ${panel.refcard_column} column — what each probe wire becomes on this bus.`
     : "Highlighted: the pins this panel drives.";
-  const mismatch = state.status.variant === "v4" && state.board;
   return el(
     "div",
     { class: "diagram" },
@@ -701,14 +844,13 @@ function hookupDiagram(panel) {
     panel.wiring.length
       ? el("p", {
           class: "caption",
-          text: mismatch
-            ? `Photo is a ${state.board.label}. ${state.boardCaveat}`
-            : `${state.board ? state.board.label : board} — the ringed pins are the ones this panel uses.`,
+          text: `${state.board ? state.board.label : board} — the ringed pins are the ones this panel uses.`,
         })
       : null,
     el("div", { class: "diagram__cards" }, refcardDiagram(panel), cableDiagram(panel)),
     el("p", { class: "caption", text: `${board} · ${columnNote}` }),
     el("p", { class: "caption", text: state.cableCaveat }),
+    el("p", { class: "caption", text: `LEDs — ${state.ledNote}` }),
     el("p", {
       class: "caption credit",
       text: "Reference cards: Dangerous Prototypes wiki (dangerousprototypes.com), CC BY-SA.",
