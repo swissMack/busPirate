@@ -101,8 +101,9 @@ check yours with Connection → **Show the cable legend**, or the `i` command.
 
 ## The board's header
 
-The probe header is a 2×5 IDC. On a **v3.6** the silkscreen names every pin,
-and they sit like this with the USB socket on the left:
+The probe header is a 2×5 IDC on a **v3.6** and a **2×6** IDC on a **v4** —
+two more pins, both AUX lines. On a v3.6 the silkscreen names every pin, and
+they sit like this with the USB socket on the left:
 
 ```
         left column        right column
@@ -115,10 +116,28 @@ and they sit like this with the USB socket on the left:
    └──────────────────────────────────┘
 ```
 
-The dashboard draws this on a photograph of the board, with the pins the
-current panel needs ringed and labelled with what they connect to — so you do
-not have to hold any of it in your head. The reference card and the cable
-card sit underneath it.
+A v4's header adds a row and carries `AUX1` and `AUX2` alongside the
+existing `AUX`:
 
-**A Bus Pirate v4 is laid out differently.** Read your own silkscreen before
-trusting a picture of someone else's board.
+```
+        left column        right column
+   ┌──────────────────────────────────┐
+   │  GND   ●          ●   +5V        │
+   │  +3.3V ●          ●   VPU        │
+   │  ADC   ●          ●   AUX2       │
+   │  AUX1  ●          ●   AUX        │
+   │  CS    ●          ●   MISO       │
+   │  CLK   ●          ●   MOSI       │
+   └──────────────────────────────────┘
+```
+
+The dashboard draws whichever of these matches the connected device on a
+photograph of the board, with the pins the current panel needs ringed and
+labelled with what they connect to — so you do not have to hold any of it in
+your head. The reference card and the cable card sit underneath it.
+
+**A Bus Pirate v4 is laid out differently: it is that extra row of AUX
+pins**, not a rearrangement of the ten a v3 has. Read your own silkscreen
+before trusting a picture of someone else's board — see
+[Bus Pirate v4](bus-pirate-v4.md#the-header-a-2x6-not-a-2x5) for the sourced
+pinout and what `AUX1`/`AUX2` can and cannot do from the dashboard.

@@ -18,24 +18,26 @@ The probe cable's supply wires are **+5V orange (pin 8)** and **+3.3V red
 
 ## The four LEDs
 
-Along the top edge of a **v3.6**, left to right, the silkscreen names them
-**PWR**, **USB**, **MODE** and **VREG**. Only one of the four is under
-software control:
+Along the top edge, left to right, the silkscreen names them **PWR**, **USB**,
+**MODE** and **VREG** on both variants. Which ones are under software control
+differs — a v3 has one, a v4 has two, because the v4 has no FT232RL and does
+USB itself off the PIC:
 
-| LED | Driven by | Lit when |
-|-----|-----------|----------|
-| **PWR** (LED1) | hardware — `VCC → R2 1K1 → LED → GND` | The board has power. Nothing can turn it off. Dark means a dead cable, a dead port or a dead board — check this before anything else. |
-| **USB** (LED4) | hardware — the FT232RL's **RXLED#** pin, through R3 | Data is arriving from the host. It **pulses**; at idle it is dark. A permanently dark USB LED with PWR lit is a driver or cable problem — see [macOS setup](macos-setup.md). |
-| **MODE** (LED2) | **firmware** — PIC GPIO **RA1** (`BP_LEDMODE`) | Binary mode has been entered. See below. |
-| **VREG** (LED3) | hardware — the switched 3.3V regulator VR2's own output (`SWV33 → R6 1K1 → LED → GND`) | The on-board supplies are on. `configure_peripherals(power=True)` drives **VREGEN** (RA0), which enables VR2 (3.3V) and VR3 (5V) together; the LED simply runs off VR2's output. |
+| LED | v3 | v4 |
+|-----|----|----|
+| **PWR** | Hardware — `VCC → R2 1K1 → LED → GND`. The board has power. Nothing can turn it off. Dark means a dead cable, a dead port or a dead board — check this before anything else. | Hardware. Same rule. |
+| **USB** | Hardware — the FT232RL's **RXLED#** pin, through R3. Data is arriving from the host. It **pulses**; at idle it is dark. A permanently dark USB LED with PWR lit is a driver or cable problem — see [macOS setup](macos-setup.md). | **Firmware** — `BP_LEDUSB` = PIC GPIO **RB10** (`hardwarev4a.h:65`). `main.c:76` lights it while the board enumerates over USB; `main.c:95` turns it **off** once enumeration is configured. **This inverts the v3 rule: on a v4, steady dark means it enumerated correctly**, not a fault. There is no FT232RL on a v4 at all — that is why this LED moved into firmware. |
+| **MODE** | Firmware — PIC GPIO **RA1** (`BP_LEDMODE`, `hardwarev3.h:51`). Binary mode has been entered. See below. | Firmware — PIC GPIO **RB8** (`BP_LEDMODE`, `hardwarev4a.h:59`). Same behaviour as a v3, a different GPIO underneath. See below. |
+| **VREG** | Hardware — the switched 3.3V regulator VR2's own output (`SWV33 → R6 1K1 → LED → GND`). The on-board supplies are on. `configure_peripherals(power=True)` drives **VREGEN** (RA0), which enables VR2 (3.3V) and VR3 (5V) together; the LED simply runs off VR2's output. | Hardware. Same rule. |
 
 ### MODE does not mean "in a protocol"
 
-This trips people up. The firmware sets `BP_LEDMODE = 1` in `binBB()` — the
-moment **binary mode** is entered — and it stays lit for the whole binary
-session, HiZ included. The "on when a protocol is active" behaviour belongs to
-`procMenu.c`, the **terminal** UI. Anything speaking the binary protocol, this
-library and dashboard included, sees MODE lit from the moment it connects.
+This trips people up, on either variant. The firmware sets `BP_LEDMODE = 1`
+in `binBB()` — the moment **binary mode** is entered — and it stays lit for
+the whole binary session, HiZ included. The "on when a protocol is active"
+behaviour belongs to `procMenu.c`, the **terminal** UI. Anything speaking the
+binary protocol, this library and dashboard included, sees MODE lit from the
+moment it connects.
 
 The firmware turns it **off** to signal trouble, and these are the cases worth
 knowing:
@@ -46,14 +48,13 @@ knowing:
 
 So **MODE going dark mid-session is a fault indication, not a mode change.**
 
-A **Bus Pirate v4** is different in kind, not just in layout: it drives its USB
-LED from firmware too (`BP_USBLED_*`). Read your own silkscreen.
-
 ### The dashboard draws them
 
 The hook-up diagram lights the same LEDs on the board photograph, and the
-status bar carries a compact copy visible on every panel. USB is flashed from
-the traffic feed, matching the RXLED# pulse.
+status bar carries a compact copy visible on every panel. On a v3, USB is
+flashed from the traffic feed, matching the RXLED# pulse. On a v4 it is not
+flashed at all — it is shown dark once connected, matching the firmware's
+own behaviour once enumeration completes.
 
 **They are inferred, not measured.** No command reads LED state back, so the
 dashboard shows what the board *ought* to be doing. It is wrong in exactly the

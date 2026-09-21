@@ -138,3 +138,13 @@ time you use real hardware, and a bug report here if they are wrong:
 - [ ] The v4 pull-up rail command on firmware that actually implements it
 - [ ] The probe cable colour table against your own cable
       (Connection → **Show the cable legend**)
+- [ ] v4: MODE lit from the moment the dashboard connects, not from entering
+      a protocol
+- [ ] v4: the USB LED **dark** once enumerated — the inverse of a v3, and the
+      claim most likely to be wrong
+- [ ] v4: the 2x6 header order against your own silkscreen
+- [ ] v4: the measured LED and pin coordinates land on the real parts
+- [ ] v4: AUX and CS actually move from the I2C panel's "Drive AUX or CS"
+- [ ] v4: AUX1 and AUX2 stay inert — nothing in the dashboard should move them
+- [ ] v3: the LED model — MODE lit from connect, USB flickering on traffic,
+      VREG following the supplies

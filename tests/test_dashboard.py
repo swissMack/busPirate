@@ -719,3 +719,10 @@ def test_the_v4_aux_pins_say_they_are_terminal_only():
 
     for signal in ("AUX1", "AUX2"):
         assert "terminal" in SIGNAL_NOTES[signal].lower(), signal
+
+
+def test_the_v4_guide_page_documents_the_header_and_the_leds(client):
+    page = client.get("/api/docs/bus-pirate-v4").json()["markdown"]
+    assert "AUX2" in page
+    assert "2x6" in page or "2×6" in page
+    assert "VREG" in page
