@@ -25,5 +25,6 @@ public, either confirm the licence, replace it with your own photograph of
 your own board, or remove it — `buspirate/web/wiring.py` holds the pin
 coordinates, and the diagram degrades gracefully without the image.
 
-The pin coordinates in `BOARD_V3` were measured from this file and checked
-against the board's own silkscreen. If you replace the photo, re-measure them.
+The pin coordinates in `BOARDS["v3"]` (in `buspirate/web/wiring.py`) were
+measured from this file and checked against the board's own silkscreen. If
+you replace the photo, re-measure them.
