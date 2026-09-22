@@ -13,6 +13,7 @@ dependencies = ["pyserial>=3.4"]
 [project.optional-dependencies]
 web = ["fastapi>=0.100", "uvicorn>=0.23", "websockets>=11"]
 dev = ["pytest>=7", "fastapi>=0.100", "uvicorn>=0.23", "websockets>=11", "httpx>=0.24"]
+app = ["pywebview>=5"]
 
 [project.scripts]
 buspirate = "buspirate.cli:main"
