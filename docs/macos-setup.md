@@ -69,7 +69,9 @@ make setup
 1. creates `.venv` if missing, using the newest Python 3 it can find,
 2. installs or updates the package when `pyproject.toml` has changed,
 3. prints the port list,
-4. starts the dashboard and opens your browser.
+4. starts the dashboard and opens it in its own window, falling back to
+   your browser if the window can't start (see
+   [Dashboard](dashboard.md#window-or-browser)).
 
 `bin/demo.command` does the same with a simulated device.
 

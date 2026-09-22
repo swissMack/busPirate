@@ -769,3 +769,20 @@ def test_the_dashboard_guide_documents_the_window(client):
     page = client.get("/api/docs/dashboard").json()["markdown"]
     assert "window" in page.lower()
     assert "pywebview" in page.lower()
+
+
+def test_the_quick_start_reflects_the_window(client):
+    # This page said "Your browser opens on the dashboard" until the window
+    # shipped and made that false — caught only by a manual sweep, not a
+    # test. Pin the corrected claim so the same page can't drift back to
+    # browser-only without a test noticing.
+    page = client.get("/api/docs/user-guide").json()["markdown"]
+    assert "window" in page.lower()
+
+
+def test_the_macos_setup_launcher_description_reflects_the_window(client):
+    # Same drift, same fix, different page: this one independently said
+    # "starts the dashboard and opens your browser" until this round. Both
+    # pages fell out of sync from the same change once, so both get pinned.
+    page = client.get("/api/docs/macos-setup").json()["markdown"]
+    assert "window" in page.lower()

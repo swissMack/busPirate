@@ -10,7 +10,9 @@ repo wraps one in a Python driver, a command line, and a web dashboard.
 1. Plug the Bus Pirate into USB.
 2. In Finder, open the `bin` folder and double-click **`dashboard.command`**.
    The first run builds a Python environment; later runs start in a second.
-3. Your browser opens on the dashboard. Click **Connect**.
+3. The dashboard opens in its own window — or your browser, if the window
+   couldn't start (see [Dashboard](dashboard.md#window-or-browser)). Click
+   **Connect**.
 4. Pick the panel for your bus and press the big button.
 
 No hardware to hand? Double-click **`bin/demo.command`** instead — everything
