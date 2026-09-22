@@ -1,0 +1,52 @@
+#!/bin/bash
+# Stub executable for BusPirate.app.
+#
+# This does NOT reimplement the venv bootstrap / install / window-or-browser
+# fallback logic — that lives in bin/dashboard.command and stays there as the
+# single implementation. This script only resolves the repo root (relative
+# to its own location, so the bundle keeps working if the repo is moved or
+# renamed) and hands off to dashboard.command directly.
+#
+# Important: we exec the .command file as a shell script, NOT via `open` or
+# LaunchServices. `open bin/dashboard.command` would hand it to Terminal.app
+# (the registered handler for .command files) and pop a Terminal window,
+# which is wrong for an app bundle. Executing it directly here runs it in
+# this same (Terminal-less) process, exactly like Finder-double-clicking the
+# app is supposed to behave.
+
+set -euo pipefail
+
+# Resolve the real, symlink-free path of this script. If BusPirate.app (or
+# something inside it) is ever reached through a symlink -- e.g. an alias --
+# this still finds the actual repo checkout rather than the symlink's
+# location.
+resolve_real_path() {
+  local target="$1" dir
+  while [ -L "$target" ]; do
+    dir="$(cd -P "$(dirname "$target")" && pwd)"
+    target="$(readlink "$target")"
+    case "$target" in
+      /*) ;;
+      *) target="$dir/$target" ;;
+    esac
+  done
+  dir="$(cd -P "$(dirname "$target")" && pwd)"
+  printf '%s/%s\n' "$dir" "$(basename "$target")"
+}
+
+SCRIPT_PATH="$(resolve_real_path "$0")"
+MACOS_DIR="$(dirname "$SCRIPT_PATH")"
+
+# $0 resolves to .../BusPirate.app/Contents/MacOS/buspirate-launcher, so the
+# repo root is four levels up from this script's directory:
+#   MacOS -> Contents -> BusPirate.app -> bin -> <repo root>
+REPO="$(cd -P "$MACOS_DIR/../../../.." && pwd)"
+
+DASHBOARD_COMMAND="$REPO/bin/dashboard.command"
+
+if [ ! -f "$DASHBOARD_COMMAND" ]; then
+  osascript -e 'display alert "Bus Pirate" message "Could not find bin/dashboard.command next to BusPirate.app. The app bundle must stay inside the busPirate repo checkout." as critical' >/dev/null 2>&1 || true
+  exit 1
+fi
+
+exec "$DASHBOARD_COMMAND" "$@"

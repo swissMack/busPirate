@@ -49,10 +49,9 @@ hardware should not become unlaunchable because a GUI dependency failed to
 build. Any other failure — a busy port, say — keeps its own message and does
 not fall back, because retrying on the same port would only fail again.
 
-One trade worth knowing about: there is no `.app` bundle, so macOS shows the
-running window in the Dock as the Python interpreter — a generic icon and
-the wrong name. That is the price of having no build step to maintain, not
-a bug.
+`bin/BusPirate.app` gives the window a real identity: a Dock icon and the
+name "Bus Pirate" instead of the Python interpreter. See "The app bundle"
+below.
 
 **Not yet checked, because it needs a real window:** closing the window and
 confirming the shutdown is actually clean — board released, no process left
@@ -64,6 +63,25 @@ The window's feel day to day — resizing, the Dock entry, whether the live
 log and the board's terminal read well inside WKWebView — is also unchecked
 for the same reason. Worth a look the first time you actually use the
 window, not the demo.
+
+## The app bundle
+
+`bin/BusPirate.app` gives `buspirate app` a real macOS app identity: a Dock
+icon and the name "Bus Pirate", instead of the Python interpreter with a
+generic icon. Launch it like any other app — double-click it in Finder, or
+`open bin/BusPirate.app`.
+
+It is a hand-written bundle (`Info.plist`, an icon, a small shell stub), not
+a py2app build — nothing to rebuild when Python is upgraded. The stub finds
+the repo relative to its own location inside `bin/`, so **the bundle must
+stay inside the repo checkout** to work; moving it out on its own breaks it.
+It execs `bin/dashboard.command` directly rather than duplicating its venv
+bootstrap and window/browser fallback logic, so there is exactly one
+implementation of that behaviour.
+
+It is unsigned — deliberately, since signing was out of scope here.
+Gatekeeper will refuse the first launch; right-click (or Control-click) the
+app and choose **Open**, then confirm, and it launches normally from then on.
 
 ## Layout
 
