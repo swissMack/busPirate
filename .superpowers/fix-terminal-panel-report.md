@@ -125,7 +125,7 @@ sleep 5; node tests/ui/frontend.mjs; pkill -9 -f "buspirate dashboard"
 
 ## Doc sweep
 
-**Commit:** 3a9... (see below) on branch `fix/terminal-panel`.
+**Commit:** 1604070 on branch `fix/terminal-panel`.
 
 ### `docs/user-guide.md:34`
 
