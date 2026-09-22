@@ -520,6 +520,31 @@ class DeviceSession:
             # board, the same reasoning disconnect_blocking() already applies.
             self.last_pins = dict.fromkeys(self.last_pins, False)
         self.stream = None
+        if note and self.bp is not None:
+            # stop_stream() could not knock the board back into binary
+            # mode: the session no longer knows what state the board is
+            # actually in (still sitting in its own terminal, most likely).
+            # Reporting "connected" here would let the dashboard go on
+            # presenting a working binary-mode session that does not exist,
+            # and every action after this would fail in a confusing way.
+            # Drop the connection outright, exactly as an explicit
+            # disconnect would — the connection panel is then the one
+            # honest way back.
+            try:
+                self.bp.close()
+            except BusPirateError:
+                pass
+            self.bp = None
+            self.port = None
+            self.port_info = None
+            self.display_variant = None
+        # Stash the failure reason on the (already-finished) stream object so
+        # stop_stream_blocking() — running on a different thread, after
+        # join() — can hand it back to the caller. Without this the note
+        # only ever reached the websocket "stream_stopped" event: real for a
+        # browser watching at that exact moment, invisible to anything that
+        # only reads the HTTP response or polls state after the fact.
+        stream.note = note
         self.emit({"type": "stream_stopped", **stream.describe(), "note": note})
 
     def stop_stream_blocking(self) -> Dict[str, Any]:
@@ -529,7 +554,11 @@ class DeviceSession:
         stream.stop_event.set()
         if stream.thread is not None:
             stream.thread.join(timeout=5)
-        return {"stopped": True, **stream.describe()}
+        return {
+            "stopped": True,
+            **stream.describe(),
+            "note": getattr(stream, "note", ""),
+        }
 
     def enter_terminal(self) -> Dict[str, Any]:
         """Leave binary mode and hold the board's own terminal open."""

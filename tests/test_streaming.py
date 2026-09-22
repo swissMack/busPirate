@@ -212,4 +212,46 @@ def test_the_mode_led_goes_dark_in_the_terminal(client):
 def test_the_mode_led_comes_back_after_the_terminal(client):
     run(client, "connection", "open_terminal")
     client.post("/api/stream/stop")
-    assert status(client)["leds"]["MODE"] is True
+    state = status(client)
+    assert state["leds"]["MODE"] is True
+    # The LED rule only looks at whether a TerminalState is currently
+    # holding the port, so a stream that was simply cleared — without
+    # binary mode actually having been restored — would satisfy it too.
+    # Pin down the real claim being made: the session still believes it
+    # has a working, connected device.
+    assert state["connected"] is True
+
+
+def test_a_failed_return_from_the_terminal_does_not_claim_a_mode(client, monkeypatch):
+    from buspirate.base import BusPirate
+    from buspirate.exceptions import ModeError
+
+    run(client, "connection", "open_terminal")
+
+    def refuse(self, retries=25):
+        raise ModeError("no BBIO response after 25 attempts on fake")
+
+    monkeypatch.setattr(BusPirate, "enter_binary_mode", refuse)
+    body = client.post("/api/stream/stop").json()
+
+    state = body["status"]
+    assert state["stream"] is None
+    # A failed return must not go on claiming a working binary-mode
+    # session — "mode" only exists in the connected branch of status(), so
+    # its absence here is part of the honest answer, not an oversight.
+    assert "mode" not in state
+    assert state["connected"] is False
+    assert state["leds"]["MODE"] is False
+    # The reason has to actually reach the caller. Before this fix it only
+    # ever reached the websocket "stream_stopped" event — invisible to an
+    # HTTP-only caller like this test, which is exactly the gap: a note
+    # nobody renders.
+    assert "no BBIO response" in body["result"]["note"]
+
+    # The board is presumed to be back in its own terminal, not a broken
+    # binary session — reconnecting is the documented way back, and it
+    # must actually work once the monkeypatch is no longer in effect.
+    monkeypatch.undo()
+    code, connect_body = run(client, "connection", "connect", port="")
+    assert code == 200, connect_body
+    assert status(client)["connected"] is True
