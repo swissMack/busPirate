@@ -103,6 +103,43 @@ you can see it happen in the traffic log.
 **The UART bridge is the exception**: the firmware has no software exit, so
 it needs a physical power cycle. The dashboard asks first.
 
+## The board's terminal
+
+The Bus Pirate has two personalities. The dashboard normally speaks its
+**binary protocol** — that is everything above, and it's what the Traffic
+log shows: a **protocol log**, hex bytes in both directions, decoded by
+whichever panel sent them. The board also has its own **text terminal**,
+the `HiZ>` prompt with `?`, `i`, `v`, `m`, `W`, `~` — the same console you'd
+get talking to it over `screen` or a serial monitor. That is a **console**,
+not a log: you type commands and read the board's own replies. Connection →
+**Open the board's terminal** gets you there.
+
+The board can only be in one personality at a time, so opening the terminal
+**leaves binary mode**. What that costs depends on the hardware:
+
+- **A v3 is hardware-reset** by this — supplies off, every pin back to
+  input, everything the session knew forgotten.
+- **A v4 is not reset.** It falls back into its terminal loop without
+  power-cycling, but the current protocol mode is dropped either way.
+
+**Both** boards go dark on the MODE LED the moment the terminal opens — it
+comes back once you leave. That is true even on the v4, where nothing else
+about the board changed.
+
+**Nothing is restored when you come back.** The dashboard does not
+re-arm the supplies or replay whatever pin state you had — silently
+re-energising a target the moment you look away is how hardware gets
+damaged. You come back to supplies off, and the dashboard says so.
+
+**The rest of the dashboard is unavailable while the terminal is open.** It
+holds the port exactly as a sniffer does — every other action is refused
+until you leave.
+
+If leaving the terminal and returning to binary mode fails, the dashboard
+**disconnects** rather than pretend the session is still in binary mode.
+Reconnecting recovers it: connecting always talks to the terminal first and
+knocks its way back into binary mode from there.
+
 ## Things you will wonder about later
 
 - **Controls that are missing** are missing on purpose: an action declares the

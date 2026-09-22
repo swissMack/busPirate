@@ -154,3 +154,13 @@ time you use real hardware, and a bug report here if they are wrong:
       from a reading of the firmware, not observed on hardware.
 - [ ] v3: the LED model — MODE lit from connect, USB flickering on traffic,
       VREG following the supplies
+- [ ] v3: opening the terminal really does reset the board — supplies off,
+      pins to input
+- [ ] v4: opening the terminal does **not** reset the board
+- [ ] Both: MODE goes dark while the terminal is open, and comes back after
+- [ ] The settle after leaving binary mode is long enough that the first
+      prompt is not truncated — `TERMINAL_SETTLE_SECONDS` in session.py
+- [ ] Returning to binary mode works reliably, including straight after a
+      v3 reset
+- [ ] `~` self-test runs to completion through the console, including the
+      stages that expect input

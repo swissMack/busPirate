@@ -316,6 +316,12 @@ def test_every_panel_points_at_a_page_that_exists(client):
             assert panel["doc"] in names, panel["id"]
 
 
+def test_the_dashboard_guide_documents_the_terminal(client):
+    page = client.get("/api/docs/dashboard").json()["markdown"]
+    assert "terminal" in page.lower()
+    assert "reset" in page.lower()
+
+
 # -- hook-up diagram data --------------------------------------------------
 
 
