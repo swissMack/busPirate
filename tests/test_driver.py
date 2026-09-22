@@ -286,7 +286,20 @@ def test_reset_hardware_returns_the_fake_to_its_terminal(bp, fake):
 def test_the_terminal_answers_the_help_command(bp, fake):
     bp.reset_hardware()
     bp.write(b"?\n")
-    assert bp.read_text(settle=0.05).strip() != ""
+    reply = bp.read_text(settle=0.05)
+    # The bare "HiZ>" fallback never spans more than one line; the help
+    # listing does, which is what actually distinguishes it.
+    assert reply.count("\r\n") >= 2
+
+
+def test_the_terminal_answers_the_voltage_command(bp, fake):
+    bp.reset_hardware()
+    bp.write(b"v\n")
+    reply = bp.read_text(settle=0.05)
+    # Specific to the voltage table: neither the fallback nor the help
+    # listing mentions the ADC.
+    assert "ADC" in reply
+    assert "General commands" not in reply
 
 
 def test_binary_mode_can_be_re_entered_after_the_terminal(bp, fake):
@@ -295,3 +308,24 @@ def test_binary_mode_can_be_re_entered_after_the_terminal(bp, fake):
     bp.read_text(settle=0.05)
     bp.enter_binary_mode()
     assert bp.bitbang_version >= 1
+
+
+def test_hardware_reset_clears_aux_and_pin_state_on_v3_only(bp, fake):
+    # Reach into the fake directly: the fake IS the thing under test here,
+    # and the extended-AUX command that would otherwise drive this is
+    # v4-only, so it cannot exercise the v3 branch anyway.
+    fake.pins = 0xFF
+    fake._aux_pin = "cs"
+    fake._aux_levels = {"aux": 1, "cs": 1}
+
+    bp.reset_hardware()
+    bp.enter_binary_mode()
+
+    if fake.variant == "v3":
+        assert fake.pins == 0x00
+        assert fake._aux_pin == "aux"
+        assert fake._aux_levels == {"aux": 0, "cs": 0}
+    else:
+        assert fake.pins == 0xFF
+        assert fake._aux_pin == "cs"
+        assert fake._aux_levels == {"aux": 1, "cs": 1}
