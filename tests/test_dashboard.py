@@ -786,3 +786,13 @@ def test_the_macos_setup_launcher_description_reflects_the_window(client):
     # pages fell out of sync from the same change once, so both get pinned.
     page = client.get("/api/docs/macos-setup").json()["markdown"]
     assert "window" in page.lower()
+
+
+def test_the_cli_reference_documents_the_app_command(client):
+    # The CLI reference listed every subcommand except `app` from the day it
+    # shipped — the same failure mode as the other two pages (a command this
+    # branch added going undocumented), just caught as an omission instead
+    # of a stale claim. Pin it so a future reshuffle of this page can't drop
+    # `app` again without a test noticing.
+    page = client.get("/api/docs/cli").json()["markdown"]
+    assert "buspirate app" in page

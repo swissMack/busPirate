@@ -1,7 +1,9 @@
 #!/bin/bash
 # Double-click this in Finder to open the Bus Pirate dashboard.
 # It sets up a Python environment the first time, then starts the server and
-# opens your browser. Close the Terminal window or press Ctrl-C to stop.
+# opens the dashboard in its own window — falling back to your browser if
+# the window can't start. Close the window (or the Terminal, or Ctrl-C) to
+# stop.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
