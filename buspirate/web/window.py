@@ -17,9 +17,16 @@ from typing import Optional, Tuple
 
 from ..exceptions import BusPirateError
 from .server import create_app
+from .session import STREAM_STOP_TIMEOUT_SECONDS
 
 #: How long to wait for uvicorn to report itself listening before giving up.
 SERVER_START_TIMEOUT_SECONDS = 10.0
+
+#: Room beyond the session's own reader-thread join, so a legitimately slow
+#: teardown is not cut short. Derived, never hardcoded: the two must move
+#: together or a close will either hang or give up early.
+SHUTDOWN_MARGIN_SECONDS = 5.0
+SHUTDOWN_TIMEOUT_SECONDS = STREAM_STOP_TIMEOUT_SECONDS + SHUTDOWN_MARGIN_SECONDS
 
 
 def _build_server(host: str, port: int, use_fake: Optional[bool], fake_variant: str):
@@ -89,3 +96,21 @@ def start_server(
         f"the dashboard did not start within {SERVER_START_TIMEOUT_SECONDS:g}s "
         f"on port {port}."
     )
+
+
+def stop_server(server, thread: threading.Thread) -> str:
+    """Stop the server and wait for its lifespan to release the hardware.
+
+    Returns an empty string on a clean stop, or a sentence to print if the
+    thread outlasted the timeout. Never blocks forever: the process is on its
+    way out and the OS releases the port regardless.
+    """
+    server.should_exit = True
+    thread.join(timeout=SHUTDOWN_TIMEOUT_SECONDS)
+    if thread.is_alive():
+        return (
+            f"the dashboard did not shut down within "
+            f"{SHUTDOWN_TIMEOUT_SECONDS:g}s. Exiting anyway — the port is "
+            "released when this process ends."
+        )
+    return ""

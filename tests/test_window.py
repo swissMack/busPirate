@@ -43,3 +43,32 @@ def test_a_taken_port_is_refused_in_a_sentence():
 def test_a_non_loopback_host_is_refused():
     with pytest.raises(BusPirateError):
         window.start_server(host="0.0.0.0", port=_free_port(), use_fake=True)
+
+
+def test_the_shutdown_timeout_outlasts_the_session_teardown():
+    from buspirate.web.session import STREAM_STOP_TIMEOUT_SECONDS
+
+    assert window.SHUTDOWN_TIMEOUT_SECONDS > STREAM_STOP_TIMEOUT_SECONDS
+
+
+def test_stopping_the_server_returns_no_complaint():
+    port = _free_port()
+    server, thread = window.start_server(port=port, use_fake=True)
+    assert window.stop_server(server, thread) == ""
+    assert not thread.is_alive()
+
+
+def test_a_thread_that_will_not_die_is_reported_not_hidden():
+    class _Stuck:
+        def join(self, timeout=None):
+            return None
+
+        def is_alive(self):
+            return True
+
+    class _Server:
+        should_exit = False
+
+    note = window.stop_server(_Server(), _Stuck())
+    assert note
+    assert "did not shut down" in note
