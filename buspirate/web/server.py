@@ -215,6 +215,18 @@ def create_app(
     return app
 
 
+def loopback_refusal(host: str) -> str:
+    """The one wording of the loopback rule.
+
+    Shared with ``web.window`` so the two guards cannot drift. The callers
+    raise different exception types on purpose, so only the words live here.
+    """
+    return (
+        f"refusing to serve on {host}: the dashboard drives hardware and "
+        "has no authentication, so it binds the loopback address only"
+    )
+
+
 def _error(message: str, status: int = 400) -> JSONResponse:
     return JSONResponse({"ok": False, "error": message}, status_code=status)
 
@@ -230,10 +242,7 @@ def serve(
     import uvicorn
 
     if not ipaddress.ip_address(host).is_loopback:
-        raise ValueError(
-            f"refusing to serve on {host}: the dashboard drives hardware and "
-            "has no authentication, so it binds the loopback address only"
-        )
+        raise ValueError(loopback_refusal(host))
 
     if open_browser:
         import threading

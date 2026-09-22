@@ -33,17 +33,21 @@ It is kept separate from `[web]` on purpose. On macOS, `pywebview` pulls in
 six `pyobjc-*` packages — weight that a plain test run or CI install should
 never have to carry.
 
-Closing the window shuts down cleanly: any running stream is stopped, the
-board is disconnected, and the serial port is released before the process
-exits. There is no background process left holding the port — a hidden
-process still holding the device is exactly what makes the *next*
-connection fail for no visible reason.
+Closing the window shuts down cleanly in the normal case: any running stream
+is stopped, the board is disconnected, and the serial port is released before
+the process exits. The one exception is a reader thread that will not let go —
+the stream stop then times out, the disconnect is abandoned, and the process
+exits anyway, so the OS releases the port and the board is left in whatever
+mode it was in. Either way there is no background process left holding the
+port — a hidden process still holding the device is exactly what makes the
+*next* connection fail for no visible reason.
 
 `bin/dashboard.command` now opens the window by default. It installs the
-`[app]` extra if it can; if the extra will not install, or the window fails
-to start, it says so and falls back to the browser dashboard instead. A tool
-whose job is driving hardware should not become unlaunchable because a GUI
-dependency failed to build.
+`[app]` extra if it can; if there is no usable window toolkit, it says so and
+falls back to the browser dashboard instead. A tool whose job is driving
+hardware should not become unlaunchable because a GUI dependency failed to
+build. Any other failure — a busy port, say — keeps its own message and does
+not fall back, because retrying on the same port would only fail again.
 
 One trade worth knowing about: there is no `.app` bundle, so macOS shows the
 running window in the Dock as the Python interpreter — a generic icon and

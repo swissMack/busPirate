@@ -81,8 +81,15 @@ done
 
 echo
 echo "Opening the Bus Pirate window. Close it to stop."
-if ! "$VENV/bin/python" -m buspirate app "${app_args[@]+"${app_args[@]}"}"; then
+# Exit code 3 is buspirate/cli.py's EXIT_NO_GUI: no usable GUI toolkit, and
+# nothing else. Only that is worth retrying in a browser. Anything else — a
+# busy port, a bad argument — already printed its own message, and running
+# `dashboard` on the same port would just fail again, more confusingly.
+"$VENV/bin/python" -m buspirate app "${app_args[@]+"${app_args[@]}"}"
+status=$?
+if [ "$status" = 3 ]; then
   echo
-  echo "The window could not start — falling back to the browser dashboard."
+  echo "No window toolkit available — falling back to the browser dashboard."
   exec "$VENV/bin/python" -m buspirate dashboard "$@"
 fi
+exit "$status"

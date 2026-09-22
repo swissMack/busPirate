@@ -7,8 +7,15 @@ import logging
 import sys
 
 from . import BusPirate, BusPirateError, discover, resolve
+from .exceptions import GuiUnavailableError
 from .i2c import I2C
 from .spi import SPI
+
+#: Exit code for "there is no usable GUI toolkit here" — and nothing else.
+#: bin/dashboard.command falls back to the browser dashboard on exactly this
+#: code; every other failure keeps its own message and exit 2, because
+#: retrying in a browser on the same port would only fail again, louder.
+EXIT_NO_GUI = 3
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
@@ -174,11 +181,15 @@ def cmd_dashboard(args) -> int:
 def cmd_app(args) -> int:
     from .web.window import run_window
 
-    note = run_window(
-        port=args.http_port,
-        use_fake=args.demo or None,
-        fake_variant=args.variant,
-    )
+    try:
+        note = run_window(
+            port=args.http_port,
+            use_fake=args.demo or None,
+            fake_variant=args.variant,
+        )
+    except GuiUnavailableError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_NO_GUI
     if note:
         print(note)
     return 0

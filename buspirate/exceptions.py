@@ -27,3 +27,11 @@ class UnsupportedFeatureError(BusPirateError):
 
 class ExternalVoltageError(BusPirateError):
     """A rail could not be connected because the pin already carries a voltage."""
+
+
+class GuiUnavailableError(BusPirateError):
+    """The desktop window's GUI toolkit is missing, or would not start.
+
+    Distinct from its siblings so the launcher can tell "there is no usable
+    GUI here, fall back to the browser" apart from every other failure.
+    """

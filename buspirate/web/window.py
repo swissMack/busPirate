@@ -15,16 +15,24 @@ import threading
 import time
 from typing import Optional, Tuple
 
-from ..exceptions import BusPirateError
-from .server import create_app
+from ..exceptions import BusPirateError, GuiUnavailableError
+from .server import create_app, loopback_refusal
 from .session import STREAM_STOP_TIMEOUT_SECONDS
 
 #: How long to wait for uvicorn to report itself listening before giving up.
 SERVER_START_TIMEOUT_SECONDS = 10.0
 
-#: Room beyond the session's own reader-thread join, so a legitimately slow
-#: teardown is not cut short. Derived, never hardcoded: the two must move
-#: together or a close will either hang or give up early.
+#: The whole shutdown budget, in two parts.
+#:
+#: uvicorn drains open connections *before* it runs the lifespan, and the
+#: dashboard always holds a websocket, so a close is drain-then-teardown. The
+#: drain is capped at ``SHUTDOWN_MARGIN_SECONDS`` via
+#: ``timeout_graceful_shutdown``; the teardown is the session's own
+#: reader-thread join, ``STREAM_STOP_TIMEOUT_SECONDS``. ``stop_server`` waits
+#: for the sum, so both phases fit and the lifespan is always reached — an
+#: unbounded drain would eat the join and skip the hardware teardown entirely.
+#: Derived, never hardcoded: these must move together or a close will either
+#: hang or give up before the board is released.
 SHUTDOWN_MARGIN_SECONDS = 5.0
 SHUTDOWN_TIMEOUT_SECONDS = STREAM_STOP_TIMEOUT_SECONDS + SHUTDOWN_MARGIN_SECONDS
 
@@ -43,6 +51,7 @@ def _build_server(host: str, port: int, use_fake: Optional[bool], fake_variant: 
         host=host,
         port=port,
         log_level="warning",
+        timeout_graceful_shutdown=SHUTDOWN_MARGIN_SECONDS,
     )
     return _WindowServer(config)
 
@@ -70,11 +79,17 @@ def start_server(
     Opening a window before the server answers shows an error page, so this
     does not return until it is up — or says why it never came.
     """
-    if not ipaddress.ip_address(host).is_loopback:
+    try:
+        is_loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError as exc:
+        # A hostname, not an address. Unreachable while `app` has no --host,
+        # but the next caller should get a sentence, not a ValueError.
         raise BusPirateError(
-            f"refusing to serve on {host}: the dashboard drives hardware and "
-            "has no authentication, so it binds the loopback address only"
-        )
+            f"the dashboard host must be a loopback IP address, not {host!r}. "
+            "Use 127.0.0.1."
+        ) from exc
+    if not is_loopback:
+        raise BusPirateError(loopback_refusal(host))
 
     server = _build_server(host, port, use_fake, fake_variant)
     thread = threading.Thread(target=_run_server, args=(server,), daemon=True)
@@ -129,14 +144,27 @@ def run_window(
     try:
         import webview
     except ImportError as exc:
-        raise BusPirateError(
+        raise GuiUnavailableError(
             "the window needs pywebview, which is not installed. Install it "
             "with:  pip install -e '.[app]'"
         ) from exc
 
     server, thread = start_server(host, port, use_fake, fake_variant)
-    webview.create_window(
-        "Bus Pirate", f"http://{host}:{port}/", width=1200, height=820
-    )
-    webview.start()
-    return stop_server(server, thread)
+    try:
+        # Only these two calls are guarded, and only for the GUI's own
+        # failures: a Cocoa or toolkit init blowup is user-actionable, so it
+        # becomes a sentence carrying the original text. Anything from
+        # stop_server is left alone — a bug there must not disappear here.
+        webview.create_window(
+            "Bus Pirate", f"http://{host}:{port}/", width=1200, height=820
+        )
+        webview.start()
+    except BusPirateError:
+        raise
+    except Exception as exc:
+        raise GuiUnavailableError(
+            f"the dashboard window could not open: {exc}"
+        ) from exc
+    finally:
+        note = stop_server(server, thread)
+    return note
