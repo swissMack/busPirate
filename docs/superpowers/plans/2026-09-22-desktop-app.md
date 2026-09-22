@@ -499,7 +499,19 @@ Register it in the handlers dict beside `"dashboard": cmd_dashboard`. `main()` a
 
 - [ ] **Step 5: Repoint the launcher**
 
-In `bin/dashboard.command`, change the install line's extra from `[web]` to `[web,app]`, and replace the final `exec` with a window attempt that falls back:
+In `bin/dashboard.command`:
+
+**The install must stay in two steps.** The script runs under `set -euo pipefail`, so a single failing `pip install` aborts it. If `[web,app]` were one command, a pyobjc build failure would kill the launcher at install time and the runtime fallback below would never run — breaking a browser path that works today. So: install `[web]` as now (it must succeed), then attempt the `app` extra separately and tolerate its failure.
+
+```bash
+  "$VENV/bin/pip" install --quiet -e "$REPO[web]"
+  # The window is a bonus, not a requirement: if the GUI toolkit will not
+  # install, the browser dashboard must still work.
+  "$VENV/bin/pip" install --quiet -e "$REPO[app]" || \
+    echo "(the window's GUI toolkit did not install — the browser will be used)"
+```
+
+Then replace the final `exec` with a window attempt that falls back:
 
 ```bash
 echo
@@ -570,5 +582,6 @@ git commit -m "docs: document running the dashboard in its own window"
 - **The derived-timeout test in Task 3 Step 1 is the important one** — it is what stops `SHUTDOWN_TIMEOUT_SECONDS` and `STREAM_STOP_TIMEOUT_SECONDS` drifting apart later.
 - **Known limit, stated in the spec and repeated here:** no test opens a window. Task 4's second test proves the wiring against a stub and nothing more. The window is a manual check.
 - **Corrected during self-review:** the missing-pywebview test originally patched `builtins.__import__`, which would have intercepted every import inside `start_server` — including uvicorn's — and could pass or fail for reasons unrelated to `webview`. Replaced with `monkeypatch.setitem(sys.modules, "webview", None)`, which raises `ImportError` for that one name only.
+- **Corrected during pre-flight:** the launcher originally installed `[web,app]` as one command. Under `set -euo pipefail` a pyobjc failure would then abort the script before the runtime fallback could run, turning a GUI-install problem into a completely unlaunchable tool. Split into a required `[web]` install and a tolerated `[app]` one.
 - **One open decision delegated deliberately:** Task 4 Step 5, whether the launcher strips `--no-browser`/`--host` before forwarding `$@` to `app`, which rejects them. The implementer decides and reports.
 - **Type consistency:** `start_server`, `stop_server`, `run_window`, `SERVER_START_TIMEOUT_SECONDS`, `SHUTDOWN_MARGIN_SECONDS`, `SHUTDOWN_TIMEOUT_SECONDS` are named identically throughout.
