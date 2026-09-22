@@ -554,7 +554,7 @@ function streamPane(result) {
 }
 
 /* The typed line that turns a console-carrying stream into something you can
-   actually drive. `send_line` lives on the Connection panel and is
+   actually drive. `send_line` lives on the Terminal panel and is
    `allow_while_streaming`, so it works for as long as this stream holds the
    port — but it is a plain action call, made directly rather than through the
    generic action-button wiring, because this field belongs to the pane, not
