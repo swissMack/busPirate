@@ -135,8 +135,8 @@ damaged. You come back to supplies off, and the dashboard says so.
 holds the port exactly as a sniffer does — every other action is refused
 until you leave. Switching panels hides the console and its Stop button
 without closing the stream, but you are never stuck: **Disconnect** on the
-Connection panel is allowed while a stream is running and always gets you
-out.
+Connection panel is always available. If the reader thread still holds the port,
+the click fails and explains why; trying again in a moment succeeds.
 
 If leaving the terminal and returning to binary mode fails, the dashboard
 **disconnects** rather than pretend the session is still in binary mode.
