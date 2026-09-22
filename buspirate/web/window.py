@@ -114,3 +114,29 @@ def stop_server(server, thread: threading.Thread) -> str:
             "released when this process ends."
         )
     return ""
+
+
+def run_window(
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    use_fake: Optional[bool] = None,
+    fake_variant: str = "v3",
+) -> str:
+    """Open the dashboard in its own window and block until it is closed.
+
+    Returns a note to print, empty when the shutdown was clean.
+    """
+    try:
+        import webview
+    except ImportError as exc:
+        raise BusPirateError(
+            "the window needs pywebview, which is not installed. Install it "
+            "with:  pip install -e '.[app]'"
+        ) from exc
+
+    server, thread = start_server(host, port, use_fake, fake_variant)
+    webview.create_window(
+        "Bus Pirate", f"http://{host}:{port}/", width=1200, height=820
+    )
+    webview.start()
+    return stop_server(server, thread)

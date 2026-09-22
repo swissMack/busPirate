@@ -71,6 +71,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="which device the demo simulates (default: v3)",
     )
     dash.add_argument("--no-browser", action="store_true", help="do not open a browser")
+
+    appcmd = sub.add_parser("app", help="open the dashboard in its own window")
+    appcmd.add_argument("--port-number", type=int, default=8765, dest="http_port")
+    appcmd.add_argument(
+        "--demo",
+        action="store_true",
+        help="run against a simulated Bus Pirate, with no hardware",
+    )
+    appcmd.add_argument(
+        "--variant",
+        default="v3",
+        choices=["v3", "v4"],
+        help="which device the demo simulates (default: v3)",
+    )
     return parser
 
 
@@ -157,6 +171,19 @@ def cmd_dashboard(args) -> int:
     return 0
 
 
+def cmd_app(args) -> int:
+    from .web.window import run_window
+
+    note = run_window(
+        port=args.http_port,
+        use_fake=args.demo or None,
+        fake_variant=args.variant,
+    )
+    if note:
+        print(note)
+    return 0
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
@@ -169,6 +196,7 @@ def main(argv=None) -> int:
         "i2c-scan": cmd_i2c_scan,
         "spi-id": cmd_spi_id,
         "dashboard": cmd_dashboard,
+        "app": cmd_app,
     }
     try:
         return handlers[args.command](args)

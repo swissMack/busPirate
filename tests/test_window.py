@@ -72,3 +72,34 @@ def test_a_thread_that_will_not_die_is_reported_not_hidden():
     note = window.stop_server(_Server(), _Stuck())
     assert note
     assert "did not shut down" in note
+
+
+def test_a_missing_pywebview_says_how_to_install_it(monkeypatch):
+    # Binding a module name to None in sys.modules makes `import name` raise
+    # ImportError. That is surgical; patching builtins.__import__ would also
+    # intercept uvicorn and everything else start_server imports.
+    monkeypatch.setitem(sys.modules, "webview", None)
+    with pytest.raises(BusPirateError) as caught:
+        window.run_window(port=_free_port(), use_fake=True)
+    assert "[app]" in str(caught.value)
+
+
+def test_the_window_is_opened_and_the_server_stopped(monkeypatch):
+    calls = {}
+
+    class _FakeWebview:
+        @staticmethod
+        def create_window(title, url, **kwargs):
+            calls["title"] = title
+            calls["url"] = url
+
+        @staticmethod
+        def start():
+            calls["started"] = True
+
+    monkeypatch.setitem(sys.modules, "webview", _FakeWebview)
+    port = _free_port()
+    assert window.run_window(port=port, use_fake=True) == ""
+    assert calls["started"] is True
+    assert str(port) in calls["url"]
+    assert calls["url"].startswith("http://127.0.0.1:")

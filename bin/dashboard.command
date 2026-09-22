@@ -41,11 +41,46 @@ if [ ! -f "$STAMP" ] || [ "$REPO/pyproject.toml" -nt "$STAMP" ]; then
   echo "Installing dependencies…"
   "$VENV/bin/pip" install --quiet --upgrade pip
   "$VENV/bin/pip" install --quiet -e "$REPO[web]"
+  # The window is a bonus, not a requirement: if the GUI toolkit will not
+  # install, the browser dashboard must still work.
+  "$VENV/bin/pip" install --quiet -e "$REPO[app]" || \
+    echo "(the window's GUI toolkit did not install — the browser will be used)"
   touch "$STAMP"
 fi
 
 echo
 "$VENV/bin/python" -m buspirate ports || true
+
+# `buspirate app` has no --host or --no-browser (the window always binds
+# loopback, and there is no browser step to skip), so those two would make
+# argparse reject the command before it ever tried to open a window. Strip
+# them for the window attempt; the original "$@" still goes to the browser
+# fallback below, which does understand both.
+app_args=()
+skip_next=0
+for arg in "$@"; do
+  if [ "$skip_next" = 1 ]; then
+    skip_next=0
+    continue
+  fi
+  case "$arg" in
+    --host)
+      skip_next=1
+      ;;
+    --host=*)
+      ;;
+    --no-browser)
+      ;;
+    *)
+      app_args+=("$arg")
+      ;;
+  esac
+done
+
 echo
-echo "Starting the dashboard. Press Ctrl-C to stop."
-exec "$VENV/bin/python" -m buspirate dashboard "$@"
+echo "Opening the Bus Pirate window. Close it to stop."
+if ! "$VENV/bin/python" -m buspirate app "${app_args[@]+"${app_args[@]}"}"; then
+  echo
+  echo "The window could not start — falling back to the browser dashboard."
+  exec "$VENV/bin/python" -m buspirate dashboard "$@"
+fi
