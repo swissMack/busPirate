@@ -26,3 +26,7 @@ dist/
 node_modules/
 package-lock.json
 package.json
+
+# built app + dmg (bin/build-dmg.sh)
+dist/
+build/

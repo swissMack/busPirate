@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import queue
+import sys
 import threading
 import time
 from collections import deque
@@ -38,6 +39,28 @@ TERMINAL_SETTLE_SECONDS = 0.5
 #: seconds on their own. A generous wait is still only a wait, though: if it
 #: expires we say the stream did not stop rather than pretending it did.
 STREAM_STOP_TIMEOUT_SECONDS = 15.0
+
+#: Where captures go when the app is frozen into a ``.app`` bundle.
+#:
+#: Finder launches an app with a current directory of ``/``, so the relative
+#: ``captures/`` used from a checkout would try to create ``/captures`` and
+#: fail. The home folder is the one place that is writable, obvious in Finder
+#: and *not* covered by macOS TCC — ``~/Documents``, ``~/Desktop`` and
+#: ``~/Downloads`` all pop a consent dialog for an unsigned app, and this one
+#: is unsigned by design.
+FROZEN_CAPTURES_DIR = os.path.join("~", "BusPirate", "captures")
+
+
+def captures_root() -> str:
+    """The directory dumps and logs are written to.
+
+    From a checkout this stays ``<cwd>/captures``, exactly as before: the
+    tests and the usual ``bin/dashboard.command`` workflow both depend on it.
+    Only a frozen bundle takes the other branch.
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.expanduser(FROZEN_CAPTURES_DIR)
+    return os.path.join(os.getcwd(), "captures")
 
 
 class StreamState:
@@ -118,7 +141,7 @@ class ActionContext:
 
     def capture_path(self, filename: str) -> str:
         """A writable path under ``captures/`` for dumps and logs."""
-        root = os.path.join(os.getcwd(), "captures")
+        root = captures_root()
         os.makedirs(root, exist_ok=True)
         safe = os.path.basename(filename) or "capture.bin"
         return os.path.join(root, safe)
