@@ -511,6 +511,12 @@ class DeviceSession:
             note = str(exc)
         self.mode_name = None
         self._mode = None
+        if isinstance(stream, TerminalState):
+            # A v3 was just hardware-reset and a v4 dropped its mode — either
+            # way the supplies this session last drove are no longer true of
+            # the board. Leaving last_pins stale would light VREG over a dark
+            # board, the same reasoning disconnect_blocking() already applies.
+            self.last_pins = dict.fromkeys(self.last_pins, False)
         self.stream = None
         self.emit({"type": "stream_stopped", **stream.describe(), "note": note})
 

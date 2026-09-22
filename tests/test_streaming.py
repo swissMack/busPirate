@@ -177,3 +177,27 @@ def test_typing_into_the_terminal_reaches_the_board(client):
     assert code == 200, body
     found = wait_for_events(client, at_least=1)
     assert found["events"] >= 1
+
+
+def test_send_line_is_refused_while_a_sniffer_runs(client):
+    run(client, "i2c", "sniff", power=True, pullups=True, speed=2)
+    code, body = run(client, "connection", "send_line", line="i")
+    assert code == 400
+    assert "terminal" in body["error"]
+
+
+def test_other_panels_are_refused_while_the_terminal_holds_the_port(client):
+    run(client, "connection", "open_terminal")
+    code, body = run(client, "i2c", "scan", power=True, pullups=True, speed=2)
+    assert code == 400
+
+
+def test_leaving_the_terminal_returns_to_binary_with_nothing_held(client):
+    run(client, "pins", "set_pins", power=True, pullups=False, aux=False,
+        mosi=False, clk=False, miso=False, cs=False)
+    run(client, "connection", "open_terminal")
+    assert client.post("/api/stream/stop").status_code == 200
+    state = status(client)
+    assert state["stream"] is None
+    assert state["mode"] is None
+    assert state["leds"]["VREG"] is False

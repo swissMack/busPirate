@@ -66,6 +66,15 @@ def _set_variant(ctx, variant):
     return text(f"Showing {BOARDS[variant]['label']}.", tone="good")
 
 
+def _open_terminal(ctx):
+    return ctx.session.enter_terminal()
+
+
+def _send_line(ctx, line):
+    ctx.session.send_terminal_line(line)
+    return text(f"Sent {line!r}.")
+
+
 def _self_test(ctx):
     errors = ctx.bp.self_test()
     if errors:
@@ -115,6 +124,27 @@ PANEL = Panel(
             allow_while_streaming=True,
             help="Stops anything that is running, resets the Bus Pirate to "
             "its terminal, and releases the port.",
+        ),
+        Action(
+            name="open_terminal",
+            label="Open the board's terminal",
+            help="Leaves binary mode and gives you the Bus Pirate's own "
+            "command prompt. Everything else in the dashboard is unavailable "
+            "until you close it.",
+            confirm="This leaves binary mode. On a Bus Pirate v3 that resets "
+            "the board: the supplies go off and the pins go to inputs. On a v4 "
+            "the board is not reset, but the current protocol mode is dropped. "
+            "Nothing is restored when you come back. Continue?",
+            stream=True,
+            handler=_open_terminal,
+        ),
+        Action(
+            name="send_line",
+            label="Send",
+            help="Types one line into the board's terminal.",
+            params=[Param("line", "text", "Command", default="")],
+            allow_while_streaming=True,
+            handler=_send_line,
         ),
         Action(
             name="identify",

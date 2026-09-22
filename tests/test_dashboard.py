@@ -90,6 +90,21 @@ def test_disconnect_leaves_a_clean_state(client):
     assert client.get("/api/state").json()["status"]["connected"] is False
 
 
+def test_the_terminal_warns_before_it_takes_the_board(client):
+    body = connect(client)
+    panels = {p["id"]: p for p in body["panels"]}
+    action = next(a for a in panels["connection"]["actions"]
+                  if a["name"] == "open_terminal")
+    assert action["confirm"], "opening the terminal must confirm first"
+
+
+def test_send_line_is_refused_when_the_terminal_is_not_open(client):
+    connect(client)
+    status, body = run(client, "connection", "send_line", line="i")
+    assert status == 400
+    assert "terminal" in body["error"]
+
+
 # -- the panels do what they say ------------------------------------------
 
 
