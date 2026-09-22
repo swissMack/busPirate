@@ -255,3 +255,79 @@ def test_a_failed_return_from_the_terminal_does_not_claim_a_mode(client, monkeyp
     code, connect_body = run(client, "connection", "connect", port="")
     assert code == 200, connect_body
     assert status(client)["connected"] is True
+
+
+def wait_for_no_stream(client, timeout=10.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if status(client)["stream"] is None:
+            return True
+        time.sleep(0.02)
+    return status(client)["stream"] is None
+
+
+def test_a_failed_write_in_the_terminal_does_not_wedge_the_session(
+    client, monkeypatch
+):
+    """A cable pulled while typing must end the stream, not strand it.
+
+    BusPirate.write raises on a dead handle. That write used to sit outside
+    the reader loop's guards, so the exception escaped the loop and
+    _finish_stream — the only thing that clears self.stream — never ran.
+    The session then refused every later action with "…has the port"
+    forever.
+    """
+    from buspirate.base import BusPirate
+
+    run(client, "connection", "open_terminal")
+    assert status(client)["stream"]["kind"] == "Board terminal"
+
+    original = BusPirate.write
+    once = {"pending": True}
+
+    def explode(self, data):
+        if once["pending"]:
+            once["pending"] = False
+            raise OSError("device disconnected")
+        return original(self, data)
+
+    monkeypatch.setattr(BusPirate, "write", explode)
+    code, body = run(client, "connection", "send_line", line="i")
+    assert code == 200, body
+
+    assert wait_for_no_stream(client), "the stream was never finished"
+
+    code, body = run(client, "connection", "connect", port="")
+    assert "has the port" not in str(body), body
+    assert code == 200, body
+
+
+def test_a_terminal_that_fails_to_open_does_not_claim_binary_mode(
+    client, monkeypatch
+):
+    """0x0F has gone out — the board is in its terminal whatever happens.
+
+    If anything after reset_hardware() fails, no stream is ever started, so
+    nothing else would tear the session down. Reporting a live binary-mode
+    connection there is a lie about the hardware.
+    """
+    from buspirate.base import BusPirate
+
+    def refuse(self):
+        raise OSError("device disconnected during the settle")
+
+    monkeypatch.setattr(BusPirate, "flush_input", refuse)
+    code, body = run(client, "connection", "open_terminal")
+    assert code == 400, body
+
+    state = status(client)
+    assert state["stream"] is None
+    assert state["connected"] is False
+    # "mode" only exists in the connected branch of status(); its absence is
+    # part of the honest answer.
+    assert "mode" not in state
+
+    monkeypatch.undo()
+    code, connect_body = run(client, "connection", "connect", port="")
+    assert code == 200, connect_body
+    assert status(client)["connected"] is True

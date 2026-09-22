@@ -53,7 +53,11 @@ def create_app(
         try:
             yield
         finally:
-            session.disconnect_blocking()
+            # A reader thread that has not let go of the port makes
+            # disconnect refuse rather than close the handle under it. The
+            # process is going away regardless, so note it and move on.
+            with contextlib.suppress(BusPirateError):
+                session.disconnect_blocking()
 
     app = FastAPI(
         title="Bus Pirate dashboard",

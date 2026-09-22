@@ -535,6 +535,9 @@ function consoleInput() {
   const field = el("input", {
     class: "stream__input",
     placeholder: "Type a command, then press Enter…",
+    // The console field is the whole interaction surface of the terminal,
+    // and a placeholder is not an accessible name.
+    "aria-label": "Board terminal command",
     "data-mono": true,
   });
   const send = el("button", { class: "btn btn--small", text: "Send" });

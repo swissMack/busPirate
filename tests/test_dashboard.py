@@ -318,7 +318,8 @@ def test_every_panel_points_at_a_page_that_exists(client):
 
 def test_the_dashboard_guide_documents_the_terminal(client):
     page = client.get("/api/docs/dashboard").json()["markdown"]
-    assert "terminal" in page.lower()
+    # "terminal" was already in this page before the feature and guards
+    # nothing. The reset behaviour is what the branch added.
     assert "reset" in page.lower()
 
 
