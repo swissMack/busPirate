@@ -65,6 +65,11 @@ class StreamState:
             "action": self.action,
             "events": self.events,
             "seconds": round(time.time() - self.started_at, 1),
+            # False here, True on TerminalState. This is the signal the
+            # frontend uses to decide whether a running stream is a console
+            # it should re-render with an input line — never ``kind``, which
+            # is only a display label. See TerminalState.describe().
+            "input": False,
         }
 
 
@@ -78,9 +83,14 @@ class TerminalState(StreamState):
 
     def __init__(self, decoder, result) -> None:
         super().__init__(
-            "Board terminal", "connection", "open_terminal", decoder, result
+            "Board terminal", "terminal", "open_terminal", decoder, result
         )
         self.inbox: "queue.Queue[bytes]" = queue.Queue()
+
+    def describe(self) -> Dict[str, Any]:
+        data = super().describe()
+        data["input"] = True
+        return data
 
 
 class ActionContext:

@@ -49,6 +49,21 @@ def test_state_lists_panels_before_connecting(client):
     assert [p["id"] for p in body["panels"]][0] == "connection"
 
 
+def test_terminal_is_its_own_panel_right_after_connection(client):
+    # open_terminal and send_line moved off the Connection panel onto their
+    # own panel, grouped together, immediately after Connection in the nav.
+    body = client.get("/api/state").json()
+    panel_ids = [p["id"] for p in body["panels"]]
+    assert "terminal" in panel_ids
+    assert panel_ids.index("terminal") == panel_ids.index("connection") + 1
+    panels = {p["id"]: p for p in body["panels"]}
+    terminal_actions = {a["name"] for a in panels["terminal"]["actions"]}
+    assert terminal_actions == {"open_terminal", "send_line"}
+    connection_actions = {a["name"] for a in panels["connection"]["actions"]}
+    assert "open_terminal" not in connection_actions
+    assert "send_line" not in connection_actions
+
+
 def test_ports_endpoint_offers_the_simulated_device(client):
     ports = client.get("/api/ports").json()["ports"]
     assert ports[0]["device"] == "fake"
@@ -93,16 +108,32 @@ def test_disconnect_leaves_a_clean_state(client):
 def test_the_terminal_warns_before_it_takes_the_board(client):
     body = connect(client)
     panels = {p["id"]: p for p in body["panels"]}
-    action = next(a for a in panels["connection"]["actions"]
+    action = next(a for a in panels["terminal"]["actions"]
                   if a["name"] == "open_terminal")
     assert action["confirm"], "opening the terminal must confirm first"
 
 
 def test_send_line_is_refused_when_the_terminal_is_not_open(client):
     connect(client)
-    status, body = run(client, "connection", "send_line", line="i")
+    status, body = run(client, "terminal", "send_line", line="i")
     assert status == 400
     assert "terminal" in body["error"]
+
+
+def test_send_line_is_hidden_from_automatic_form_rendering(client):
+    body = connect(client)
+    panels = {p["id"]: p for p in body["panels"]}
+    action = next(a for a in panels["terminal"]["actions"]
+                  if a["name"] == "send_line")
+    assert action["hidden"] is True
+
+
+def test_open_terminal_is_not_hidden(client):
+    body = connect(client)
+    panels = {p["id"]: p for p in body["panels"]}
+    action = next(a for a in panels["terminal"]["actions"]
+                  if a["name"] == "open_terminal")
+    assert action["hidden"] is False
 
 
 # -- the panels do what they say ------------------------------------------
