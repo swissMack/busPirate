@@ -164,8 +164,8 @@ log shows: a **protocol log**, hex bytes in both directions, decoded by
 whichever panel sent them. The board also has its own **text terminal**,
 the `HiZ>` prompt with `?`, `i`, `v`, `m`, `W`, `~` — the same console you'd
 get talking to it over `screen` or a serial monitor. That is a **console**,
-not a log: you type commands and read the board's own replies. Connection →
-**Open the board's terminal** gets you there.
+not a log: you type commands and read the board's own replies. The
+**Terminal** panel's **Open the board's terminal** gets you there.
 
 The board can only be in one personality at a time, so opening the terminal
 **leaves binary mode**. What that costs depends on the hardware:
@@ -186,10 +186,13 @@ damaged. You come back to supplies off, and the dashboard says so.
 
 **The rest of the dashboard is unavailable while the terminal is open.** It
 holds the port exactly as a sniffer does — every other action is refused
-until you leave. Switching panels hides the console and its Stop button
-without closing the stream, but you are never stuck: **Disconnect** on the
-Connection panel is always available. If the reader thread still holds the port,
-the click fails and explains why; trying again in a moment succeeds.
+until you leave. Switching panels takes you away from the console, but it
+keeps running, and coming back to the **Terminal** panel shows it again,
+live, with a working Stop button and input line — the pane is derived from
+the running session, not just from the moment you opened it. You are never
+stuck: **Disconnect** on the Connection panel is always available. If the
+reader thread still holds the port, the click fails and explains why; trying
+again in a moment succeeds.
 
 If leaving the terminal and returning to binary mode fails, the dashboard
 **disconnects** rather than pretend the session is still in binary mode.

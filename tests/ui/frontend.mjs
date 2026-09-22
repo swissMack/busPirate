@@ -52,7 +52,7 @@ check("panel is hidden", $("panel").hidden);
 check("status reads not connected", $("status-text").textContent === "Not connected");
 const options = [...$("port-select").options].map((o) => o.textContent);
 check("port picker offers the simulated device", options.some((o) => o.includes("fake")), options.join("|"));
-check("nav lists every panel plus the guide", $("nav").children.length === 8, `${$("nav").children.length}`);
+check("nav lists every panel plus the guide", $("nav").children.length === 9, `${$("nav").children.length}`);
 
 // --- connect
 $("connect").click();
@@ -242,16 +242,26 @@ check("the device works again after a sniff",
   scanAgain.querySelector(".result").textContent.includes("0x50"),
   scanAgain.querySelector(".result").textContent.slice(0, 60));
 
-// --- the board's own terminal, opened as an input-carrying stream
-navButtons.find((b) => b.textContent === "Connection").click();
+// --- the board's own terminal, opened as an input-carrying stream, now on
+// its own Terminal panel (moved off Connection so open/type/stop are one
+// group in one place)
+navButtons.find((b) => b.textContent === "Terminal").click();
 await settle(200);
+check("send_line has no automatic form on the Terminal panel — only the "
+  + "console input row drives it",
+  $("panel").querySelector('[data-action="send_line"]') === null);
 const term = $("panel").querySelector('[data-action="open_terminal"]');
 term.querySelector("button").click();
 await settle(900);
-const termPane = term.querySelector(".stream");
+// Opening it re-renders the whole panel from state (see app.js renderPanel):
+// the pane is the panel's only content now, so re-query from #panel rather
+// than the (possibly now-detached) `term` node.
+const termPane = $("panel").querySelector(".stream");
 check("opening the terminal starts a live pane", termPane !== null);
 check("the terminal pane offers an input line",
   termPane && termPane.querySelector(".stream__input") !== null);
+check("Stop is the first control in the pane — nothing else on this panel",
+  termPane && termPane.querySelector("button").textContent === "Stop");
 
 const line = termPane.querySelector(".stream__input");
 const toksBefore = termPane.querySelectorAll(".tok").length;
@@ -264,10 +274,48 @@ check("the pane gains output after a line is sent",
 check("the input clears after sending", line.value === "");
 check("the field is not disabled while idle", !line.disabled);
 
-termPane.querySelector("button").click();  // Stop — first button, same as the sniffer pane
+// --- the regression this fix exists for: leaving the Terminal panel used to
+// destroy the live pane outright — the header still said "running", but the
+// Stop button and console were gone with no way back. The pane must be
+// derivable from state, not just from the action result that first created
+// it.
+navButtons.find((b) => b.textContent === "I2C").click();
+await settle(200);
+check("navigating away leaves the stream running (header still says so)",
+  /Board terminal running/.test($("status-text").textContent), $("status-text").textContent);
+check("the pane is gone from the DOM while looking at another panel",
+  $("panel").querySelector(".stream") === null);
+navButtons.find((b) => b.textContent === "Terminal").click();
+await settle(200);
+const revivedPane = $("panel").querySelector(".stream");
+check("returning to the Terminal panel shows the live pane again", revivedPane !== null);
+const revivedStop = revivedPane && revivedPane.querySelector("button");
+check("the revived pane has a working Stop button",
+  revivedStop !== null && revivedStop.textContent === "Stop" && !revivedStop.disabled);
+check("the revived pane still offers the input line",
+  revivedPane && revivedPane.querySelector(".stream__input") !== null);
+
+// The revived pane must be live, not a static leftover: typing into it
+// still reaches the board.
+const revivedLine = revivedPane.querySelector(".stream__input");
+const revivedToksBefore = revivedPane.querySelectorAll(".tok").length;
+revivedLine.value = "?";
+revivedLine.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+await settle(900);
+check("the revived pane keeps receiving output",
+  revivedPane.querySelectorAll(".tok").length > revivedToksBefore,
+  `${revivedToksBefore} -> ${revivedPane.querySelectorAll(".tok").length}`);
+
+revivedPane.querySelector("button").click();  // Stop — first button, same as the sniffer pane
 await settle(900);
 check("the input line goes away when the stream stops",
   $("panel").querySelector(".stream__input") === null);
+check("navigating back after stopping shows no stale pane",
+  (() => {
+    navButtons.find((b) => b.textContent === "I2C").click();
+    navButtons.find((b) => b.textContent === "Terminal").click();
+    return $("panel").querySelector(".stream") === null;
+  })());
 
 // --- the guide, rendered in the UI
 // Open it from the I2C panel: the guide follows whichever panel you are on.

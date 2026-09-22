@@ -165,15 +165,15 @@ def test_the_bridge_action_asks_before_it_runs(client):
 
 
 def test_the_terminal_holds_the_port_as_a_stream(client):
-    code, body = run(client, "connection", "open_terminal")
+    code, body = run(client, "terminal", "open_terminal")
     assert code == 200, body
     assert body["result"]["input"] is True
     assert status(client)["stream"]["kind"] == "Board terminal"
 
 
 def test_typing_into_the_terminal_reaches_the_board(client):
-    run(client, "connection", "open_terminal")
-    code, body = run(client, "connection", "send_line", line="i")
+    run(client, "terminal", "open_terminal")
+    code, body = run(client, "terminal", "send_line", line="i")
     assert code == 200, body
     found = wait_for_events(client, at_least=1)
     assert found["events"] >= 1
@@ -181,13 +181,13 @@ def test_typing_into_the_terminal_reaches_the_board(client):
 
 def test_send_line_is_refused_while_a_sniffer_runs(client):
     run(client, "i2c", "sniff", power=True, pullups=True, speed=2)
-    code, body = run(client, "connection", "send_line", line="i")
+    code, body = run(client, "terminal", "send_line", line="i")
     assert code == 400
     assert "terminal" in body["error"]
 
 
 def test_other_panels_are_refused_while_the_terminal_holds_the_port(client):
-    run(client, "connection", "open_terminal")
+    run(client, "terminal", "open_terminal")
     code, body = run(client, "i2c", "scan", power=True, pullups=True, speed=2)
     assert code == 400
 
@@ -195,7 +195,7 @@ def test_other_panels_are_refused_while_the_terminal_holds_the_port(client):
 def test_leaving_the_terminal_returns_to_binary_with_nothing_held(client):
     run(client, "pins", "set_pins", power=True, pullups=False, aux=False,
         mosi=False, clk=False, miso=False, cs=False)
-    run(client, "connection", "open_terminal")
+    run(client, "terminal", "open_terminal")
     assert client.post("/api/stream/stop").status_code == 200
     state = status(client)
     assert state["stream"] is None
@@ -205,12 +205,12 @@ def test_leaving_the_terminal_returns_to_binary_with_nothing_held(client):
 
 def test_the_mode_led_goes_dark_in_the_terminal(client):
     assert status(client)["leds"]["MODE"] is True
-    run(client, "connection", "open_terminal")
+    run(client, "terminal", "open_terminal")
     assert status(client)["leds"]["MODE"] is False
 
 
 def test_the_mode_led_comes_back_after_the_terminal(client):
-    run(client, "connection", "open_terminal")
+    run(client, "terminal", "open_terminal")
     client.post("/api/stream/stop")
     state = status(client)
     assert state["leds"]["MODE"] is True
@@ -226,7 +226,7 @@ def test_a_failed_return_from_the_terminal_does_not_claim_a_mode(client, monkeyp
     from buspirate.base import BusPirate
     from buspirate.exceptions import ModeError
 
-    run(client, "connection", "open_terminal")
+    run(client, "terminal", "open_terminal")
 
     def refuse(self, retries=25):
         raise ModeError("no BBIO response after 25 attempts on fake")
@@ -279,7 +279,7 @@ def test_a_failed_write_in_the_terminal_does_not_wedge_the_session(
     """
     from buspirate.base import BusPirate
 
-    run(client, "connection", "open_terminal")
+    run(client, "terminal", "open_terminal")
     assert status(client)["stream"]["kind"] == "Board terminal"
 
     original = BusPirate.write
@@ -292,7 +292,7 @@ def test_a_failed_write_in_the_terminal_does_not_wedge_the_session(
         return original(self, data)
 
     monkeypatch.setattr(BusPirate, "write", explode)
-    code, body = run(client, "connection", "send_line", line="i")
+    code, body = run(client, "terminal", "send_line", line="i")
     assert code == 200, body
 
     assert wait_for_no_stream(client), "the stream was never finished"
@@ -317,7 +317,7 @@ def test_a_terminal_that_fails_to_open_does_not_claim_binary_mode(
         raise OSError("device disconnected during the settle")
 
     monkeypatch.setattr(BusPirate, "flush_input", refuse)
-    code, body = run(client, "connection", "open_terminal")
+    code, body = run(client, "terminal", "open_terminal")
     assert code == 400, body
 
     state = status(client)

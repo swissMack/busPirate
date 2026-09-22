@@ -96,6 +96,12 @@ class Action:
     #: True for actions that must still work while a stream holds the port —
     #: connecting and disconnecting, which end the stream themselves.
     allow_while_streaming: bool = False
+    #: True to suppress the automatic form/button the frontend would
+    #: otherwise build for this action. The action still runs over
+    #: ``/api/run`` — only its generic rendering is skipped, for actions a
+    #: panel drives some other way (e.g. a console input row bound to a
+    #: live stream rather than a standalone button).
+    hidden: bool = False
 
     def to_json(self) -> dict:
         return {
@@ -110,6 +116,7 @@ class Action:
             "long_running": self.long_running,
             "stream": self.stream,
             "allow_while_streaming": self.allow_while_streaming,
+            "hidden": self.hidden,
         }
 
 

@@ -286,11 +286,31 @@ function renderPanel() {
   const panel = state.panels.find((p) => p.id === state.current);
   if (!panel) return;
   const root = $("panel");
+  // A live stream survives leaving its panel — it keeps running and the
+  // header keeps saying so — so the pane has to be re-derivable from state,
+  // not only ever built from a fresh action result. `stream.panel` names
+  // the panel whose action started it; `stream.input` marks a console
+  // rather than a plain transcript (never `stream.kind`, which is only a
+  // display label). When both match here, this panel's job is just to show
+  // that pane again, live — nothing else, so Stop sits right at the top.
+  const revived = state.status.stream
+    && state.status.stream.panel === panel.id
+    && state.status.stream.input
+    ? streamPane({ input: true })
+    : null;
   root.replaceChildren(
     el("h1", { text: panel.title }),
     el("p", { class: "blurb", text: panel.blurb }),
     panel.wiring.length || panel.notes.length ? wiringCard(panel) : null,
-    el("div", { class: "card" }, ...panel.actions.map((action) => actionBlock(panel, action)))
+    el(
+      "div",
+      { class: "card" },
+      revived
+        ? revived
+        : panel.actions
+            .filter((action) => !action.hidden)
+            .map((action) => actionBlock(panel, action))
+    )
   );
 }
 
@@ -364,6 +384,15 @@ function actionBlock(panel, action) {
       state.status = body.status;
       state.panels = body.panels;
       renderStatus();
+      if (body.result && body.result.render === "stream" && body.result.input) {
+        // A console stream (never anything sniffer-shaped — that is what
+        // `input` picks out, not `kind`) gets the same rendering the panel
+        // would derive from state on its own: just the pane, nothing else
+        // on the panel, Stop at the top from the very first click, not
+        // only after leaving and coming back.
+        renderPanel();
+        return;
+      }
       output.replaceChildren(renderResult(body.result));
     } catch (error) {
       output.replaceChildren(el("p", { class: "msg msg--warn", text: error.message }));
