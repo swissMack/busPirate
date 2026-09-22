@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import queue
 import threading
 import time
 from collections import deque
@@ -19,12 +20,24 @@ from ..base import BusPirate
 from ..exceptions import BusPirateError, ModeError
 from ..ports import discover, resolve
 from .decoders import make_decoder
-from .registry import Action, Panel, load_panels
+from .registry import Action, Panel, live, load_panels
 from .wiring import BOARDS, DEFAULT_VARIANT, LED_RULES
 
 TRAFFIC_HISTORY = 500
 STREAM_EVENT_CAP = 200  # events per websocket message
 STREAM_FLUSH_SECONDS = 0.1  # at most ten updates a second, however busy the bus
+
+#: How long to wait after leaving binary mode before reading. A v3 performs a
+#: hardware reset here and has to boot; a v4 does not. Set conservatively for
+#: the slower case — see the hardware checklist in docs/troubleshooting.md.
+TERMINAL_SETTLE_SECONDS = 0.5
+
+#: How long stop_stream_blocking() waits for the reader thread to let go of
+#: the port. Leaving the board's terminal on a v3 means a hardware reset, so
+#: enter_binary_mode()'s 25 retries against a 0.2s serial timeout can run for
+#: seconds on their own. A generous wait is still only a wait, though: if it
+#: expires we say the stream did not stop rather than pretending it did.
+STREAM_STOP_TIMEOUT_SECONDS = 15.0
 
 
 class StreamState:
@@ -40,6 +53,10 @@ class StreamState:
         self.thread: Optional[threading.Thread] = None
         self.started_at = time.time()
         self.events = 0
+        self.note = ""
+        #: Set by _finish_stream so it can never run twice for one stream,
+        #: whichever path gets there first.
+        self.finished = False
 
     def describe(self) -> Dict[str, Any]:
         return {
@@ -49,6 +66,21 @@ class StreamState:
             "events": self.events,
             "seconds": round(time.time() - self.started_at, 1),
         }
+
+
+class TerminalState(StreamState):
+    """The Bus Pirate's own terminal, held open as a stream.
+
+    Typed input does not go to the port directly. ``send_terminal_line`` puts
+    it here and the reader thread writes it, so that thread stays the only
+    thing touching the port.
+    """
+
+    def __init__(self, decoder, result) -> None:
+        super().__init__(
+            "Board terminal", "connection", "open_terminal", decoder, result
+        )
+        self.inbox: "queue.Queue[bytes]" = queue.Queue()
 
 
 class ActionContext:
@@ -200,7 +232,16 @@ class DeviceSession:
 
     def disconnect_blocking(self) -> None:
         if self.stream is not None:
-            self.stop_stream_blocking()
+            outcome = self.stop_stream_blocking()
+            if not outcome.get("stopped") and self.stream is not None:
+                # The reader thread still owns the port. Closing it here
+                # would put two threads on one serial handle — the exact
+                # thing the single-reader design exists to prevent — so
+                # refuse instead. The thread clears self.stream on its way
+                # out, after which a retry disconnects normally.
+                raise BusPirateError(
+                    outcome.get("reason", "a stream still holds the port")
+                )
         if self.bp is not None:
             try:
                 self.bp.close()
@@ -277,7 +318,9 @@ class DeviceSession:
             how = rule["inference"]
             if how == "supplies":
                 state[name] = live and self._supplies_on()
-            elif how in {"powered", "connected"}:
+            elif how == "connected":
+                state[name] = live and not isinstance(self.stream, TerminalState)
+            elif how == "powered":
                 state[name] = live
             else:  # flash_on_traffic, always_dark
                 state[name] = False
@@ -409,19 +452,32 @@ class DeviceSession:
 
     def _begin_stream(self, panel: Panel, action: Action, result: Dict[str, Any]) -> None:
         """Hand the port to a reader thread until someone stops it."""
-        stream = StreamState(
-            kind=result.get("kind", action.name),
-            panel_id=panel.id,
-            action=action.name,
-            decoder=make_decoder(result.get("decoder", "text")),
-            result=result,
-        )
+        decoder = make_decoder(result.get("decoder", "text"))
+        if result.get("input"):
+            stream = TerminalState(decoder, result)
+        else:
+            stream = StreamState(
+                kind=result.get("kind", action.name),
+                panel_id=panel.id,
+                action=action.name,
+                decoder=decoder,
+                result=result,
+            )
         result["legend"] = stream.decoder.legend
         self.stream = stream
         stream.thread = threading.Thread(
             target=self._read_stream, args=(stream,), daemon=True
         )
-        stream.thread.start()
+        try:
+            stream.thread.start()
+        except BaseException:
+            # No reader exists, so nothing will ever clear self.stream.
+            self.stream = None
+            if isinstance(stream, TerminalState):
+                # 0x0F has already gone out: the board is in its own
+                # terminal and this session cannot speak to it.
+                self._drop_connection()
+            raise
         self.emit({"type": "stream_started", **stream.describe()})
 
     def _read_stream(self, stream: StreamState) -> None:
@@ -451,26 +507,85 @@ class DeviceSession:
             pending = []
             last_flush = time.monotonic()
 
-        while not stream.stop_event.is_set() and device is not None:
+        # Everything below runs under try/finally: whatever ends this loop —
+        # a stop request, a dead port, a decoder or _notify raising — the
+        # stream has to be finished exactly once. self.stream is only ever
+        # cleared in _finish_stream, so an escaping exception here would
+        # leave it set for the life of the process and every later action
+        # would be refused with "…has the port".
+        try:
+            while not stream.stop_event.is_set() and device is not None:
+                if isinstance(stream, TerminalState) and not self._drain_inbox(
+                    stream, device
+                ):
+                    break
+                try:
+                    data = device.serial.read(256)
+                except (OSError, AttributeError):
+                    break
+                if not data:
+                    flush()
+                    time.sleep(0.01)
+                    continue
+                device._notify("rx", data)
+                events = stream.decoder.feed(data)
+                if events:
+                    stream.events += len(events)
+                    pending.extend(events)
+                if time.monotonic() - last_flush >= STREAM_FLUSH_SECONDS:
+                    flush()
+        finally:
             try:
-                data = device.serial.read(256)
-            except (OSError, AttributeError):
-                break
-            if not data:
                 flush()
-                time.sleep(0.01)
-                continue
-            device._notify("rx", data)
-            events = stream.decoder.feed(data)
-            if events:
-                stream.events += len(events)
-                pending.extend(events)
-            if time.monotonic() - last_flush >= STREAM_FLUSH_SECONDS:
-                flush()
-        flush()
-        self._finish_stream(stream)
+            finally:
+                self._finish_stream(stream)
+
+    def _drain_inbox(self, stream: "TerminalState", device: BusPirate) -> bool:
+        """Write everything the user has typed. False means the port is gone.
+
+        ``BusPirate.write`` raises ConnectionError when the handle has gone
+        away and lets serial.SerialException through, so an unguarded write
+        here would escape the reader loop entirely. Returning False instead
+        ends the stream through the normal path.
+        """
+        while True:
+            try:
+                line = stream.inbox.get_nowait()
+            except queue.Empty:
+                return True
+            try:
+                device.write(line)
+            except (OSError, AttributeError, BusPirateError):
+                return False
+
+    def _drop_connection(self) -> None:
+        """Forget the device without claiming anything about the board.
+
+        Used whenever the board has been sent out of binary mode and this
+        session cannot prove it came back. Reporting "connected" then would
+        let the dashboard go on presenting a working binary-mode session that
+        does not exist, and every action after it would fail confusingly.
+        Dropping the connection outright makes the connection panel the one
+        honest way back.
+        """
+        if self.bp is not None:
+            try:
+                self.bp.close()
+            except BusPirateError:
+                pass
+        self.bp = None
+        self.port = None
+        self.port_info = None
+        self.display_variant = None
+        self.mode_name = None
+        self._mode = None
+        # Whatever we drove the pins to is no longer true of the board.
+        self.last_pins = dict.fromkeys(self.last_pins, False)
 
     def _finish_stream(self, stream: StreamState) -> None:
+        if stream.finished:
+            return
+        stream.finished = True
         note = ""
         try:
             if self.bp is not None:
@@ -479,7 +594,25 @@ class DeviceSession:
             note = str(exc)
         self.mode_name = None
         self._mode = None
+        if isinstance(stream, TerminalState):
+            # A v3 was just hardware-reset and a v4 dropped its mode — either
+            # way the supplies this session last drove are no longer true of
+            # the board. Leaving last_pins stale would light VREG over a dark
+            # board, the same reasoning disconnect_blocking() already applies.
+            self.last_pins = dict.fromkeys(self.last_pins, False)
         self.stream = None
+        if note and self.bp is not None:
+            # stop_stream() could not knock the board back into binary mode,
+            # so the session no longer knows what state the board is in
+            # (still sitting in its own terminal, most likely).
+            self._drop_connection()
+        # Stash the failure reason on the (already-finished) stream object so
+        # stop_stream_blocking() — running on a different thread, after
+        # join() — can hand it back to the caller. Without this the note
+        # only ever reached the websocket "stream_stopped" event: real for a
+        # browser watching at that exact moment, invisible to anything that
+        # only reads the HTTP response or polls state after the fact.
+        stream.note = note
         self.emit({"type": "stream_stopped", **stream.describe(), "note": note})
 
     def stop_stream_blocking(self) -> Dict[str, Any]:
@@ -487,9 +620,67 @@ class DeviceSession:
         if stream is None:
             return {"stopped": False, "reason": "nothing is streaming"}
         stream.stop_event.set()
-        if stream.thread is not None:
-            stream.thread.join(timeout=5)
-        return {"stopped": True, **stream.describe()}
+        thread = stream.thread
+        if thread is not None:
+            thread.join(timeout=STREAM_STOP_TIMEOUT_SECONDS)
+            if thread.is_alive():
+                # Do not claim stopped: the reader thread is still inside
+                # stop_stream() and still owns the port. Callers use this
+                # answer to decide whether it is safe to close the handle.
+                return {
+                    "stopped": False,
+                    "reason": (
+                        f"{stream.kind} has not let go of the port after "
+                        f"{STREAM_STOP_TIMEOUT_SECONDS:g}s — it is still "
+                        "returning the board to binary mode. Nothing else "
+                        "may touch the port until it finishes; try again "
+                        "in a moment."
+                    ),
+                    **stream.describe(),
+                    "note": stream.note,
+                }
+        return {
+            "stopped": True,
+            **stream.describe(),
+            "note": stream.note,
+        }
+
+    def enter_terminal(self) -> Dict[str, Any]:
+        """Leave binary mode and hold the board's own terminal open."""
+        if self.bp is None or not self.bp.is_open:
+            raise BusPirateError("not connected — pick a port and connect first")
+        # Once 0x0F is on the wire the board is in its own terminal whatever
+        # happens next, so any failure from here has to tear the connection
+        # down the same way a failed return does — otherwise the session
+        # reports a live binary-mode connection over a board that is not
+        # listening to one. reset_hardware() is inside the guard because it
+        # writes 0x0F and then flushes: it can raise with the command
+        # already sent.
+        try:
+            self.bp.reset_hardware()
+            time.sleep(TERMINAL_SETTLE_SECONDS)
+            self.bp.flush_input()
+        except BusPirateError:
+            self._drop_connection()
+            raise
+        except Exception as exc:  # noqa: BLE001 - re-raised as a board error
+            self._drop_connection()
+            raise BusPirateError(
+                "the board was sent out of binary mode but its terminal "
+                f"could not be opened: {exc}"
+            ) from exc
+        return live(
+            "Board terminal",
+            decoder="text",
+            caption="The Bus Pirate's own terminal. Type a command; '?' lists them.",
+            input=True,
+        )
+
+    def send_terminal_line(self, line: str) -> None:
+        stream = self.stream
+        if not isinstance(stream, TerminalState):
+            raise BusPirateError("the board's terminal is not open")
+        stream.inbox.put((line + "\r\n").encode("ascii", errors="replace"))
 
     async def run(self, panel: Panel, action: Action, params: Dict[str, Any]):
         async with self.lock:

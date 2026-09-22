@@ -90,6 +90,21 @@ def test_disconnect_leaves_a_clean_state(client):
     assert client.get("/api/state").json()["status"]["connected"] is False
 
 
+def test_the_terminal_warns_before_it_takes_the_board(client):
+    body = connect(client)
+    panels = {p["id"]: p for p in body["panels"]}
+    action = next(a for a in panels["connection"]["actions"]
+                  if a["name"] == "open_terminal")
+    assert action["confirm"], "opening the terminal must confirm first"
+
+
+def test_send_line_is_refused_when_the_terminal_is_not_open(client):
+    connect(client)
+    status, body = run(client, "connection", "send_line", line="i")
+    assert status == 400
+    assert "terminal" in body["error"]
+
+
 # -- the panels do what they say ------------------------------------------
 
 
@@ -299,6 +314,21 @@ def test_every_panel_points_at_a_page_that_exists(client):
     for panel in client.get("/api/state").json()["panels"]:
         if panel["doc"]:
             assert panel["doc"] in names, panel["id"]
+
+
+def test_the_dashboard_guide_documents_the_terminal(client):
+    page = client.get("/api/docs/dashboard").json()["markdown"]
+    # "terminal" was already in this page before the feature and guards
+    # nothing. The reset behaviour is what the branch added.
+    assert "reset" in page.lower()
+
+
+def test_the_led_guide_distinguishes_the_two_causes_of_a_dark_mode(client):
+    # "terminal" alone is already in this page (procMenu.c is "the terminal
+    # UI"), so it does not pin the fix. Pin the actual corrected claim: a
+    # dark MODE has two distinct causes, one deliberate, one a fault.
+    page = client.get("/api/docs/pins-and-power").json()["markdown"]
+    assert "one of two things" in page.lower()
 
 
 # -- hook-up diagram data --------------------------------------------------

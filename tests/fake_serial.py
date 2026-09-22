@@ -211,10 +211,26 @@ class FakeSerial:
         if cmd in (0x0A, 0x0D):
             line = self._term_line.decode("ascii", "replace").strip().lower()
             self._term_line.clear()
-            self._out += (self.banner if line == "i" else "HiZ>").encode()
+            self._out += self._term_reply(line).encode()
             return 1
         self._term_line.append(cmd)
         return 1
+
+    def _term_reply(self, line: str) -> str:
+        """A short, plausible reply for one completed terminal line.
+
+        These exist for assertions, not firmware fidelity — a few lines is
+        plenty for each command.
+        """
+        if line == "i":
+            return self.banner
+        if line == "":
+            return "HiZ>"
+        if line == "?":
+            return "General commands\r\n?  help   i  info   v  pin voltages\r\nHiZ>"
+        if line == "v":
+            return "ADC: 3.30V  VPU: 0.0V\r\nHiZ>"
+        return f"command '{line}' not found\r\nHiZ>"
 
     # -- bitbang -----------------------------------------------------------
 
@@ -238,6 +254,15 @@ class FakeSerial:
             self._out += b"RAW1"
         elif cmd == 0x0F:
             self.state = "term"
+            if self.variant == "v3":
+                # A v3 hardware-resets on this command (Firmware/binIO.c:150-158);
+                # a v4 just falls back into its terminal loop. Model that by
+                # clearing the peripheral state a reset would clear: the
+                # AUX/CS pin model and the pin byte that carries the power
+                # and pull-up flags.
+                self._aux_pin = "aux"
+                self._aux_levels = {"aux": 0, "cs": 0}
+                self.pins = 0x00
         elif cmd in (0x10, 0x11):  # self-test
             if not self._supports("self_test"):
                 raise AssertionError("v4 hardware has no binary self-test")

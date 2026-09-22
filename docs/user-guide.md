@@ -29,6 +29,7 @@ yourself how the tool fits together.
 | Watch a serial line | Dashboard → UART → **Set the line up**, then **Start listening** | [UART](uart.md) |
 | Read DS18B20 temperatures | Dashboard → 1-Wire → **Read temperatures** | needs a 4k7 pull-up |
 | Watch two other devices talk | Dashboard → I2C or SPI → **Sniff the bus** | passive; nothing is driven |
+| Get the board's own `HiZ>` prompt | Dashboard → Connection → **Open the board's terminal** | leaves binary mode; see [Dashboard](dashboard.md#the-boards-terminal) |
 | Write a file back to SPI flash | Dashboard → SPI → **Write a file to flash** | erases first, then verifies |
 | Erase a flash chip | Dashboard → SPI → **Erase one sector** / **the whole chip** | not reversible |
 | Talk to something odd | Dashboard → Raw wire | [Raw wire](rawwire.md) |

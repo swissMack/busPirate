@@ -37,16 +37,23 @@ in `binBB()` — the moment **binary mode** is entered — and it stays lit for
 the whole binary session, HiZ included. The "on when a protocol is active"
 behaviour belongs to `procMenu.c`, the **terminal** UI. Anything speaking the
 binary protocol, this library and dashboard included, sees MODE lit from the
-moment it connects.
+moment it connects, and dark again the moment you leave binary mode — which
+now includes opening the board's own terminal from the dashboard. See
+[Dashboard](dashboard.md#the-boards-terminal) for what that costs.
 
-The firmware turns it **off** to signal trouble, and these are the cases worth
-knowing:
+The firmware also turns it **off** for a second, unrelated reason: to signal
+trouble mid-session, while you are still in binary mode. These are the
+fault cases worth knowing:
 
 - an SPI sniff that cannot keep up (`SPI.c`) — see [SPI](spi.md)
 - a UART overrun (`UART.c`)
 - the input buffer filling and a byte being dropped (`baseIO.c`)
 
-So **MODE going dark mid-session is a fault indication, not a mode change.**
+So **MODE going dark mid-session means one of two things: you (or the
+dashboard) deliberately left binary mode for the board's own terminal, or
+the firmware just dropped something.** The first is expected and harmless;
+the second is a fault. Check which one actually happened before assuming
+the worse case.
 
 ### The dashboard draws them
 
