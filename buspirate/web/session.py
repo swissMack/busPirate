@@ -298,7 +298,9 @@ class DeviceSession:
             how = rule["inference"]
             if how == "supplies":
                 state[name] = live and self._supplies_on()
-            elif how in {"powered", "connected"}:
+            elif how == "connected":
+                state[name] = live and not isinstance(self.stream, TerminalState)
+            elif how == "powered":
                 state[name] = live
             else:  # flash_on_traffic, always_dark
                 state[name] = False

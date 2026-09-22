@@ -216,7 +216,8 @@ DEFAULT_VARIANT = "v3"
 #:
 #: ``inference`` is one of:
 #:   "powered"          — lit whenever the port is open
-#:   "connected"        — lit whenever the port is open (binary mode entered)
+#:   "connected"        — lit while the port is open and in binary mode; dark
+#:                        while the board's own terminal holds the port
 #:   "supplies"         — follows the on-board 3.3V/5V regulators
 #:   "flash_on_traffic" — a pulse the client drives from the traffic feed
 #:   "always_dark"      — never reported lit
@@ -235,7 +236,9 @@ LED_RULES: Dict[str, Dict[str, Dict[str, str]]] = {
         "MODE": {
             "driver": "firmware",
             "inference": "connected",
-            "means": "binary mode is active — the firmware clears it on an overrun",
+            "means": "binary mode is active — the firmware clears it on an "
+            "overrun, and it goes dark while the board's own terminal is "
+            "open, since opening it leaves binary mode",
         },
         "VREG": {
             "driver": "hardware",
@@ -258,7 +261,9 @@ LED_RULES: Dict[str, Dict[str, Dict[str, str]]] = {
         "MODE": {
             "driver": "firmware",
             "inference": "connected",
-            "means": "binary mode is active — the firmware clears it on an overrun",
+            "means": "binary mode is active — the firmware clears it on an "
+            "overrun, and it goes dark while the board's own terminal is "
+            "open, since opening it leaves binary mode",
         },
         "VREG": {
             "driver": "hardware",

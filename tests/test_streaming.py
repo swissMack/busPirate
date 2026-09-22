@@ -201,3 +201,15 @@ def test_leaving_the_terminal_returns_to_binary_with_nothing_held(client):
     assert state["stream"] is None
     assert state["mode"] is None
     assert state["leds"]["VREG"] is False
+
+
+def test_the_mode_led_goes_dark_in_the_terminal(client):
+    assert status(client)["leds"]["MODE"] is True
+    run(client, "connection", "open_terminal")
+    assert status(client)["leds"]["MODE"] is False
+
+
+def test_the_mode_led_comes_back_after_the_terminal(client):
+    run(client, "connection", "open_terminal")
+    client.post("/api/stream/stop")
+    assert status(client)["leds"]["MODE"] is True
