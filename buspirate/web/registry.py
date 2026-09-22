@@ -211,10 +211,13 @@ def pins(state: Dict[str, bool]) -> dict:
     return {"render": "pins", "state": state}
 
 
-def live(kind: str, *, decoder: str, caption: str = "", warning: str = "") -> dict:
+def live(kind: str, *, decoder: str, caption: str = "", warning: str = "",
+         input: bool = False) -> dict:
     """A live stream: the device now talks until it is told to stop.
 
     ``decoder`` names an entry in :mod:`buspirate.web.decoders`.
+    ``input`` marks a stream that accepts typed lines back, which is what
+    makes the pane render a console rather than a transcript.
     """
     return {
         "render": "stream",
@@ -222,6 +225,7 @@ def live(kind: str, *, decoder: str, caption: str = "", warning: str = "") -> di
         "decoder": decoder,
         "caption": caption,
         "warning": warning,
+        "input": input,
     }
 
 

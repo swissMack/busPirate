@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import queue
 import threading
 import time
 from collections import deque
@@ -19,12 +20,17 @@ from ..base import BusPirate
 from ..exceptions import BusPirateError, ModeError
 from ..ports import discover, resolve
 from .decoders import make_decoder
-from .registry import Action, Panel, load_panels
+from .registry import Action, Panel, live, load_panels
 from .wiring import BOARDS, DEFAULT_VARIANT, LED_RULES
 
 TRAFFIC_HISTORY = 500
 STREAM_EVENT_CAP = 200  # events per websocket message
 STREAM_FLUSH_SECONDS = 0.1  # at most ten updates a second, however busy the bus
+
+#: How long to wait after leaving binary mode before reading. A v3 performs a
+#: hardware reset here and has to boot; a v4 does not. Set conservatively for
+#: the slower case — see the hardware checklist in docs/troubleshooting.md.
+TERMINAL_SETTLE_SECONDS = 0.5
 
 
 class StreamState:
@@ -49,6 +55,21 @@ class StreamState:
             "events": self.events,
             "seconds": round(time.time() - self.started_at, 1),
         }
+
+
+class TerminalState(StreamState):
+    """The Bus Pirate's own terminal, held open as a stream.
+
+    Typed input does not go to the port directly. ``send_terminal_line`` puts
+    it here and the reader thread writes it, so that thread stays the only
+    thing touching the port.
+    """
+
+    def __init__(self, decoder, result) -> None:
+        super().__init__(
+            "Board terminal", "connection", "open_terminal", decoder, result
+        )
+        self.inbox: "queue.Queue[bytes]" = queue.Queue()
 
 
 class ActionContext:
@@ -409,13 +430,17 @@ class DeviceSession:
 
     def _begin_stream(self, panel: Panel, action: Action, result: Dict[str, Any]) -> None:
         """Hand the port to a reader thread until someone stops it."""
-        stream = StreamState(
-            kind=result.get("kind", action.name),
-            panel_id=panel.id,
-            action=action.name,
-            decoder=make_decoder(result.get("decoder", "text")),
-            result=result,
-        )
+        decoder = make_decoder(result.get("decoder", "text"))
+        if result.get("input"):
+            stream = TerminalState(decoder, result)
+        else:
+            stream = StreamState(
+                kind=result.get("kind", action.name),
+                panel_id=panel.id,
+                action=action.name,
+                decoder=decoder,
+                result=result,
+            )
         result["legend"] = stream.decoder.legend
         self.stream = stream
         stream.thread = threading.Thread(
@@ -452,6 +477,13 @@ class DeviceSession:
             last_flush = time.monotonic()
 
         while not stream.stop_event.is_set() and device is not None:
+            if isinstance(stream, TerminalState):
+                while True:
+                    try:
+                        line = stream.inbox.get_nowait()
+                    except queue.Empty:
+                        break
+                    device.write(line)
             try:
                 data = device.serial.read(256)
             except (OSError, AttributeError):
@@ -490,6 +522,26 @@ class DeviceSession:
         if stream.thread is not None:
             stream.thread.join(timeout=5)
         return {"stopped": True, **stream.describe()}
+
+    def enter_terminal(self) -> Dict[str, Any]:
+        """Leave binary mode and hold the board's own terminal open."""
+        if self.bp is None or not self.bp.is_open:
+            raise BusPirateError("not connected — pick a port and connect first")
+        self.bp.reset_hardware()
+        time.sleep(TERMINAL_SETTLE_SECONDS)
+        self.bp.flush_input()
+        return live(
+            "Board terminal",
+            decoder="text",
+            caption="The Bus Pirate's own terminal. Type a command; '?' lists them.",
+            input=True,
+        )
+
+    def send_terminal_line(self, line: str) -> None:
+        stream = self.stream
+        if not isinstance(stream, TerminalState):
+            raise BusPirateError("the board's terminal is not open")
+        stream.inbox.put((line + "\r\n").encode("ascii", errors="replace"))
 
     async def run(self, panel: Panel, action: Action, params: Dict[str, Any]):
         async with self.lock:

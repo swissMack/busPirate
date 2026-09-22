@@ -159,3 +159,21 @@ def test_the_bridge_action_asks_before_it_runs(client):
     bridge = next(a for a in panels["uart"]["actions"] if a["name"] == "bridge")
     assert bridge["confirm"]
     assert bridge["stream"] is True
+
+
+# -- the board's own terminal ----------------------------------------------
+
+
+def test_the_terminal_holds_the_port_as_a_stream(client):
+    code, body = run(client, "connection", "open_terminal")
+    assert code == 200, body
+    assert body["result"]["input"] is True
+    assert status(client)["stream"]["kind"] == "Board terminal"
+
+
+def test_typing_into_the_terminal_reaches_the_board(client):
+    run(client, "connection", "open_terminal")
+    code, body = run(client, "connection", "send_line", line="i")
+    assert code == 200, body
+    found = wait_for_events(client, at_least=1)
+    assert found["events"] >= 1
