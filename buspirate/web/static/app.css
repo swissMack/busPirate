@@ -256,6 +256,8 @@ svg .led--flash { fill: var(--led-on); stroke: #eaffe4; stroke-width: 1.5; opaci
 .tok--ack { color: var(--good); border: 0; background: none; padding: 1px 2px; }
 .tok--nack { color: var(--warn); border: 0; background: none; padding: 1px 2px; }
 .tok--value { color: var(--accent); }
+.stream__inputrow { display: flex; gap: 8px; margin-top: 9px; }
+.stream__input { flex: 1 1 auto; min-width: 0; font-family: var(--mono); }
 
 .card-img--board { max-width: 840px; display: block; margin-bottom: 4px; }
 /* The viewBox is ~1090 units wide but the card renders at ~760px, so the

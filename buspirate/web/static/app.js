@@ -492,13 +492,19 @@ function streamPane(result) {
   const counter = el("span", { class: "muted", text: "waiting for traffic…" });
   const stop = el("button", { class: "btn btn--primary", text: "Stop" });
 
+  // A stream whose result carries `input: true` is a console, not just a
+  // transcript — the Bus Pirate's own terminal is the one example today, but
+  // this is driven by the flag, never by `result.kind` (a display label).
+  const inputRow = result.input ? consoleInput() : null;
+
   const pane = el(
     "div",
     { class: "stream" },
     result.warning ? el("p", { class: "msg msg--warn", text: result.warning }) : null,
     el("div", { class: "stream__bar" }, stop, counter),
     el("p", { class: "caption", text: result.legend || "" }),
-    events
+    events,
+    inputRow
   );
 
   stop.addEventListener("click", async () => {
@@ -514,8 +520,49 @@ function streamPane(result) {
     }
   });
 
-  activeStream = { events, counter, stop };
+  activeStream = { events, counter, stop, inputRow };
   return pane;
+}
+
+/* The typed line that turns a console-carrying stream into something you can
+   actually drive. `send_line` lives on the Connection panel and is
+   `allow_while_streaming`, so it works for as long as this stream holds the
+   port — but it is a plain action call, made directly rather than through the
+   generic action-button wiring, because this field belongs to the pane, not
+   to a form of its own. The field is never disabled while a send is in
+   flight: swallowing keystrokes would make the console worse than useless. */
+function consoleInput() {
+  const field = el("input", {
+    class: "stream__input",
+    placeholder: "Type a command, then press Enter…",
+    "data-mono": true,
+  });
+  const send = el("button", { class: "btn btn--small", text: "Send" });
+
+  const submit = async () => {
+    const line = field.value;
+    if (!line) return;
+    field.value = "";
+    try {
+      await api("/api/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ panel: state.current, action: "send_line", params: { line } }),
+      });
+    } catch (error) {
+      // The stream itself reports failures on the pane (e.g. it has already
+      // stopped); nothing more to do with a failed send here.
+    }
+  };
+
+  field.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    submit();
+  });
+  send.addEventListener("click", submit);
+
+  return el("div", { class: "stream__inputrow" }, field, send);
 }
 
 function pushStreamEvents(message) {
@@ -538,6 +585,10 @@ function endStream(message) {
   activeStream.counter.textContent =
     `${message.events} events in ${message.seconds}s` +
     (message.note ? ` — ${message.note}` : "");
+  // A stopped stream no longer accepts typed lines — the port is gone —
+  // so drop the input row rather than leave a field that quietly does
+  // nothing, and so a normal dashboard is what later checks see.
+  if (activeStream.inputRow) activeStream.inputRow.remove();
   activeStream = null;
 }
 

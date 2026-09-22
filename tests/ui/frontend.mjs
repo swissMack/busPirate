@@ -21,6 +21,7 @@ const dom = new JSDOM(html, { url: BASE, runScripts: "outside-only", pretendToBe
 const { window } = dom;
 window.fetch = (path, options) => fetch(path.startsWith("http") ? path : BASE + path, options);
 window.WebSocket = RealWebSocket;  // a real socket, so the live log is genuinely tested
+window.confirm = () => true;  // jsdom has no confirm(); accept every confirming action
 window.localStorage.clear();
 
 const failures = [];
@@ -240,6 +241,33 @@ await settle(900);
 check("the device works again after a sniff",
   scanAgain.querySelector(".result").textContent.includes("0x50"),
   scanAgain.querySelector(".result").textContent.slice(0, 60));
+
+// --- the board's own terminal, opened as an input-carrying stream
+navButtons.find((b) => b.textContent === "Connection").click();
+await settle(200);
+const term = $("panel").querySelector('[data-action="open_terminal"]');
+term.querySelector("button").click();
+await settle(900);
+const termPane = term.querySelector(".stream");
+check("opening the terminal starts a live pane", termPane !== null);
+check("the terminal pane offers an input line",
+  termPane && termPane.querySelector(".stream__input") !== null);
+
+const line = termPane.querySelector(".stream__input");
+const toksBefore = termPane.querySelectorAll(".tok").length;
+line.value = "?";
+line.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+await settle(900);
+check("the pane gains output after a line is sent",
+  termPane.querySelectorAll(".tok").length > toksBefore,
+  `${toksBefore} -> ${termPane.querySelectorAll(".tok").length}`);
+check("the input clears after sending", line.value === "");
+check("the field is not disabled while idle", !line.disabled);
+
+termPane.querySelector("button").click();  // Stop — first button, same as the sniffer pane
+await settle(900);
+check("the input line goes away when the stream stops",
+  $("panel").querySelector(".stream__input") === null);
 
 // --- the guide, rendered in the UI
 // Open it from the I2C panel: the guide follows whichever panel you are on.
