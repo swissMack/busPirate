@@ -322,6 +322,11 @@ def test_the_dashboard_guide_documents_the_terminal(client):
     assert "reset" in page.lower()
 
 
+def test_the_led_guide_knows_the_terminal_can_darken_mode(client):
+    page = client.get("/api/docs/pins-and-power").json()["markdown"]
+    assert "terminal" in page.lower()
+
+
 # -- hook-up diagram data --------------------------------------------------
 
 
