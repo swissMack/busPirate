@@ -1,9 +1,10 @@
 # The dashboard
 
 ```
-bin/dashboard.command          # real hardware
+bin/dashboard.command          # real hardware, opens its own window
 bin/demo.command               # simulated, no hardware needed
-buspirate dashboard            # the same, from a terminal
+buspirate app                  # the window, from a terminal
+buspirate dashboard            # the same UI, served to your browser
 buspirate dashboard --demo --variant v4
 make dash / make demo
 ```
@@ -11,6 +12,54 @@ make dash / make demo
 It serves on `http://127.0.0.1:8765/` and **refuses to bind anything but the
 loopback address** — it drives hardware and has no authentication, so it is
 not something to expose.
+
+## Window or browser
+
+`buspirate app` opens the dashboard in its own window instead of a browser
+tab. It is the same server and the same UI — nothing about a panel, a
+recipe, or a stream behaves differently. Neither command replaces the other:
+`buspirate dashboard` is still what the frontend test suite drives against,
+and it is the one to reach for if you'd rather keep the dashboard in a
+regular browser tab (bookmarks, extensions, a second monitor's window
+manager).
+
+The window needs one extra package, on top of the usual `[web]` install:
+
+```bash
+pip install -e '.[app]'
+```
+
+It is kept separate from `[web]` on purpose. On macOS, `pywebview` pulls in
+six `pyobjc-*` packages — weight that a plain test run or CI install should
+never have to carry.
+
+Closing the window shuts down cleanly: any running stream is stopped, the
+board is disconnected, and the serial port is released before the process
+exits. There is no background process left holding the port — a hidden
+process still holding the device is exactly what makes the *next*
+connection fail for no visible reason.
+
+`bin/dashboard.command` now opens the window by default. It installs the
+`[app]` extra if it can; if the extra will not install, or the window fails
+to start, it says so and falls back to the browser dashboard instead. A tool
+whose job is driving hardware should not become unlaunchable because a GUI
+dependency failed to build.
+
+One trade worth knowing about: there is no `.app` bundle, so macOS shows the
+running window in the Dock as the Python interpreter — a generic icon and
+the wrong name. That is the price of having no build step to maintain, not
+a bug.
+
+**Not yet checked, because it needs a real window:** closing the window and
+confirming the shutdown is actually clean — board released, no process left
+holding the port — has not been exercised end to end; the automated tests
+stop at proving the server starts and answers under the window (see
+`tests/test_window.py`). Driving a real close needs macOS Accessibility
+permission for whatever automates it, which this environment did not have.
+The window's feel day to day — resizing, the Dock entry, whether the live
+log and the board's terminal read well inside WKWebView — is also unchecked
+for the same reason. Worth a look the first time you actually use the
+window, not the demo.
 
 ## Layout
 

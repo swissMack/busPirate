@@ -763,3 +763,9 @@ def test_the_v4_guide_page_documents_the_header_and_the_leds(client):
     assert "AUX2" in page
     assert "2x6" in page or "2×6" in page
     assert "VREG" in page
+
+
+def test_the_dashboard_guide_documents_the_window(client):
+    page = client.get("/api/docs/dashboard").json()["markdown"]
+    assert "window" in page.lower()
+    assert "pywebview" in page.lower()

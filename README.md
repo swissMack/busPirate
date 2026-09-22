@@ -9,8 +9,11 @@ buses, and reads, erases and programmes SPI flash.
 ## Start here
 
 Plug the Bus Pirate in and double-click **`bin/dashboard.command`**. It builds
-its own Python environment the first time, then opens the dashboard in your
-browser.
+its own Python environment the first time, then opens the dashboard in its
+own window. If the window's GUI toolkit will not install, it falls back to
+opening the dashboard in your browser instead — either way you get the same
+UI. From a terminal, the equivalent commands are `buspirate app` (window) and
+`buspirate dashboard` (browser).
 
 No hardware to hand? **`bin/demo.command`** runs the whole thing against a
 simulated Bus Pirate.
