@@ -40,6 +40,18 @@ def _build_server(host: str, port: int, use_fake: Optional[bool], fake_variant: 
     return _WindowServer(config)
 
 
+def _run_server(server) -> None:
+    """uvicorn calls sys.exit() on a bind failure. Inside a thread that only
+    ends the thread, but the default excepthook still prints a traceback over
+    the clean message the caller is about to raise. The readiness handshake
+    notices the dead thread either way.
+    """
+    try:
+        server.run()
+    except SystemExit:
+        pass
+
+
 def start_server(
     host: str = "127.0.0.1",
     port: int = 8765,
@@ -58,7 +70,7 @@ def start_server(
         )
 
     server = _build_server(host, port, use_fake, fake_variant)
-    thread = threading.Thread(target=server.run, daemon=True)
+    thread = threading.Thread(target=_run_server, args=(server,), daemon=True)
     thread.start()
 
     deadline = time.monotonic() + SERVER_START_TIMEOUT_SECONDS
