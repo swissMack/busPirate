@@ -6,11 +6,15 @@ buspirate ping       [-p PORT] [-v]
 buspirate i2c-scan   [-p PORT] [--speed 0..3] [--no-power] [--no-pullups]
 buspirate spi-id     [-p PORT] [--speed 0..7]
 buspirate dashboard  [--demo] [--variant v3|v4] [--no-browser]
+buspirate app        [--demo] [--variant v3|v4] [--port-number N]
 ```
 
 `-p/--port` defaults to `auto`, which picks the most likely device.
 `-v` logs every byte in both directions — the fastest way to see where a
 transaction stops.
+
+`dashboard` opens a browser tab; `app` opens the same UI in its own window.
+See [Dashboard](dashboard.md#window-or-browser) for the difference.
 
 ## `ports`
 
@@ -56,6 +60,24 @@ JEDEC ID: ef 40 18
 ```
 
 `ef` is Winbond; `18` means 2^24 bytes, so 16 MB.
+
+## `app`
+
+Opens the dashboard in its own window instead of a browser tab — same
+server, same UI, nothing about a panel or a recipe behaves differently. See
+[Dashboard](dashboard.md#window-or-browser) for the full story.
+
+It needs one extra package on top of `[web]`:
+
+```bash
+pip install -e '.[app]'
+```
+
+Takes `--demo`, `--variant` and `--port-number`, the same as `dashboard`.
+There is no `--host` or `--no-browser`: the window always binds loopback,
+and there is no browser step to skip. Closing the window shuts down
+cleanly — any running stream is stopped, the board is disconnected, and the
+port is released before the process exits.
 
 ## Scripting
 
