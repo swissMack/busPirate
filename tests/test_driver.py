@@ -270,3 +270,28 @@ def test_uart_framing_flags_pack(bp, fake):
 def test_onewire_search_drops_the_empty_slots(bp):
     with bp.onewire() as ow:
         assert ow.search_rom() == [b"\x28\x11\x22\x33\x44\x55\x66\x77"]
+
+
+# -- terminal ----------------------------------------------------------
+
+
+def test_reset_hardware_returns_the_fake_to_its_terminal(bp, fake):
+    with bp.i2c():
+        pass
+    bp.reset_hardware()
+    bp.write(b"i\n")
+    assert "Bus Pirate" in bp.read_text(settle=0.05)
+
+
+def test_the_terminal_answers_the_help_command(bp, fake):
+    bp.reset_hardware()
+    bp.write(b"?\n")
+    assert bp.read_text(settle=0.05).strip() != ""
+
+
+def test_binary_mode_can_be_re_entered_after_the_terminal(bp, fake):
+    bp.reset_hardware()
+    bp.write(b"i\n")
+    bp.read_text(settle=0.05)
+    bp.enter_binary_mode()
+    assert bp.bitbang_version >= 1
