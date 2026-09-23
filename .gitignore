@@ -23,9 +23,10 @@ build/
 dist/
 
 # frontend test deps (see tests/ui/README.md)
+# package.json (declares jsdom + ws) IS tracked - CI installs from it.
+# There is no lockfile; node_modules and any generated lockfile stay ignored.
 node_modules/
 package-lock.json
-package.json
 
 # built app + dmg (bin/build-dmg.sh)
 dist/

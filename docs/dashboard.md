@@ -31,7 +31,8 @@ pip install -e '.[app]'
 
 It is kept separate from `[web]` on purpose. On macOS, `pywebview` pulls in
 six `pyobjc-*` packages — weight that a plain test run or CI install should
-never have to carry.
+never have to carry. The GitHub Actions workflow (`.github/workflows/tests.yml`)
+installs only `.[dev]`, so it never touches `[app]`.
 
 Closing the window shuts down cleanly in the normal case: any running stream
 is stopped, the board is disconnected, and the serial port is released before

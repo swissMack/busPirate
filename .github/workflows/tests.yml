@@ -1,0 +1,101 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python-tests:
+    name: "Python tests (py${{ matrix.python-version }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # requires-python in pyproject.toml is ">=3.8"; test the declared
+        # floor alongside a current release so a claim nothing verifies
+        # actually gets checked.
+        python-version: ["3.8", "3.13"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install buspirate with the dev extra
+        # dev only - never app (pywebview + pyobjc, macOS-only, unneeded here).
+        run: pip install -e '.[dev]'
+
+      - name: Run Python test suite
+        run: python -m pytest tests/ -q
+
+  frontend-tests:
+    name: "Frontend tests (jsdom against the live dashboard)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install buspirate with the dev extra
+        run: pip install -e '.[dev]'
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install Node dependencies (jsdom, ws)
+        # No lockfile is committed, so this is a plain install, not npm ci.
+        run: npm install
+
+      - name: Start the dashboard server (demo mode)
+        run: |
+          nohup python -m buspirate dashboard --demo --no-browser > server.log 2>&1 &
+          echo $! > server.pid
+
+      - name: Wait for the dashboard to answer
+        # Poll instead of a fixed sleep, with a bounded timeout that fails
+        # loudly (and prints the server log) instead of hanging the runner.
+        run: |
+          timeout_seconds=30
+          waited=0
+          until curl --silent --fail --output /dev/null http://127.0.0.1:8765/; do
+            waited=$((waited + 1))
+            if [ "$waited" -ge "$timeout_seconds" ]; then
+              echo "::error::Dashboard server did not answer within ${timeout_seconds}s"
+              echo "---- server.log ----"
+              cat server.log || true
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "Dashboard answered after ${waited}s"
+
+      - name: Run frontend test suite (jsdom)
+        # Runs directly (not piped), so its non-zero exit on failure fails
+        # this step and the job.
+        run: node tests/ui/frontend.mjs
+
+      - name: Stop the dashboard server
+        if: always()
+        run: pkill -f "buspirate dashboard" || true
