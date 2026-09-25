@@ -120,47 +120,59 @@ virtualenv.
 
 ---
 
+## Verified against hardware
+
+Checked on 2026-09-25 on a **Bus Pirate v3.a, firmware v6.1 r1676** and a
+**Bus Pirate v4, firmware v6.0-a3**:
+
+- [x] `buspirate ping` on a v3, and on a v4
+- [x] `identify()` parses both boards' real `i` banners — the v4's has no
+      build number and no bootloader line
+- [x] SPI `spi-id` on a bare bus: a clean `00 00 00` and the MISO warning
+- [x] `i2c-scan` on a bare bus: with VPU floating every address "answers"
+      (SDA held low reads as an ACK); the scan now says so. With VPU tied to
+      a supply it finds nothing, as it should
+- [x] The probe cable colour table against a real v3 cable and the
+      firmware's own `v` pin table — CLK is **purple** (the table said pink)
+- [x] v3: the LED model — MODE lit from connect, USB flickering on traffic,
+      VREG following the supplies
+- [x] v4: MODE lit from connect, and the USB LED **dark** once enumerated
+- [x] v3: opening the terminal resets the board — supplies measured at
+      0.00 V, pins to input
+- [x] v4: opening the terminal **also** resets the board — the claim that it
+      does not was wrong. It drops off USB (gone at 188 ms, back at 463 ms);
+      the dashboard now follows it
+- [x] Both: MODE goes dark while the terminal is open, and comes back after
+- [x] The first prompt after leaving binary mode arrives complete
+- [x] Returning to binary mode works reliably, including straight after a
+      reset — 10 of 10 on a v3; now 0.4 s on both boards (it was 4.3 s)
+- [x] `~` self-test runs to completion through the console, stopping at
+      "Space to continue" and "Any key to exit" — 0 errors on a v3, with MODE
+      and VREG lit at the end
+- [x] A board left at a menu question, or left in binary mode, still
+      connects and is identified
+
 ## Not yet verified against hardware
 
-This driver was written from the published protocol documentation and is
-tested against a simulated device. These points deserve a check the first
-time you use real hardware, and a bug report here if they are wrong:
+These still deserve a check the first time you have the hardware, and a bug
+report here if they are wrong:
 
-- [ ] `buspirate ping` on a v3, and on a v4
-- [ ] `identify()` parses your device's real `i` banner
-      (`buspirate ping` prints what it made of it)
 - [ ] `write_then_read()` against a real 24Cxx EEPROM — the wire format is
       taken from the documented command, not from observation
-- [ ] SPI `set_mode()` against a real flash chip. The CKP/CKE mapping now
-      follows the documented startup default (mode 0 = CKP 0, CKE 1), but it
-      has only been checked against the documentation, not a scope.
+- [ ] SPI `set_mode()` against a real flash chip. The CKP/CKE mapping follows
+      the documented startup default (mode 0 = CKP 0, CKE 1), but it has only
+      been checked against the documentation, not a scope.
 - [ ] A flash erase/write/verify round trip on a real chip, ideally one you
       have dumped first
 - [ ] The I2C and SPI sniffers against real traffic — in particular whether
       stopping resynchronises cleanly on your firmware version
 - [ ] The v4 pull-up rail command on firmware that actually implements it
-- [ ] The probe cable colour table against your own cable
-      (Connection → **Show the cable legend**)
-- [ ] v4: MODE lit from the moment the dashboard connects, not from entering
-      a protocol
-- [ ] v4: the USB LED **dark** once enumerated — the inverse of a v3, and the
-      claim most likely to be wrong
-- [ ] v4: the 2x6 header order against your own silkscreen
+- [ ] v4: the 2x6 header order against your own silkscreen (see
+      [the wiring card](wiring-card.html))
 - [ ] v4: the measured LED and pin coordinates land on the real parts
 - [ ] v4: AUX and CS actually move from the I2C panel's "Drive AUX or CS"
 - [ ] v4: AUX1 and AUX2 stay inert — nothing in the dashboard should move them
 - [ ] v4: extended AUX's `read` sub-command (`0x03`) reply is the pin state
       (0 or 1), not an ack — every other sub-command replies `0x01`. Taken
       from a reading of the firmware, not observed on hardware.
-- [ ] v3: the LED model — MODE lit from connect, USB flickering on traffic,
-      VREG following the supplies
-- [ ] v3: opening the terminal really does reset the board — supplies off,
-      pins to input
-- [ ] v4: opening the terminal does **not** reset the board
-- [ ] Both: MODE goes dark while the terminal is open, and comes back after
-- [ ] The settle after leaving binary mode is long enough that the first
-      prompt is not truncated — `TERMINAL_SETTLE_SECONDS` in session.py
-- [ ] Returning to binary mode works reliably, including straight after a
-      v3 reset
-- [ ] `~` self-test runs to completion through the console, including the
-      stages that expect input
+- [ ] v4: the `~` self-test and its jumpers

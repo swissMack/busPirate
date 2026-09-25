@@ -8,7 +8,7 @@ import sys
 
 from . import BusPirate, BusPirateError, discover, resolve
 from .exceptions import GuiUnavailableError
-from .i2c import I2C
+from .i2c import I2C, SCAN_RANGE, stuck_bus_warning
 from .spi import SPI
 
 #: Exit code for "there is no usable GUI toolkit here" — and nothing else.
@@ -133,6 +133,10 @@ def cmd_i2c_scan(args) -> int:
             )
             i2c.set_speed(args.speed)
             found = i2c.scan()
+    stuck = stuck_bus_warning(found, SCAN_RANGE)
+    if stuck:
+        print(stuck)
+        return 1
     if not found:
         print("No devices responded. Check pull-ups, power, and SDA/SCL order.")
         return 1

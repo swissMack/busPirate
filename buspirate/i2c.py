@@ -21,6 +21,29 @@ PULLUP_VOLTAGE_BASE = 0x50  # 0b010100xy, BPv4 only
 
 MAX_WRITE_THEN_READ = 4096
 
+#: The addresses a scan probes: the whole map less the reserved ends.
+SCAN_RANGE = range(0x08, 0x78)
+
+
+def stuck_bus_warning(found: Iterable[int], probed: Iterable[int]) -> str:
+    """Say so when every probed address answered, which no real bus does.
+
+    A low SDA in the ACK slot reads as an ACK, so a bus whose pull-ups have
+    nothing to pull up to acknowledges everything — seen on a real v3 with
+    VPU floating, where all 112 addresses "answered". Returns "" for an
+    ordinary result.
+    """
+    probed = list(probed)
+    if len(probed) < 2 or set(probed) - set(found):
+        return ""
+    return (
+        f"Every address answered ({len(probed)} of {len(probed)}), which no real "
+        "bus does: SDA is being held low, and a low SDA reads as an ACK. Most "
+        "often the pull-ups have nothing to pull up to — tie VPU to the bus's "
+        "supply (the Bus Pirate's +3.3V or +5V will do). Otherwise something "
+        "on the bus is holding SDA down."
+    )
+
 # Argument bytes for the v4 extended AUX command.
 AUX_LOW = 0x00
 AUX_HIGH = 0x01
@@ -190,7 +213,7 @@ class I2C(Mode):
 
     # -- convenience -------------------------------------------------------
 
-    def scan(self, addresses: Iterable[int] = range(0x08, 0x78)) -> List[int]:
+    def scan(self, addresses: Iterable[int] = SCAN_RANGE) -> List[int]:
         """Probe each 7-bit address and return those that acknowledge.
 
         The default range skips the reserved addresses at both ends of the map.

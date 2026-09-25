@@ -15,8 +15,10 @@ repo wraps one in a Python driver, a command line, and a web dashboard.
    **Connect**.
 4. Pick the panel for your bus and press the big button.
 
-No hardware to hand? Double-click **`bin/demo.command`** instead — everything
-works against a simulated Bus Pirate, which is the cheapest way to remind
+No hardware to hand? Press **Try a simulated one** on the connect screen (or
+pick `simulated-v3` / `simulated-v4` from the port list), or double-click
+**`bin/demo.command`** to start straight into one — everything works against
+a simulated Bus Pirate, which is the cheapest way to remind
 yourself how the tool fits together.
 
 ## I want to…
@@ -90,7 +92,7 @@ round, which is the easy mistake to make.
 | 1 | MISO | black | data in, the target's TX on a UART |
 | 2 | CS | white | chip select, active low |
 | 3 | MOSI | grey | data out; SDA on I2C, OWD on 1-Wire |
-| 4 | CLK | pink | clock; SCL on I2C |
+| 4 | CLK | purple | clock; SCL on I2C |
 | 5 | AUX | blue | auxiliary I/O, frequency probe, PWM |
 | 6 | VPU | green | input for the pull-up resistors, 0–5V |
 | 7 | ADC | yellow | A/D converter, max 6V, 10-bit |
@@ -101,6 +103,11 @@ round, which is the easy mistake to make.
 This is the Seeed Studio / Adafruit cable, which is the order the firmware
 itself uses. **SparkFun cables are usually reversed and the v2go differs** —
 check yours with Connection → **Show the cable legend**, or the `i` command.
+
+**Go by position, not by colour.** Dyes vary between batches: on one real
+cable GND's brown was so light it passed for grey, and +5V's orange read as
+pink. Find GND by its place at the edge of the ribbon, count from there, and
+if in doubt measure — the ADC probe reads any rail.
 
 ## The board's header
 

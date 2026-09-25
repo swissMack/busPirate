@@ -203,6 +203,11 @@ table.data td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line);
 }
 /* The same four, drawn on the board photograph. */
 svg .led { fill: #2b2118; stroke: var(--muted); stroke-width: 1; opacity: 0.75; }
+/* Unknown: the board's own terminal drives it. Dashed, so it never reads as
+   either lit or dark. */
+.leds .led--unknown { border-style: dashed; opacity: .6; }
+.leds .led--unknown::after { content: "?"; margin-left: 2px; }
+svg .led--unknown { stroke-dasharray: 3 2; opacity: 0.6; }
 svg .led--on,
 svg .led--flash { fill: var(--led-on); stroke: #eaffe4; stroke-width: 1.5; opacity: 1; }
 
@@ -256,6 +261,11 @@ svg .led--flash { fill: var(--led-on); stroke: #eaffe4; stroke-width: 1.5; opaci
 .tok--ack { color: var(--good); border: 0; background: none; padding: 1px 2px; }
 .tok--nack { color: var(--warn); border: 0; background: none; padding: 1px 2px; }
 .tok--value { color: var(--accent); }
+.stream__console {
+  max-height: 360px; overflow-y: auto; background: var(--bg-sunken);
+  border-radius: 7px; padding: 9px 11px; margin: 0; font-family: var(--mono);
+  font-size: 12.5px; white-space: pre-wrap; tab-size: 8; user-select: text;
+}
 .stream__inputrow { display: flex; gap: 8px; margin-top: 9px; }
 .stream__input { flex: 1 1 auto; min-width: 0; font-family: var(--mono); }
 

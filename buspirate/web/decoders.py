@@ -112,6 +112,28 @@ class TextDecoder(Decoder):
         ]
 
 
+class ConsoleDecoder(Decoder):
+    """The board's own terminal, as the text a serial terminal would show.
+
+    The firmware ends lines with CR LF. Dropping every CR, rather than
+    translating the pair, means a CR and its LF split across two reads still
+    come out as one newline. Tabs are kept — the v3 pin table is laid out with
+    them — and so is backspace, which the firmware echoes as BS, space, BS
+    and the pane applies. Any other non-printable byte becomes U+FFFD, so a
+    garbled line looks garbled instead of silently losing characters.
+    """
+
+    legend = "The board's replies, as its own terminal prints them"
+
+    def feed(self, data: bytes) -> List[Dict]:
+        text = "".join(
+            chr(b) if 32 <= b < 127 or b in (0x08, 0x09, 0x0A) else "\N{REPLACEMENT CHARACTER}"
+            for b in data
+            if b != 0x0D
+        )
+        return [{"kind": "console", "text": text}] if text else []
+
+
 class VoltageDecoder(Decoder):
     """Continuous ADC readings: two bytes per sample, most significant first."""
 
@@ -136,6 +158,7 @@ class VoltageDecoder(Decoder):
 
 
 DECODERS = {
+    "console": ConsoleDecoder,
     "i2c-sniffer": I2CSnifferDecoder,
     "spi-sniffer": SPISnifferDecoder,
     "text": TextDecoder,

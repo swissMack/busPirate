@@ -211,3 +211,23 @@ def test_other_failures_keep_the_ordinary_error_exit(monkeypatch):
 
         monkeypatch.setitem(sys.modules, "webview", _FakeWebview)
         assert cli.main(["app", "--port-number", str(_Args.http_port), "--demo"]) == 2
+
+
+def test_the_window_lets_you_select_and_copy_text(monkeypatch):
+    # pywebview disables text selection unless asked, which made the terminal,
+    # the traffic log and every result impossible to copy out of — found on
+    # a real board, trying to copy the self-test's output.
+    calls = {}
+
+    class _FakeWebview:
+        @staticmethod
+        def create_window(title, url, **kwargs):
+            calls.update(kwargs)
+
+        @staticmethod
+        def start():
+            pass
+
+    monkeypatch.setitem(sys.modules, "webview", _FakeWebview)
+    window.run_window(port=_free_port(), use_fake=True)
+    assert calls.get("text_select") is True

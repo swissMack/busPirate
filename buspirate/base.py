@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 import time
 from typing import Callable, List, Optional
 
@@ -47,6 +49,14 @@ PWM_PRESCALERS = {0: 1, 1: 8, 2: 64, 3: 256}
 TrafficHook = Callable[[str, bytes], None]
 
 
+#: Nulls the firmware must see before it leaves the terminal for binary mode.
+KNOCK_BURST = 20
+#: Menu questions answered with Enter before giving up on reaching a prompt.
+MENU_ANSWER_LIMIT = 10
+#: How long a connect waits for a missing /dev node to come back.
+PORT_RETURN_SECONDS = 2.0
+
+
 class BusPirate:
     """Owns the serial port, the device profile and the raw bitbang protocol.
 
@@ -88,9 +98,30 @@ class BusPirate:
         if self.serial is None:
             self.serial = self._make_serial()
         if identify:
+            if self._already_in_binary_mode():
+                # Left there by a program that let go without resetting it.
+                # `i` means nothing in binary mode — a real v4 connected as
+                # "unidentified" — and the terminal is only reached by a
+                # reset, which a v4 follows by leaving USB for a moment.
+                self.reset_hardware()
+                self.reopen_if_reenumerated()
             self.identify()
         self.enter_binary_mode()
         return self
+
+    def _already_in_binary_mode(self) -> bool:
+        """Probe with one null: binary mode answers it, the terminal ignores it.
+
+        The firmware leaves its terminal only after 20 nulls in a row, so a
+        single one is harmless there, while in binary mode it is the
+        "reset to bitbang" command and is answered at once.
+        """
+        self.flush_input()
+        self.write(b"\x00")
+        reply = self.serial.read(banner_length(BANNER_BITBANG))
+        if reply:
+            self._notify("rx", reply)
+        return reply.startswith(BANNER_BITBANG.encode())
 
     def _make_serial(self):
         if self._serial_factory is not None:
@@ -101,6 +132,19 @@ class BusPirate:
             raise ConnectionError(
                 "pyserial is required: pip install pyserial"
             ) from exc
+        # A device node that is missing may be on its way back: a v4 leaves
+        # USB for about half a second whenever it is reset, Disconnect
+        # included. Give it a moment rather than failing a connect made in
+        # that window.
+        if self.port.startswith("/dev/"):
+            deadline = time.monotonic() + PORT_RETURN_SECONDS
+            while not os.path.exists(self.port) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if not os.path.exists(self.port):
+                raise ConnectionError(
+                    f"{self.port} is not there. Is the Bus Pirate plugged in? "
+                    "Refresh the port list after plugging it back in."
+                )
         try:
             return serial.Serial(
                 self.port, baudrate=self.baudrate, timeout=self.timeout
@@ -267,24 +311,69 @@ class BusPirate:
         gets the conservative feature set.
         """
         self.flush_input()
-        self.write(b"\n")
-        self.read_text(settle=self.identify_timeout / 2)
+        self._answer_pending_questions()
         self.write(b"i\n")
         banner = self.read_text(settle=self.identify_timeout)
         self.profile = parse_banner(banner) if banner.strip() else UNKNOWN_PROFILE
         log.debug("identified %s", self.profile.describe())
         return self.profile
 
+    def _answer_pending_questions(self, limit: int = 10) -> None:
+        """Press Enter until the board is at a prompt rather than a question.
+
+        A board disconnected half way through a terminal menu (choosing a
+        mode with ``m``) is left at a question like ``(1)>``, where it answers
+        anything but Enter with BEL — a real v4 answered every 0x00 of a
+        binary-mode knock with 0x07, and connecting failed. Enter accepts the
+        question's default, so answer each until a prompt comes back. A board
+        already at its prompt just prints it again.
+        """
+        for _ in range(limit):
+            self.write(b"\n")
+            reply = self.read_text(settle=self.identify_timeout / 2)
+            last = reply.rstrip().rsplit("\n", 1)[-1]
+            if "\x07" not in reply and not re.search(r"\(\d+\)>$", last):
+                return
+        log.debug("still at a menu question after %d answers", limit)
+
     # -- mode control ------------------------------------------------------
 
     def enter_binary_mode(self, retries: int = 25) -> None:
         """Knock on the port with 0x00 until the Bus Pirate answers ``BBIOx``.
 
-        The device answers only once it has seen enough nulls to leave the
-        terminal, so this is a loop by design rather than a single write.
+        The firmware answers only after the 20th null, so they go out as one
+        burst first: waiting for a reply after each single null cost a full
+        read timeout per byte, 4.3 s on a real v3. A board already in binary
+        mode answers every null, so whatever follows the first banner is
+        drained. If the burst gets no banner, fall back to knocking one null
+        at a time.
         """
         self.flush_input()
         expected = banner_length(BANNER_BITBANG)
+        for _ in range(MENU_ANSWER_LIMIT):
+            self.write(b"\x00" * KNOCK_BURST)
+            response = self.serial.read(expected)
+            if response:
+                self._notify("rx", response)
+            if response.startswith(BANNER_BITBANG.encode()):
+                self.bitbang_version = match_banner(
+                    response, BANNER_BITBANG, "entering bitbang mode"
+                )
+                time.sleep(0.02)  # let the banners for the other nulls land
+                self.flush_input()
+                log.debug("binary mode entered with one burst")
+                self._mode = None
+                return
+            if b"\x07" not in response:
+                break
+            # BEL: the board is at a menu question (a real v4 was left at
+            # one by a disconnect mid-`m`) and refuses every null. Enter
+            # accepts the question's default; answer, then knock again.
+            self.flush_input()
+            self.write(b"\n")
+            time.sleep(0.05)
+            self.flush_input()
+        self.flush_input()
         for attempt in range(retries):
             self.write(b"\x00")
             response = self.serial.read(expected)
@@ -312,6 +401,53 @@ class BusPirate:
         self.write(bytes([CMD_RESET_HARDWARE]))
         self._mode = None
         self.flush_input()
+
+    def reopen_if_reenumerated(
+        self, watch: float = 0.8, timeout: float = 5.0, poll: float = 0.02
+    ) -> bool:
+        """After :meth:`reset_hardware`, follow a board that left USB and came back.
+
+        A v4 (measured on firmware 6.0-a3) resets on ``0x0F`` and
+        re-enumerates: its device node vanished 188 ms after the command and
+        returned at 463 ms, and the old handle is dead from then on. A v3's
+        FTDI chip stays enumerated through its reset. So watch the node for
+        ``watch`` seconds: if it never goes, keep the handle and return
+        False; if it goes, wait up to ``timeout`` for it to return, reopen,
+        and return True.
+
+        A port that is not a device node at all — a simulator's name — has
+        nothing to watch and is left alone.
+        """
+        if not os.path.exists(self.port):
+            return False
+        deadline = time.monotonic() + watch
+        while os.path.exists(self.port):
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(poll)
+
+        try:
+            self.serial.close()
+        except Exception:  # noqa: BLE001 - the handle is already dead
+            log.debug("closing the dead handle failed", exc_info=True)
+        self.serial = None
+        self._mode = None
+
+        deadline = time.monotonic() + timeout
+        while True:
+            if os.path.exists(self.port):
+                try:
+                    self.serial = self._make_serial()
+                    return True
+                except ConnectionError:
+                    pass  # the node can appear a moment before it opens
+            if time.monotonic() >= deadline:
+                raise ConnectionError(
+                    f"{self.port} dropped off USB when the board reset and "
+                    f"did not come back within {timeout:g}s. Unplug it, plug "
+                    "it back in, and connect again."
+                )
+            time.sleep(poll)
 
     @property
     def mode(self):

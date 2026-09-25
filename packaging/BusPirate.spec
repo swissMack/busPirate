@@ -32,6 +32,8 @@ hiddenimports = (
     + [
         "webview.platforms.cocoa",
         "serial.tools.list_ports",
+        # Imported lazily when a simulated board is picked, so name it here.
+        "buspirate.simulator",
     ]
 )
 

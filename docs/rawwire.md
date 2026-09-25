@@ -8,7 +8,7 @@ data lines, one bit at a time if you want.
 
 | Probe wire | Seeed colour | Target |
 |-----------|--------------|--------|
-| CLK | pink | clock — you control every edge |
+| CLK | purple | clock — you control every edge |
 | MOSI | grey | data out, and data in on a two-wire bus |
 | MISO | black | data in, three-wire buses only |
 | CS | white | chip select, if the target has one |

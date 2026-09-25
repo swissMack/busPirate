@@ -62,6 +62,37 @@ def test_i2c_decoder_survives_a_read_that_splits_an_escape():
     assert [e["text"] for e in second] == ["a0", "+"]
 
 
+def test_console_decoder_turns_the_boards_output_into_text():
+    decoder = make_decoder("console")
+    events = decoder.feed(b"i\r\nBus Pirate v3.a\r\nHiZ>")
+    assert "".join(e["text"] for e in events) == "i\nBus Pirate v3.a\nHiZ>"
+    assert all(e["kind"] == "console" for e in events)
+
+
+def test_console_decoder_survives_a_line_ending_split_across_reads():
+    decoder = make_decoder("console")
+    text = "".join(
+        e["text"] for chunk in (b"Found 0 errors.\r", b"\nHiZ>") for e in decoder.feed(chunk)
+    )
+    assert text == "Found 0 errors.\nHiZ>"
+
+
+def test_console_decoder_shows_tabs_and_keeps_control_bytes_visible():
+    # The v3 pin table is tab-separated; a stray control byte must not vanish
+    # silently — it is shown, so a garbled line looks garbled.
+    decoder = make_decoder("console")
+    text = "".join(e["text"] for e in decoder.feed(b"GND\t3.3V\x0e"))
+    assert text == "GND\t3.3V\ufffd"
+
+
+def test_console_decoder_passes_backspace_through_for_the_pane_to_apply():
+    # The firmware answers a backspace with BS, space, BS. The pane applies
+    # it; turning it into U+FFFD would leave the deleted character on screen.
+    decoder = make_decoder("console")
+    text = "".join(e["text"] for e in decoder.feed(b"ab\x08 \x08"))
+    assert text == "ab\b \b"
+
+
 def test_spi_decoder_pairs_mosi_with_miso():
     decoder = make_decoder("spi-sniffer")
     events = decoder.feed(b"[\\\x9f\xff\\\x00\xef]")
@@ -173,15 +204,85 @@ def test_the_terminal_holds_the_port_as_a_stream(client):
 
 def test_typing_into_the_terminal_reaches_the_board(client):
     run(client, "terminal", "open_terminal")
-    code, body = run(client, "terminal", "send_line", line="i")
+    code, body = run(client, "terminal", "send_keys", keys="i\r")
     assert code == 200, body
     found = wait_for_events(client, at_least=1)
     assert found["events"] >= 1
 
 
-def test_send_line_is_refused_while_a_sniffer_runs(client):
+def test_opening_the_terminal_follows_a_board_that_left_usb(client, monkeypatch):
+    """A v4 resets on 0x0F and re-enumerates; the terminal must not lose it."""
+    from buspirate.base import BusPirate
+
+    calls = []
+
+    def reopened(self, watch=0.8, timeout=5.0, poll=0.02):
+        calls.append(watch)
+        return True
+
+    monkeypatch.setattr(BusPirate, "reopen_if_reenumerated", reopened)
+    code, body = run(client, "terminal", "open_terminal")
+    assert code == 200, body
+    assert calls, "opening the terminal never checked for re-enumeration"
+    assert status(client)["connected"]
+
+
+def test_a_board_that_never_returns_says_so_instead_of_not_connected(client, monkeypatch):
+    """Found on a real v4: the board left USB, and the only message was the
+    generic "not connected — pick a port and connect first"."""
+    from buspirate.base import BusPirate
+    from buspirate.exceptions import ConnectionError as BPConnectionError
+
+    def gone(self, watch=0.8, timeout=5.0, poll=0.02):
+        raise BPConnectionError(f"{self.port} dropped off USB when the board reset")
+
+    monkeypatch.setattr(BusPirate, "reopen_if_reenumerated", gone)
+    code, body = run(client, "terminal", "open_terminal")
+    assert code == 400
+    assert "dropped off USB" in body["error"]
+    assert not status(client)["connected"]
+
+
+def test_the_terminal_is_shown_as_text_not_hex(client):
+    code, body = run(client, "terminal", "open_terminal")
+    assert code == 200, body
+    assert body["result"]["decoder"] == "console"
+
+
+def written_after(client, send):
+    """The bytes that reached the board as a result of ``send()``."""
+    fake = client.app.state.session.bp.serial
+    before = len(fake.written)
+    send()
+    deadline = time.monotonic() + 3
+    while len(fake.written) == before and time.monotonic() < deadline:
+        time.sleep(0.02)
+    time.sleep(0.05)  # let a batch that is still draining land
+    return bytes(fake.written[before:])
+
+
+def test_keys_reach_the_board_exactly_as_typed(client):
+    """Nothing is added: the terminal sends keys, the way `screen` does.
+
+    It used to send a line and append Enter — first CR LF, then CR. Either
+    way that is one keypress more than the user typed, and the firmware reads
+    raw keys: on a real v3 the spare byte answered "Space to continue", and
+    later "Any key to exit", before anyone had read them.
+    """
+    run(client, "terminal", "open_terminal")
+    assert written_after(client, lambda: run(client, "terminal", "send_keys", keys=" ")) == b" "
+    assert written_after(client, lambda: run(client, "terminal", "send_keys", keys="~")) == b"~"
+    assert written_after(client, lambda: run(client, "terminal", "send_keys", keys="\r")) == b"\r"
+
+
+def test_backspace_reaches_the_board_as_a_backspace(client):
+    run(client, "terminal", "open_terminal")
+    assert written_after(client, lambda: run(client, "terminal", "send_keys", keys="\b")) == b"\x08"
+
+
+def test_send_keys_is_refused_while_a_sniffer_runs(client):
     run(client, "i2c", "sniff", power=True, pullups=True, speed=2)
-    code, body = run(client, "terminal", "send_line", line="i")
+    code, body = run(client, "terminal", "send_keys", keys="i")
     assert code == 400
     assert "terminal" in body["error"]
 
@@ -203,10 +304,21 @@ def test_leaving_the_terminal_returns_to_binary_with_nothing_held(client):
     assert state["leds"]["VREG"] is False
 
 
-def test_the_mode_led_goes_dark_in_the_terminal(client):
-    assert status(client)["leds"]["MODE"] is True
+def test_mode_and_vreg_are_unknown_while_the_terminal_is_open(client):
+    """The board's own commands drive these LEDs while its terminal is open.
+
+    Seen on real hardware: the dashboard showed VREG lit over a board whose
+    reset had switched the supplies off, and showed MODE and VREG dark while
+    the ~ self-test had both lit. It cannot see either, so it must not guess.
+    """
+    run(client, "pins", "set_pins", power=True, pullups=False, aux=False,
+        mosi=False, clk=False, miso=False, cs=False)
+    assert status(client)["leds"]["VREG"] is True
     run(client, "terminal", "open_terminal")
-    assert status(client)["leds"]["MODE"] is False
+    leds = status(client)["leds"]
+    assert leds["MODE"] is None
+    assert leds["VREG"] is None
+    assert leds["PWR"] is True
 
 
 def test_the_mode_led_comes_back_after_the_terminal(client):
@@ -292,7 +404,7 @@ def test_a_failed_write_in_the_terminal_does_not_wedge_the_session(
         return original(self, data)
 
     monkeypatch.setattr(BusPirate, "write", explode)
-    code, body = run(client, "terminal", "send_line", line="i")
+    code, body = run(client, "terminal", "send_keys", keys="i")
     assert code == 200, body
 
     assert wait_for_no_stream(client), "the stream was never finished"

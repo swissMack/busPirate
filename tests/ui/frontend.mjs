@@ -4,10 +4,27 @@ import fs from "node:fs";
 import { JSDOM } from "jsdom";
 import { WebSocket as RealWebSocket } from "ws";
 
-const BASE = "http://127.0.0.1:8765";
+// BUSPIRATE_UI_BASE lets `make ui-test` run its demo on a port of its own, so
+// the suite can run while a real dashboard holds the default one.
+const BASE = process.env.BUSPIRATE_UI_BASE || "http://127.0.0.1:8765";
 const ROOT = new URL("../../buspirate/web/static/", import.meta.url).pathname;
 const html = fs.readFileSync(`${ROOT}/index.html`, "utf8");
 const js = fs.readFileSync(`${ROOT}/app.js`, "utf8");
+
+// This suite disconnects, connects to the first port offered, and presses
+// every button — against a real board that is a stranger driving the
+// hardware. Before sending a single command, insist the server is a demo:
+// a `--demo` server reports `simulated` even while disconnected, a real one
+// does not.
+const probe = await (await fetch(`${BASE}/api/state`)).json();
+if (!probe.status.simulated) {
+  console.error(
+    `refusing to run: ${BASE} is a real dashboard, not a --demo one, and this ` +
+      "suite would drive its hardware. Start a demo server (make ui-test does) " +
+      "or point BUSPIRATE_UI_BASE at one."
+  );
+  process.exit(2);
+}
 
 // The server keeps the device connected across page loads, which is what we
 // want in real use — so start from a known state.
@@ -51,7 +68,8 @@ check("welcome screen is shown", !$("welcome").hidden);
 check("panel is hidden", $("panel").hidden);
 check("status reads not connected", $("status-text").textContent === "Not connected");
 const options = [...$("port-select").options].map((o) => o.textContent);
-check("port picker offers the simulated device", options.some((o) => o.includes("fake")), options.join("|"));
+check("port picker offers the simulated device", options.some((o) => o.includes("simulated-v3")), options.join("|"));
+check("welcome offers a simulated board", !!$("connect-simulated"));
 check("nav lists every panel plus the guide", $("nav").children.length === 9, `${$("nav").children.length}`);
 
 // --- connect
@@ -63,7 +81,7 @@ check("status shows the device", /SIMULATED Bus Pirate v3/.test($("status-text")
 check("recipe strip appeared", !$("recipes").hidden && $("recipes").children.length >= 8, `${$("recipes").children.length}`);
 
 // --- USB indicator
-check("USB indicator names the port", /USB: fake/.test($("usb").textContent), $("usb").textContent);
+check("USB indicator names the port", /USB: simulated-v3/.test($("usb").textContent), $("usb").textContent);
 
 // --- the indicator LEDs, inferred from what we have asked the board to do
 const leds = () => [...$("leds").children]
@@ -149,8 +167,11 @@ check("cards use the bundled artwork", images.join(",") === "/static/img/refcard
 const marks = cards[0].querySelectorAll("rect");
 check("the I2C column is marked on the card", marks.length >= 3, `${marks.length}`);
 check("the credit is shown", $("panel").textContent.includes("Dangerous Prototypes"));
+// CLK is purple: the firmware's own pin table calls it PU, and a real
+// cable's CLK lead is purple — the pink once sampled from the cable card
+// image was the scan, not the wire.
 check("cable colours are the corrected ones",
-  $("panel").querySelector(".swatch").getAttribute("style").includes("#ff85ff"),
+  $("panel").querySelector(".swatch").getAttribute("style").includes("#9b59d6"),
   $("panel").querySelector(".swatch").getAttribute("style"));
 
 const scan = $("panel").querySelector('[data-action="scan"]');
@@ -247,9 +268,9 @@ check("the device works again after a sniff",
 // group in one place)
 navButtons.find((b) => b.textContent === "Terminal").click();
 await settle(200);
-check("send_line has no automatic form on the Terminal panel — only the "
-  + "console input row drives it",
-  $("panel").querySelector('[data-action="send_line"]') === null);
+check("send_keys has no automatic form on the Terminal panel — only the "
+  + "console's typing surface drives it",
+  $("panel").querySelector('[data-action="send_keys"]') === null);
 const term = $("panel").querySelector('[data-action="open_terminal"]');
 term.querySelector("button").click();
 await settle(900);
@@ -263,16 +284,159 @@ check("the terminal pane offers an input line",
 check("Stop is the first control in the pane — nothing else on this panel",
   termPane && termPane.querySelector("button").textContent === "Stop");
 
+// While the board's own terminal is open its commands drive MODE and VREG,
+// which the dashboard cannot see: the strip must say "unknown", not guess.
+const stripLed = (name) => $("leds").querySelector(`[data-led="${name}"]`);
+check("MODE and VREG read as unknown while the terminal is open",
+  ["MODE", "VREG"].every((n) => stripLed(n).classList.contains("led--unknown")
+    && !stripLed(n).classList.contains("led--on")
+    && /unknown/.test(stripLed(n).title)),
+  ["MODE", "VREG"].map((n) => `${n}: ${stripLed(n).className} / ${stripLed(n).title}`).join(" | "));
+check("PWR is still shown as known and lit",
+  stripLed("PWR").classList.contains("led--on") && !stripLed("PWR").classList.contains("led--unknown"));
+
+// A panel with no wiring card used to hand `null` to replaceChildren(), which,
+// unlike el(), prints it: the Terminal panel read "null" under its blurb.
+const strayNull = () =>
+  [...$("panel").childNodes].some((n) => n.nodeType === 3 && n.textContent.trim() === "null");
+check("nothing on the Terminal panel reads a stray 'null'", !strayNull());
+
 const line = termPane.querySelector(".stream__input");
-const toksBefore = termPane.querySelectorAll(".tok").length;
-line.value = "?";
-line.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+const consoleText = () => {
+  const out = $("panel").querySelector(".stream__console");
+  return out ? out.textContent : "";
+};
+const prompts = () => (consoleText().match(/HiZ>/g) || []).length;
+
+// Every key goes to the board as it is typed, the way `screen` does it —
+// nothing is batched into a line and nothing is appended. Record what the
+// page sends so each check can see the exact keys.
+const sent = [];
+const realFetch = window.fetch;
+window.fetch = (path, options) => {
+  if (options && options.body && options.body.includes('"send_keys"')) {
+    sent.push(JSON.parse(options.body).params.keys);
+  }
+  return realFetch(path, options);
+};
+const sentSince = (mark) => sent.slice(mark).join("");
+// What typing a printable key does to a text field: the character lands,
+// then an input event says so.
+const typeKeys = (field, text) => {
+  for (const ch of text) {
+    field.value += ch;
+    field.dispatchEvent(new window.InputEvent("input", { data: ch, inputType: "insertText", bubbles: true }));
+  }
+};
+const pressKey = (field, init) =>
+  field.dispatchEvent(new window.KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+const enter = (field) => pressKey(field, { key: "Enter", code: "Enter" });
+
+check("there is no Send button — keys go as they are typed",
+  ![...termPane.querySelectorAll("button")].some((b) => b.textContent === "Send"));
+
+let mark = sent.length;
+typeKeys(line, "?");
+enter(line);
 await settle(900);
-check("the pane gains output after a line is sent",
-  termPane.querySelectorAll(".tok").length > toksBefore,
-  `${toksBefore} -> ${termPane.querySelectorAll(".tok").length}`);
-check("the input clears after sending", line.value === "");
+check("typing ? then Return sends exactly those two keys",
+  sentSince(mark) === "?\r", JSON.stringify(sentSince(mark)));
+check("the board's reply is shown as text, the way a terminal shows it",
+  consoleText().includes("General commands"), JSON.stringify(consoleText().slice(0, 120)));
+check("what you type appears through the board's own echo",
+  consoleText().includes("?\nGeneral commands"), JSON.stringify(consoleText().slice(0, 120)));
+check("the console shows no hex tokens",
+  termPane.querySelectorAll(".tok").length === 0, `${termPane.querySelectorAll(".tok").length}`);
+check("the typing surface stays empty — the console is the display",
+  line.value === "", JSON.stringify(line.value));
 check("the field is not disabled while idle", !line.disabled);
+
+// Found on a real v3: a line-based input answered "Space to continue" AND
+// "Any key to exit" with one line, because Enter was appended. A lone key
+// must go alone.
+mark = sent.length;
+typeKeys(line, " ");
+await settle(600);
+check("a single space goes out as a single space, with no Enter after it",
+  sentSince(mark) === " ", JSON.stringify(sentSince(mark)));
+
+// Return on its own is how you ask a Bus Pirate for a fresh prompt.
+const promptsBefore = prompts();
+mark = sent.length;
+enter(line);
+await settle(900);
+check("Return alone sends a CR and gets a fresh prompt",
+  sentSince(mark) === "\r" && prompts() > promptsBefore,
+  `${JSON.stringify(sentSince(mark))}, prompts ${promptsBefore} -> ${prompts()}`);
+
+// Backspace goes to the board, whose BS-space-BS echo the pane applies.
+mark = sent.length;
+typeKeys(line, "ab");
+pressKey(line, { key: "Backspace", code: "Backspace" });
+await settle(900);
+check("Backspace is sent as a backspace",
+  sentSince(mark) === "ab\b", JSON.stringify(sentSince(mark)));
+check("the pane applies the board's backspace echo",
+  consoleText().endsWith("a") && !consoleText().includes("\b"),
+  JSON.stringify(consoleText().slice(-20)));
+enter(line);  // finish the half-typed line on the board
+await settle(600);
+
+// ⌘ shortcuts belong to the window — copy must never type into the board.
+mark = sent.length;
+pressKey(line, { key: "c", code: "KeyC", metaKey: true });
+await settle(300);
+check("⌘C sends nothing to the board", sentSince(mark) === "", JSON.stringify(sentSince(mark)));
+
+// A dead key (the ~ on a Swiss or German layout) is composed: nothing may go
+// out until the character lands, and one Return must then send it and the
+// CR. WebKit's order — the app's own window, recorded on a Swiss layout
+// (⌥N, then Return): the composing input events, compositionend, then a
+// Return whose `key` is the committed text glued to a CR ("~\r"), keyCode
+// 192. Only `code` still says Enter.
+mark = sent.length;
+line.dispatchEvent(new window.CompositionEvent("compositionstart", { data: "", bubbles: true }));
+line.value = "~";
+line.dispatchEvent(new window.InputEvent("input",
+  { data: "~", inputType: "insertCompositionText", isComposing: true, bubbles: true }));
+check("nothing is sent while the dead key is still composing",
+  sentSince(mark) === "", JSON.stringify(sentSince(mark)));
+line.dispatchEvent(new window.InputEvent("input",
+  { data: "~", inputType: "insertFromComposition", isComposing: true, bubbles: true }));
+line.dispatchEvent(new window.CompositionEvent("compositionend", { data: "~", bubbles: true }));
+pressKey(line, { key: "~\r", code: "Enter", keyCode: 192 });
+await settle(900);
+check("⌥N then one Return sends ~ and a CR (WebKit's order)",
+  sentSince(mark) === "~\r", JSON.stringify(sentSince(mark)));
+check("the field is empty again after the composed key", line.value === "", JSON.stringify(line.value));
+
+// Chrome's order: the Return arrives while still composing, then the
+// composition ends.
+mark = sent.length;
+line.dispatchEvent(new window.CompositionEvent("compositionstart", { data: "", bubbles: true }));
+line.value = "~";
+line.dispatchEvent(new window.InputEvent("input",
+  { data: "~", inputType: "insertCompositionText", isComposing: true, bubbles: true }));
+pressKey(line, { key: "Enter", code: "Enter", isComposing: true });
+check("a Return during composition sends nothing yet",
+  sentSince(mark) === "", JSON.stringify(sentSince(mark)));
+line.dispatchEvent(new window.CompositionEvent("compositionend", { data: "~", bubbles: true }));
+await settle(900);
+check("once the ~ lands, it and the CR go out (Chrome's order)",
+  sentSince(mark) === "~\r", JSON.stringify(sentSince(mark)));
+
+// Keys typed faster than the board is written to must arrive in order.
+mark = sent.length;
+typeKeys(line, "abc");
+enter(line);
+await settle(900);
+check("keys typed in a burst arrive in order", sentSince(mark) === "abc\r", JSON.stringify(sentSince(mark)));
+
+check("the field does not autocorrect, autocapitalise or spellcheck commands",
+  line.getAttribute("autocapitalize") === "off"
+    && line.getAttribute("autocorrect") === "off"
+    && line.getAttribute("spellcheck") === "false",
+  `${line.getAttribute("autocapitalize")}/${line.getAttribute("autocorrect")}/${line.getAttribute("spellcheck")}`);
 
 // --- the regression this fix exists for: leaving the Terminal panel used to
 // destroy the live pane outright — the header still said "running", but the
@@ -298,14 +462,15 @@ check("the revived pane still offers the input line",
 // The revived pane must be live, not a static leftover: typing into it
 // still reaches the board.
 const revivedLine = revivedPane.querySelector(".stream__input");
-const revivedToksBefore = revivedPane.querySelectorAll(".tok").length;
-revivedLine.value = "?";
-revivedLine.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+const revivedPromptsBefore = prompts();
+typeKeys(revivedLine, "?");
+enter(revivedLine);
 await settle(900);
-check("the revived pane keeps receiving output",
-  revivedPane.querySelectorAll(".tok").length > revivedToksBefore,
-  `${revivedToksBefore} -> ${revivedPane.querySelectorAll(".tok").length}`);
+check("the revived pane keeps receiving output, as text",
+  prompts() > revivedPromptsBefore, `${revivedPromptsBefore} -> ${prompts()}`);
+check("the revived pane reads no stray 'null' either", !strayNull());
 
+window.fetch = realFetch;
 revivedPane.querySelector("button").click();  // Stop — first button, same as the sniffer pane
 await settle(900);
 check("the input line goes away when the stream stops",
@@ -330,13 +495,33 @@ check("guide renders the I2C page for the I2C panel",
   /I2C/.test($("guide").querySelector("h1").textContent), $("guide").textContent.slice(0, 60));
 check("guide renders tables", $("guide").querySelector("table") !== null);
 check("guide shows the corrected cable colours",
-  /grey/.test($("guide").textContent) && /pink/.test($("guide").textContent),
+  /grey/.test($("guide").textContent) && /purple/.test($("guide").textContent),
   $("guide").textContent.slice(0, 80));
 const picker = $("guide").querySelector("select");
 check("guide lists every page", picker.options.length >= 13, `${picker.options.length}`);
 $("guide").querySelector(".btn").click();
 await settle(300);
 check("back returns to the dashboard", $("guide").hidden && !$("panel").hidden);
+
+// --- a connection changed somewhere else. Found with a real v4: another
+// client connected the board, and a window showing "Not connected" never
+// looked again — its status check only ran while it thought it was connected,
+// and only repainted the header.
+const serverSide = (action, params = {}) =>
+  fetch(`${BASE}/api/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ panel: "connection", action, params }),
+  });
+await serverSide("disconnect");
+await settle(6000);
+check("a window notices a disconnect made elsewhere",
+  !$("welcome").hidden && $("panel").hidden, $("status-text").textContent);
+await serverSide("connect", { port: "simulated-v4" });
+await settle(6000);
+check("a window showing Not connected notices a connect made elsewhere",
+  $("welcome").hidden && !$("panel").hidden && /v4/.test($("status-text").textContent),
+  $("status-text").textContent);
 
 console.log(failures.length ? `\n${failures.length} FAILED` : "\nall frontend checks passed");
 process.exit(failures.length ? 1 : 0);

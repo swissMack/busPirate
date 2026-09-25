@@ -23,7 +23,10 @@ SEEED_CABLE = [
     ("MISO", "#000000", "black"),
     ("CS", "#ffffff", "white"),
     ("MOSI", "#a9a9a9", "grey"),
-    ("CLK", "#ff85ff", "pink"),
+    # Purple, not the pink once sampled from the cable card image: the
+    # firmware's own pin table calls CLK "PU", and a real v3 cable's CLK
+    # lead is purple.
+    ("CLK", "#9b59d6", "purple"),
     ("AUX", "#0433ff", "blue"),
     ("VPU", "#00f900", "green"),
     ("ADC", "#fffb00", "yellow"),

@@ -3,7 +3,7 @@
 Kept as its own panel (rather than living on Connection) so starting,
 typing and stopping the console are one group in one place: the pane that
 `open_terminal` starts stays reachable by coming back to this panel, and
-`send_line` is grouped right next to the action that opens the session it
+`send_keys` is grouped right next to the action that opens the session it
 feeds.
 """
 
@@ -16,9 +16,9 @@ def _open_terminal(ctx):
     return ctx.session.enter_terminal()
 
 
-def _send_line(ctx, line):
-    ctx.session.send_terminal_line(line)
-    return text(f"Sent {line!r}.")
+def _send_keys(ctx, keys):
+    ctx.session.send_terminal_keys(keys)
+    return text(f"Sent {keys!r}.")
 
 
 PANEL = Panel(
@@ -34,24 +34,25 @@ PANEL = Panel(
             help="Leaves binary mode and gives you the Bus Pirate's own "
             "command prompt. Everything else in the dashboard is unavailable "
             "until you close it.",
-            confirm="This leaves binary mode. On a Bus Pirate v3 that resets "
-            "the board: the supplies go off and the pins go to inputs. On a v4 "
-            "the board is not reset, but the current protocol mode is dropped. "
-            "Nothing is restored when you come back. Continue?",
+            confirm="This leaves binary mode, which resets the board — a v3 "
+            "and a v4 alike: the supplies go off and the pins go to inputs. A "
+            "v4 also drops off USB for a moment and is reconnected. Nothing is "
+            "restored when you come back. Continue?",
             stream=True,
             handler=_open_terminal,
         ),
         Action(
-            name="send_line",
+            name="send_keys",
             label="Send",
-            help="Types one line into the board's terminal.",
-            params=[Param("line", "text", "Command", default="")],
+            help="Types keys into the board's terminal, exactly as given — "
+            "Enter is a \\r of its own, never added.",
+            params=[Param("keys", "text", "Keys", default="")],
             allow_while_streaming=True,
             # The console input row on the live pane calls this action
             # directly — it needs no button/form of its own, and showing one
             # anyway was the third half of the bug this panel fixes.
             hidden=True,
-            handler=_send_line,
+            handler=_send_keys,
         ),
     ],
 )

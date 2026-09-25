@@ -228,16 +228,22 @@ not a log: you type commands and read the board's own replies. The
 **Terminal** panel's **Open the board's terminal** gets you there.
 
 The board can only be in one personality at a time, so opening the terminal
-**leaves binary mode**. What that costs depends on the hardware:
+**leaves binary mode**, and that **resets the board — a v3 and a v4 alike**:
+supplies off, every pin back to input, everything the session knew
+forgotten. A v4 also **drops off USB for about half a second** and comes
+back (measured on firmware 6.0-a3); the dashboard watches for that and
+reconnects to it, so opening the terminal just takes a moment longer.
 
-- **A v3 is hardware-reset** by this — supplies off, every pin back to
-  input, everything the session knew forgotten.
-- **A v4 is not reset.** It falls back into its terminal loop without
-  power-cycling, but the current protocol mode is dropped either way.
+It works like `screen`: **every key goes to the board as you type it**, and
+what you see is the board's own echo. Return sends a single CR, Backspace
+works, and a key the board asks for on its own — "Space to continue", "Any
+key to exit" — is answered by exactly the key you press. Dead keys (`~` on a
+Swiss or German layout) work too. Copy and paste work as usual.
 
-**Both** boards go dark on the MODE LED the moment the terminal opens — it
-comes back once you leave. That is true even on the v4, where nothing else
-about the board changed.
+While the terminal is open, **MODE and VREG show as unknown** (dashed, with
+a "?"). The board's own commands drive them — `W` switches the supplies on
+in a bus mode, the `~` self-test lights both — and the dashboard cannot see
+that. PWR stays accurate.
 
 **Nothing is restored when you come back.** The dashboard does not
 re-arm the supplies or replay whatever pin state you had — silently
@@ -248,7 +254,7 @@ damaged. You come back to supplies off, and the dashboard says so.
 holds the port exactly as a sniffer does — every other action is refused
 until you leave. Switching panels takes you away from the console, but it
 keeps running, and coming back to the **Terminal** panel shows it again,
-live, with a working Stop button and input line — the pane is derived from
+live, with a working Stop button and its typing surface — the pane is derived from
 the running session, not just from the moment you opened it. You are never
 stuck: **Disconnect** on the Connection panel is always available. If the
 reader thread still holds the port, the click fails and explains why; trying
@@ -256,8 +262,9 @@ again in a moment succeeds.
 
 If leaving the terminal and returning to binary mode fails, the dashboard
 **disconnects** rather than pretend the session is still in binary mode.
-Reconnecting recovers it: connecting always talks to the terminal first and
-knocks its way back into binary mode from there.
+Reconnecting recovers it: connecting answers any menu question the board
+was left at, resets a board left in binary mode, waits out a v4 that is
+still coming back to USB, and knocks its way into binary mode from there.
 
 ## Things you will wonder about later
 
@@ -275,6 +282,10 @@ knocks its way back into binary mode from there.
   Bus Pirate, which is what you want when a page gets into a mess.
 - **One caller at a time.** A serial port cannot be shared, so actions are
   serialised. If two clicks overlap, the second waits.
+- **Simulated boards** are always in the port list as `simulated-v3` and
+  `simulated-v4`, with a **Try a simulated one** button on the connect
+  screen. Automatic detection never picks them. `--demo` only makes a
+  simulator the default and hides the real ports.
 - **Demo mode** (`--demo`) is the full UI against a simulated device. Use it
   to re-learn the tool without wiring anything up, and to check the software
   still works after an OS upgrade.

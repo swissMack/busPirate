@@ -123,7 +123,7 @@ in `buspirate/device.py`.
 
 ## Testing without hardware
 
-`tests/fake_serial.py` emulates the firmware's state machine and **raises on
+`buspirate/simulator.py` (re-exported as `tests/fake_serial.py`) emulates the firmware's state machine and **raises on
 any command it does not recognise** — so a new mode needs a matching
 `_state_<name>` handler, and a driver bug shows up as a failure rather than a
 silent read of zeros. Add your mode there, and the dashboard tests in

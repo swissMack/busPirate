@@ -18,7 +18,7 @@ from collections import deque
 from typing import Any, Dict, List, Optional, Set
 
 from ..base import BusPirate
-from ..exceptions import BusPirateError, ModeError
+from ..exceptions import BusPirateError, ConnectionError, ModeError
 from ..ports import discover, resolve
 from .decoders import make_decoder
 from .registry import Action, Panel, live, load_panels
@@ -28,10 +28,12 @@ TRAFFIC_HISTORY = 500
 STREAM_EVENT_CAP = 200  # events per websocket message
 STREAM_FLUSH_SECONDS = 0.1  # at most ten updates a second, however busy the bus
 
-#: How long to wait after leaving binary mode before reading. A v3 performs a
-#: hardware reset here and has to boot; a v4 does not. Set conservatively for
-#: the slower case — see the hardware checklist in docs/troubleshooting.md.
-TERMINAL_SETTLE_SECONDS = 0.5
+#: How long to watch after leaving binary mode. Both boards reset here. A v3
+#: stays on USB and needs this long to boot (0.5 s was verified on hardware);
+#: a v4 drops off USB and re-enumerates — measured on firmware 6.0-a3, gone at
+#: 188 ms and back at 463 ms — so the window has to outlast its departure.
+#: It is the watch passed to BusPirate.reopen_if_reenumerated().
+TERMINAL_SETTLE_SECONDS = 0.8
 
 #: How long stop_stream_blocking() waits for the reader thread to let go of
 #: the port. Leaving the board's terminal on a v3 means a hardware reset, so
@@ -39,6 +41,21 @@ TERMINAL_SETTLE_SECONDS = 0.5
 #: seconds on their own. A generous wait is still only a wait, though: if it
 #: expires we say the stream did not stop rather than pretending it did.
 STREAM_STOP_TIMEOUT_SECONDS = 15.0
+
+#: Port names that mean "a simulated board", offered in every port list so
+#: the dashboard can be tried without hardware, whatever it was launched with.
+SIMULATED_PREFIX = "simulated-"
+SIMULATED_VARIANTS = ("v3", "v4")
+
+
+def simulated_variant(port: Optional[str]) -> Optional[str]:
+    """The variant a simulated port name stands for, or None for real ports."""
+    if port and port.startswith(SIMULATED_PREFIX):
+        variant = port[len(SIMULATED_PREFIX):]
+        if variant in SIMULATED_VARIANTS:
+            return variant
+    return None
+
 
 #: Where captures go when the app is frozen into a ``.app`` bundle.
 #:
@@ -99,7 +116,7 @@ class StreamState:
 class TerminalState(StreamState):
     """The Bus Pirate's own terminal, held open as a stream.
 
-    Typed input does not go to the port directly. ``send_terminal_line`` puts
+    Typed input does not go to the port directly. ``send_terminal_keys`` puts
     it here and the reader thread writes it, so that thread stays the only
     thing touching the port.
     """
@@ -238,11 +255,23 @@ class DeviceSession:
 
     # -- connection --------------------------------------------------------
 
-    def _make_device(self, port: str) -> BusPirate:
-        if self.use_fake:
-            from tests.fake_serial import FakeSerial, fake_factory
+    @property
+    def simulated(self) -> bool:
+        """Whether the board in use (or, before connecting, the default) is fake.
 
-            fake = FakeSerial(variant=self.fake_variant)
+        Decided per connection rather than per launch: a dashboard started for
+        real hardware can still be pointed at a simulated board.
+        """
+        if self.port is not None:
+            return simulated_variant(self.port) is not None
+        return self.use_fake
+
+    def _make_device(self, port: str) -> BusPirate:
+        variant = simulated_variant(port)
+        if variant is not None:
+            from ..simulator import FakeSerial, fake_factory
+
+            fake = FakeSerial(variant=variant)
             return BusPirate(
                 port,
                 serial_factory=fake_factory(fake),
@@ -251,9 +280,26 @@ class DeviceSession:
             )
         return BusPirate(port, on_traffic=self._on_traffic)
 
+    def _resolve(self, port: Optional[str]) -> str:
+        """Turn what the user picked into a port name, real or simulated."""
+        if port == "fake" or (self.use_fake and port in (None, "", "auto")):
+            # "fake" is the name the simulator had before it could be picked.
+            return SIMULATED_PREFIX + self.fake_variant
+        if simulated_variant(port) is not None:
+            return port
+        try:
+            return resolve(port)
+        except ConnectionError as exc:
+            # Automatic detection never picks the simulator — that would pass
+            # off a fake board as the real one — but it should be mentioned.
+            raise ConnectionError(
+                f"{exc} To try the dashboard without hardware, pick a "
+                "simulated Bus Pirate from the port list instead."
+            ) from None
+
     def connect_blocking(self, port: Optional[str]) -> Dict[str, Any]:
         self.disconnect_blocking()
-        resolved = "fake" if self.use_fake else resolve(port)
+        resolved = self._resolve(port)
         self.port_info = self._describe_port(resolved)
         device = self._make_device(resolved)
         device.open()
@@ -294,11 +340,12 @@ class DeviceSession:
 
     def _describe_port(self, device: str) -> Dict[str, Any]:
         """What USB discovery can tell us about one device path."""
-        if self.use_fake:
+        variant = simulated_variant(device)
+        if variant is not None:
             return {
                 "device": device,
                 "usb_id": None,
-                "description": f"simulated Bus Pirate {self.fake_variant}",
+                "description": f"simulated Bus Pirate {variant}",
                 "note": "no hardware involved",
             }
         for candidate in discover(include_unlikely=True):
@@ -319,7 +366,7 @@ class DeviceSession:
         """
         if self.port is None:
             return {"attached": False}
-        if self.use_fake:
+        if self.simulated:
             return dict(self.port_info or {}, attached=True, simulated=True)
         attached = any(
             candidate.device == self.port
@@ -339,20 +386,26 @@ class DeviceSession:
             return bool(self._mode.peripherals.get("power"))
         return bool(self.last_pins.get("power"))
 
-    def leds(self) -> Dict[str, bool]:
+    def leds(self) -> Dict[str, Optional[bool]]:
         """What the indicator LEDs should be showing, for the shown variant.
 
         Inferred, never read: no command reports LED state. See LED_NOTES.
+        ``None`` means unknown: while the board's own terminal is open, its
+        commands drive MODE and VREG (``W`` switches the supplies, the ``~``
+        self-test lights both), and this session sees none of it.
         """
         live = self.bp is not None and self.bp.is_open
+        in_terminal = isinstance(self.stream, TerminalState)
         rules = LED_RULES[self.effective_variant()]
-        state = {}
+        state: Dict[str, Optional[bool]] = {}
         for name, rule in rules.items():
             how = rule["inference"]
-            if how == "supplies":
+            if live and in_terminal and how in ("supplies", "connected"):
+                state[name] = None
+            elif how == "supplies":
                 state[name] = live and self._supplies_on()
             elif how == "connected":
-                state[name] = live and not isinstance(self.stream, TerminalState)
+                state[name] = live
             elif how == "powered":
                 state[name] = live
             else:  # flash_on_traffic, always_dark
@@ -384,7 +437,7 @@ class DeviceSession:
         if self.bp is None or not self.bp.is_open:
             return {
                 "connected": False,
-                "simulated": self.use_fake,
+                "simulated": self.simulated,
                 "usb": {"attached": False},
                 "stream": None,
                 "leds": self.leds(),
@@ -393,7 +446,7 @@ class DeviceSession:
         return {
             "connected": True,
             "leds": self.leds(),
-            "simulated": self.use_fake,
+            "simulated": self.simulated,
             "port": self.port,
             "usb": self.usb_status(),
             "mode": self.mode_name,
@@ -408,15 +461,24 @@ class DeviceSession:
         }
 
     def ports(self) -> List[Dict[str, Any]]:
+        # A demo launch offers its own variant first; a hardware launch lists
+        # the simulators after the real ports and never marks them likely.
+        variants = sorted(
+            SIMULATED_VARIANTS,
+            key=lambda v: (not (self.use_fake and v == self.fake_variant), v),
+        )
+        simulators = [
+            {
+                "device": SIMULATED_PREFIX + variant,
+                "note": f"simulated Bus Pirate {variant}, no hardware",
+                "likely": self.use_fake and variant == self.fake_variant,
+                "usb_id": None,
+                "simulated": True,
+            }
+            for variant in variants
+        ]
         if self.use_fake:
-            return [
-                {
-                    "device": "fake",
-                    "note": f"simulated Bus Pirate {self.fake_variant}",
-                    "likely": True,
-                    "usb_id": None,
-                }
-            ]
+            return simulators
         return [
             {
                 "device": c.device,
@@ -424,9 +486,10 @@ class DeviceSession:
                 "likely": c.likely_bus_pirate,
                 "usb_id": c.usb_id,
                 "description": c.description,
+                "simulated": False,
             }
             for c in discover(include_unlikely=True)
-        ]
+        ] + simulators
 
     # -- modes -------------------------------------------------------------
 
@@ -628,10 +691,10 @@ class DeviceSession:
         self.mode_name = None
         self._mode = None
         if isinstance(stream, TerminalState):
-            # A v3 was just hardware-reset and a v4 dropped its mode — either
-            # way the supplies this session last drove are no longer true of
-            # the board. Leaving last_pins stale would light VREG over a dark
-            # board, the same reasoning disconnect_blocking() already applies.
+            # The board was reset on the way in — a v3 and a v4 alike — so
+            # the supplies this session last drove are no longer true of it.
+            # Leaving last_pins stale would light VREG over a dark board, the
+            # same reasoning disconnect_blocking() already applies.
             self.last_pins = dict.fromkeys(self.last_pins, False)
         self.stream = None
         if note and self.bp is not None:
@@ -691,7 +754,9 @@ class DeviceSession:
         # already sent.
         try:
             self.bp.reset_hardware()
-            time.sleep(TERMINAL_SETTLE_SECONDS)
+            # Doubles as the v3's boot settle: on a board that stays on USB it
+            # simply runs out the window.
+            self.bp.reopen_if_reenumerated(watch=TERMINAL_SETTLE_SECONDS)
             self.bp.flush_input()
         except BusPirateError:
             self._drop_connection()
@@ -704,16 +769,23 @@ class DeviceSession:
             ) from exc
         return live(
             "Board terminal",
-            decoder="text",
+            decoder="console",
             caption="The Bus Pirate's own terminal. Type a command; '?' lists them.",
             input=True,
         )
 
-    def send_terminal_line(self, line: str) -> None:
+    def send_terminal_keys(self, keys: str) -> None:
+        """Queue keys for the board exactly as typed, the way `screen` does.
+
+        Nothing is appended. The firmware reads raw keys and several of its
+        prompts want exactly one ("Space to continue", "Any key to exit"), so
+        a line with Enter added answered them before anyone had read them —
+        found on a real v3, running the ``~`` self-test.
+        """
         stream = self.stream
         if not isinstance(stream, TerminalState):
             raise BusPirateError("the board's terminal is not open")
-        stream.inbox.put((line + "\r\n").encode("ascii", errors="replace"))
+        stream.inbox.put(keys.encode("ascii", errors="replace"))
 
     async def run(self, panel: Panel, action: Action, params: Dict[str, Any]):
         async with self.lock:

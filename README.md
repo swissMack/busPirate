@@ -15,8 +15,10 @@ opening the dashboard in your browser instead — either way you get the same
 UI. From a terminal, the equivalent commands are `buspirate app` (window) and
 `buspirate dashboard` (browser).
 
-No hardware to hand? **`bin/demo.command`** runs the whole thing against a
-simulated Bus Pirate.
+No hardware to hand? Press **Try a simulated one** on the connect screen, or
+pick `simulated-v3` / `simulated-v4` from the port list — the whole dashboard
+works against a simulated Bus Pirate. **`bin/demo.command`** starts straight
+into one.
 
 **→ [The user guide](docs/user-guide.md) is the place to start**, especially
 if it has been a while.
@@ -119,8 +121,10 @@ zeros. The mode tests run twice, once as a v3 and once as a v4.
 ## Status
 
 Written against the published protocol documentation and tested against a
-simulated device: 238 Python tests plus a frontend test that drives the real
-UI. It has **not yet been run against real hardware** — see the checklist at
-the end of [troubleshooting](docs/troubleshooting.md) for what is worth
-verifying the first time you plug one in, chiefly the SPI clock phase
-mapping, a flash write round trip, and the sniffers.
+simulated device: over 400 Python tests plus a frontend test that drives the
+real UI. **Run against real hardware** — a v3 on firmware 6.1 and a v4 on
+firmware 6.0-a3: connecting, the LEDs, the board's own terminal and the `~`
+self-test are verified. Not yet verified, for want of chips on the bench: the
+SPI clock phase mapping, a flash write round trip, an EEPROM, and the
+sniffers — see the checklists at the end of
+[troubleshooting](docs/troubleshooting.md).

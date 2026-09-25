@@ -14,7 +14,7 @@ import ipaddress
 import os
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -188,13 +188,30 @@ def create_app(
     async def feed(socket: WebSocket) -> None:
         await socket.accept()
         queue = session.subscribe()
-        try:
+
+        async def pump() -> None:
             while True:
                 event = await queue.get()
                 await socket.send_json(event)
-        except (WebSocketDisconnect, RuntimeError, asyncio.CancelledError):
-            pass
+
+        async def watch() -> None:
+            # The page never sends anything, so the only message is the
+            # disconnect. Without reading it, a client that leaves during a
+            # quiet spell goes unnoticed — the pump sits in queue.get() for
+            # good, and uvicorn's graceful shutdown waits on it forever.
+            while (await socket.receive())["type"] != "websocket.disconnect":
+                pass
+
+        tasks = [asyncio.create_task(pump()), asyncio.create_task(watch())]
+        try:
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         finally:
+            for task in tasks:
+                task.cancel()
+            # Retrieve each outcome so a pump that died on a closed socket
+            # (WebSocketDisconnect, RuntimeError) is not logged as an
+            # unretrieved task exception.
+            await asyncio.gather(*tasks, return_exceptions=True)
             session.unsubscribe(queue)
 
     # -- static -----------------------------------------------------------

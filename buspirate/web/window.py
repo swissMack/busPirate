@@ -156,7 +156,13 @@ def run_window(
         # becomes a sentence carrying the original text. Anything from
         # stop_server is left alone — a bug there must not disappear here.
         webview.create_window(
-            "Bus Pirate", f"http://{host}:{port}/", width=1200, height=820
+            "Bus Pirate",
+            f"http://{host}:{port}/",
+            width=1200,
+            height=820,
+            # pywebview disables selection by default; without this nothing
+            # in the window — terminal, traffic log, results — can be copied.
+            text_select=True,
         )
         webview.start()
     except BusPirateError:

@@ -102,7 +102,8 @@ PANEL = Panel(
                     "Port",
                     default="",
                     placeholder="auto",
-                    help="A /dev path, or blank for automatic.",
+                    help="A /dev path, simulated-v3 or simulated-v4 for a board "
+                    "with no hardware, or blank for automatic.",
                 )
             ],
             handler=_connect,

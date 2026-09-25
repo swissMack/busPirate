@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bus Pirate Wiring Card</title>
+<!--
+  A printable card for making a probe lead set in the dashboard's colours.
+  The colours and pin pairs are the ones buspirate/web/wiring.py draws with;
+  tests/test_dashboard.py fails if this card drifts from them.
+  Print it at 100% on A4 or Letter, with "background graphics" switched on.
+-->
+<style>
+  :root {
+    --ink: #1d1a16;
+    --muted: #6b645b;
+    --line: #d8d2c8;
+    --paper: #ffffff;
+    --warn: #9a4a00;
+    --warn-bg: #fff4e5;
+  }
+  @page { size: A4; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; background: var(--paper); color: var(--ink);
+    font: 13px/1.45 -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  .lede { color: var(--muted); margin: 0 0 14px; max-width: 62ch; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  section {
+    border: 1.5px solid var(--ink); border-radius: 10px; padding: 12px 14px 10px;
+    break-inside: avoid;
+  }
+  section h2 { font-size: 16px; margin: 0; }
+  .sub { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+  .head { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px;
+    font-size: 11px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .06em; margin-bottom: 4px; }
+  .head span:last-child { text-align: right; }
+  .header { border: 1px solid var(--line); border-radius: 8px; padding: 6px; background: #faf8f4; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+  .pin { display: flex; align-items: center; gap: 8px; padding: 5px 4px; min-width: 0; }
+  .row + .row .pin { border-top: 1px dashed var(--line); }
+  .pin.right { flex-direction: row-reverse; text-align: right; }
+  .dot {
+    flex: none; width: 22px; height: 22px; border-radius: 50%;
+    border: 1.5px solid var(--ink); background: var(--c);
+  }
+  .dot.none { background: repeating-linear-gradient(45deg, #fff 0 3px, #cfc8bd 3px 6px); border-style: dashed; }
+  .name { font-weight: 700; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  .colour { color: var(--muted); font-size: 11.5px; display: block; }
+  .note { font-size: 11.5px; color: var(--muted); margin: 8px 0 0; }
+  .warn { font-size: 11.5px; color: var(--warn); background: var(--warn-bg);
+    border-radius: 6px; padding: 6px 8px; margin: 0 0 10px; }
+  .rules { margin: 14px 0 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; }
+  .rules h3 { margin: 0 0 4px; font-size: 13px; }
+  .rules ul { margin: 0; padding-left: 18px; }
+  @media print { body { padding: 0; } .cards { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>Bus Pirate wiring card</h1>
+<p class="lede">One colour per signal, the same on both boards and the same as the
+dashboard's hook-up diagrams. Each box below is the header as the board's
+silkscreen labels it: left column and right column, top row first.</p>
+
+<div class="cards">
+
+<section data-board="v3">
+  <h2>Bus Pirate v3 — 2×5 header</h2>
+  <p class="sub">USB socket on the left. Colours checked against a real v3 cable and the firmware's own pin table.</p>
+  <div class="head"><span>Left</span><span>Right</span></div>
+  <div class="header">
+    <div class="row">
+      <div class="pin left" data-signal="GND" data-colour="#945200"><i class="dot" style="--c:#945200"></i><span><span class="name">GND</span><span class="colour">brown</span></span></div>
+      <div class="pin right" data-signal="+3.3V" data-colour="#ff2600"><i class="dot" style="--c:#ff2600"></i><span><span class="name">+3.3V</span><span class="colour">red</span></span></div>
+    </div> <!-- /row -->
+    <div class="row">
+      <div class="pin left" data-signal="+5V" data-colour="#ff9300"><i class="dot" style="--c:#ff9300"></i><span><span class="name">+5V</span><span class="colour">orange</span></span></div>
+      <div class="pin right" data-signal="ADC" data-colour="#fffb00"><i class="dot" style="--c:#fffb00"></i><span><span class="name">ADC</span><span class="colour">yellow</span></span></div>
+    </div> <!-- /row -->
+    <div class="row">
+      <div class="pin left" data-signal="VPU" data-colour="#00f900"><i class="dot" style="--c:#00f900"></i><span><span class="name">VPU</span><span class="colour">green</span></span></div>
+      <div class="pin right" data-signal="AUX" data-colour="#0433ff"><i class="dot" style="--c:#0433ff"></i><span><span class="name">AUX</span><span class="colour">blue</span></span></div>
+    </div> <!-- /row -->
+    <div class="row">
+      <div class="pin left" data-signal="CLK" data-colour="#9b59d6"><i class="dot" style="--c:#9b59d6"></i><span><span class="name">CLK</span><span class="colour">purple</span></span></div>
+      <div class="pin right" data-signal="MOSI" data-colour="#a9a9a9"><i class="dot" style="--c:#a9a9a9"></i><span><span class="name">MOSI</span><span class="colour">grey</span></span></div>
+    </div> <!-- /row -->
+    <div class="row">
+      <div class="pin left" data-signal="CS" data-colour="#ffffff"><i class="dot" style="--c:#ffffff"></i><span><span class="name">CS</span><span class="colour">white</span></span></div>
+      <div class="pin right" data-signal="MISO" data-colour="#000000"><i class="dot" style="--c:#000000"></i><span><span class="name">MISO</span><span class="colour">black</span></span></div>
+    </div> <!-- /row -->
+  </div>
+  <p class="note">The standard v3 ribbon cable already uses these colours.</p>
+</section>
+
+<section data-board="v4">
+  <h2>Bus Pirate v4 — 2×6 header</h2>
+  <p class="sub">Two more pins than the v3: AUX1 and AUX2.</p>
+  <p class="warn"><b>Check before wiring:</b> this pin order comes from the board
+  drawings and the firmware, not yet from a real board. Compare it with the
+  silkscreen next to your own header first.</p>
+  <div class="head"><span>Left</span><span>Right</span></div>
+  <div class="header">
+    <div class="row">
+      <div class="pin left" data-signal="GND" data-colour="#945200"><i class="dot" style="--c:#945200"></i><span><span class="name">GND</span><span class="colour">brown</span></span></div>
+      <div class="pin right" data-signal="+5V" data-colour="#ff9300"><i class="dot" style="--c:#ff9300"></i><span><span class="name">+5V</span><span class="colour">orange</span></span></div>
+    </div> <!-- /row -->
+    <div class="row">
+      <div class="pin left" data-signal="+3.3V" data-colour="#ff2600"><i class="dot" style="--c:#ff2600"></i><span><span class="name">+3.3V</span><span class="colour">red</span></span></div>
+      <div class="pin right" data-signal="VPU" data-colour="#00f900"><i class="dot" style="--c:#00f900"></i><span><span class="name">VPU</span><span class="colour">green</span></span></div>
+    </div> <!-- /row -->
+    <div class="row">
+      <div class="pin left" data-signal="ADC" data-colour="#fffb00"><i class="dot" style="--c:#fffb00"></i><span><span class="name">ADC</span><span class="colour">yellow</span></span></div>
+      <div class="pin right" data-signal="AUX2" data-colour=""><i class="dot none"></i><span><span class="name">AUX2</span><span class="colour">optional — leave unwired</span></span></div>
+    </div> <!-- /row -->
+    <div class="row">
+      <div class="pin left" data-signal="AUX1" data-colour=""><i class="dot none"></i><span><span class="name">AUX1</span><span class="colour">optional — leave unwired</span></span></div>
+      <div class="pin right" data-signal="AUX" data-colour="#0433ff"><i class="dot" style="--c:#0433ff"></i><span><span class="name">AUX</span><span class="colour">blue</span></span></div>
+    </div> <!-- /row -->
+    <div class="row">
+      <div class="pin left" data-signal="CS" data-colour="#ffffff"><i class="dot" style="--c:#ffffff"></i><span><span class="name">CS</span><span class="colour">white</span></span></div>
+      <div class="pin right" data-signal="MISO" data-colour="#000000"><i class="dot" style="--c:#000000"></i><span><span class="name">MISO</span><span class="colour">black</span></span></div>
+    </div> <!-- /row -->
+    <div class="row">
+      <div class="pin left" data-signal="CLK" data-colour="#9b59d6"><i class="dot" style="--c:#9b59d6"></i><span><span class="name">CLK</span><span class="colour">purple</span></span></div>
+      <div class="pin right" data-signal="MOSI" data-colour="#a9a9a9"><i class="dot" style="--c:#a9a9a9"></i><span><span class="name">MOSI</span><span class="colour">grey</span></span></div>
+    </div> <!-- /row -->
+  </div>
+  <p class="note">AUX1 and AUX2 work only from the board's own terminal; the
+  dashboard never drives them. If you wire them anyway, mark the two leads
+  with tape — jumper kits come in the same ten colours.</p>
+</section>
+
+</div>
+
+<div class="rules">
+  <h3>Before you trust a lead</h3>
+  <ul>
+    <li><b>Go by position, not colour.</b> Dyes vary: on one real cable GND's brown
+      passed for grey and +5V's orange read as pink.</li>
+    <li><b>Keep GND clear of both supplies.</b> The dashboard switches +3.3V and +5V
+      on together.</li>
+    <li><b>Measure when unsure.</b> Clip the yellow ADC lead to a supply lead and read
+      it in Pins &amp; power → Measure a voltage: about 3.3 V or 5.0 V.</li>
+  </ul>
+</div>
+
+</body>
+</html>

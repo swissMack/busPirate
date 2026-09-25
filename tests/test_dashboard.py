@@ -50,7 +50,7 @@ def test_state_lists_panels_before_connecting(client):
 
 
 def test_terminal_is_its_own_panel_right_after_connection(client):
-    # open_terminal and send_line moved off the Connection panel onto their
+    # open_terminal and send_keys moved off the Connection panel onto their
     # own panel, grouped together, immediately after Connection in the nav.
     body = client.get("/api/state").json()
     panel_ids = [p["id"] for p in body["panels"]]
@@ -58,16 +58,70 @@ def test_terminal_is_its_own_panel_right_after_connection(client):
     assert panel_ids.index("terminal") == panel_ids.index("connection") + 1
     panels = {p["id"]: p for p in body["panels"]}
     terminal_actions = {a["name"] for a in panels["terminal"]["actions"]}
-    assert terminal_actions == {"open_terminal", "send_line"}
+    assert terminal_actions == {"open_terminal", "send_keys"}
     connection_actions = {a["name"] for a in panels["connection"]["actions"]}
     assert "open_terminal" not in connection_actions
-    assert "send_line" not in connection_actions
+    assert "send_keys" not in connection_actions
 
 
 def test_ports_endpoint_offers_the_simulated_device(client):
     ports = client.get("/api/ports").json()["ports"]
-    assert ports[0]["device"] == "fake"
+    assert ports[0]["device"] == f"simulated-{client.variant}"
     assert ports[0]["likely"]
+
+
+# -- the simulator as an option in a normal (hardware) launch -----------------
+
+
+@pytest.fixture
+def hardware_client(monkeypatch):
+    """A dashboard started for real hardware, with nothing plugged in."""
+    from buspirate import ports as ports_module
+    from buspirate.web import session as session_module
+
+    monkeypatch.setattr(ports_module, "discover", lambda include_unlikely=False: [])
+    monkeypatch.setattr(session_module, "discover", lambda include_unlikely=False: [])
+    app = create_app(use_fake=False)
+    with fastapi_testclient.TestClient(app) as client:
+        yield client
+
+
+def test_hardware_launch_still_offers_both_simulators(hardware_client):
+    ports = hardware_client.get("/api/ports").json()["ports"]
+    simulated = {p["device"]: p for p in ports if p.get("simulated")}
+    assert set(simulated) == {"simulated-v3", "simulated-v4"}
+    # Offered, but never what "detect automatically" picks.
+    assert not any(p["likely"] for p in simulated.values())
+
+
+@pytest.mark.parametrize("variant", ["v3", "v4"])
+def test_hardware_launch_can_connect_to_a_simulator(hardware_client, variant):
+    status, body = run(
+        hardware_client, "connection", "connect", port=f"simulated-{variant}"
+    )
+    assert status == 200, body
+    assert body["status"]["simulated"] is True
+    assert body["status"]["variant"] == variant
+    assert body["status"]["usb"]["simulated"] is True
+    # And it drives like the real thing.
+    status, body = run(hardware_client, "i2c", "scan", power=True, pullups=True)
+    assert status == 200, body
+
+
+def test_disconnecting_a_simulator_returns_to_hardware(hardware_client):
+    run(hardware_client, "connection", "connect", port="simulated-v3")
+    run(hardware_client, "connection", "disconnect")
+    state = hardware_client.get("/api/state").json()["status"]
+    assert state["connected"] is False
+    assert state["simulated"] is False
+
+
+def test_auto_detect_never_falls_back_to_the_simulator(hardware_client):
+    status, body = run(hardware_client, "connection", "connect", port="")
+    assert status != 200
+    assert "simulated" in str(body).lower()  # the error points at it
+    state = hardware_client.get("/api/state").json()["status"]
+    assert state["connected"] is False
 
 
 # -- connecting ------------------------------------------------------------
@@ -113,18 +167,18 @@ def test_the_terminal_warns_before_it_takes_the_board(client):
     assert action["confirm"], "opening the terminal must confirm first"
 
 
-def test_send_line_is_refused_when_the_terminal_is_not_open(client):
+def test_send_keys_is_refused_when_the_terminal_is_not_open(client):
     connect(client)
-    status, body = run(client, "terminal", "send_line", line="i")
+    status, body = run(client, "terminal", "send_keys", keys="i")
     assert status == 400
     assert "terminal" in body["error"]
 
 
-def test_send_line_is_hidden_from_automatic_form_rendering(client):
+def test_send_keys_is_hidden_from_automatic_form_rendering(client):
     body = connect(client)
     panels = {p["id"]: p for p in body["panels"]}
     action = next(a for a in panels["terminal"]["actions"]
-                  if a["name"] == "send_line")
+                  if a["name"] == "send_keys")
     assert action["hidden"] is True
 
 
@@ -371,7 +425,7 @@ def test_the_cable_table_matches_the_reference_card(client):
         (1, "MISO", "black"),
         (2, "CS", "white"),
         (3, "MOSI", "grey"),
-        (4, "CLK", "pink"),
+        (4, "CLK", "purple"),
         (5, "AUX", "blue"),
         (6, "VPU", "green"),
         (7, "ADC", "yellow"),
@@ -827,3 +881,124 @@ def test_the_cli_reference_documents_the_app_command(client):
     # `app` again without a test noticing.
     page = client.get("/api/docs/cli").json()["markdown"]
     assert "buspirate app" in page
+
+
+def test_a_server_with_a_departed_feed_client_still_shuts_down():
+    """A browser that closes during a quiet spell must not pin the server.
+
+    The feed used to wait only for the next event to send, so a client that
+    left while nothing was happening was never noticed: the handler sat in
+    ``queue.get()`` for good, and uvicorn's graceful shutdown waited on it
+    forever — `buspirate dashboard` ignored Ctrl-C and SIGTERM once a page
+    had been open. TestClient cancels the handler when the socket closes and
+    so cannot see this; it takes a real uvicorn.
+    """
+    import asyncio
+    import socket
+    import threading
+    import time
+
+    uvicorn = pytest.importorskip("uvicorn")
+    websockets = pytest.importorskip("websockets")
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    server = uvicorn.Server(
+        uvicorn.Config(create_app(use_fake=True), host="127.0.0.1", port=port,
+                       log_level="warning")
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 5
+    while not server.started:
+        assert time.monotonic() < deadline, "server never started"
+        time.sleep(0.02)
+
+    async def visit():
+        async with websockets.connect(f"ws://127.0.0.1:{port}/ws"):
+            pass  # connect, then leave without a single event arriving
+
+    asyncio.run(visit())
+    server.should_exit = True
+    thread.join(5)
+    assert not thread.is_alive(), "shutdown hung on the departed feed client"
+
+
+def test_the_terminal_warning_says_both_boards_reset(client):
+    # A real v4 reset on opening the terminal: supplies off, off USB and back.
+    body = connect(client)
+    panels = {p["id"]: p for p in body["panels"]}
+    action = next(a for a in panels["terminal"]["actions"] if a["name"] == "open_terminal")
+    assert "not reset" not in action["confirm"]
+    assert "v4" in action["confirm"] and "supplies go off" in action["confirm"]
+
+
+def test_a_scan_where_every_address_answers_says_the_bus_is_stuck(client):
+    """Found on a real v3 with VPU floating: the pull-ups had nothing to pull
+    up to, SDA sat low, and a low SDA in the ACK slot reads as an ACK — so
+    all 112 addresses "answered", and the scan listed 112 devices without a
+    word of warning."""
+    connect(client)
+    client.app.state.session.bp.serial.i2c_devices = set(range(0x08, 0x78))
+    status, body = run(client, "i2c", "scan", power=True, pullups=True, speed=2)
+    assert status == 200, body
+    result = body["result"]
+    assert result["render"] == "text" and result["tone"] == "warn"
+    assert "VPU" in result["text"]
+
+
+def test_the_stuck_bus_check_is_shared_with_the_command_line():
+    from buspirate.i2c import stuck_bus_warning
+
+    everything = list(range(0x08, 0x78))
+    assert "VPU" in stuck_bus_warning(everything, everything)
+    assert stuck_bus_warning([0x50, 0x68], everything) == ""
+
+
+# -- the printable wiring card ---------------------------------------------
+
+
+def _card_rows(html, board):
+    """[(left, right), ...] as the card lays out one board's header."""
+    import re
+
+    section = re.search(rf'<section[^>]*data-board="{board}".*?</section>', html, re.S)
+    assert section, f"no {board} card"
+    rows = re.findall(r'<div class="row">(.*?)</div>\s*<!-- /row -->', section.group(0), re.S)
+    return [tuple(re.findall(r'data-signal="([^"]+)"', row)) for row in rows], section.group(0)
+
+
+def _header_rows(board):
+    """The same rows derived from the geometry the dashboard draws with."""
+    from buspirate.web.wiring import BOARDS
+
+    geometry = BOARDS[board]
+    by_row = {}
+    for signal, (x, y) in geometry["pins"].items():
+        by_row.setdefault(y, {})[geometry["side"][signal]] = signal
+    return [(r["left"], r["right"]) for _, r in sorted(by_row.items())]
+
+
+@pytest.mark.parametrize("board", ["v3", "v4"])
+def test_the_wiring_card_matches_the_header_the_dashboard_draws(board):
+    from pathlib import Path
+
+    html = (Path(__file__).parent.parent / "docs" / "wiring-card.html").read_text()
+    rows, _ = _card_rows(html, board)
+    assert rows == _header_rows(board)
+
+
+@pytest.mark.parametrize("board", ["v3", "v4"])
+def test_the_wiring_card_uses_the_dashboards_colours(board):
+    import re
+    from pathlib import Path
+
+    from buspirate.web.wiring import SEEED_CABLE
+
+    html = (Path(__file__).parent.parent / "docs" / "wiring-card.html").read_text()
+    _, section = _card_rows(html, board)
+    shown = dict(re.findall(r'data-signal="([^"]+)" data-colour="([^"]*)"', section))
+    for signal, hexcode, name in SEEED_CABLE:
+        assert shown[signal] == hexcode, signal

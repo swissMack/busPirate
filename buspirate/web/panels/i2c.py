@@ -11,6 +11,8 @@ from ...i2c import (
     AUX_USE_AUX,
     AUX_USE_CS,
     I2C,
+    SCAN_RANGE,
+    stuck_bus_warning,
 )
 from ..registry import Action, Panel, Param, Wire, chips, hexdump, live, text
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, PULLUP_RAIL_NOTE, colour
@@ -58,6 +60,9 @@ def _scan(ctx, power, pullups, speed):
     ctx.mode.configure_peripherals(power=power, pullups=pullups)
     ctx.mode.set_speed(speed)
     found = ctx.mode.scan()
+    stuck = stuck_bus_warning(found, SCAN_RANGE)
+    if stuck:
+        return text(stuck, tone="warn")
     if not found:
         return text(
             "Nothing answered. The usual causes, in order: pull-ups are off, "

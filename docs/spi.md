@@ -6,7 +6,7 @@ Four wires, one chip selected at a time.
 
 | Probe wire | Seeed colour | Target |
 |-----------|--------------|--------|
-| CLK | pink | SCK / CLK |
+| CLK | purple | SCK / CLK |
 | MOSI | grey | DI / MOSI — Bus Pirate out, chip in |
 | MISO | black | DO / MISO — chip out, Bus Pirate in |
 | CS | white | CS / SS, active low |

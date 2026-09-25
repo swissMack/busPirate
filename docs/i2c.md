@@ -6,7 +6,7 @@ Two wires shared by many chips, each with a 7-bit address.
 
 | Probe wire | Seeed colour | Target |
 |-----------|--------------|--------|
-| CLK | pink | SCL |
+| CLK | purple | SCL |
 | MOSI | grey | SDA |
 | GND | brown | GND — connect this first |
 | VPU | green | the bus supply rail |

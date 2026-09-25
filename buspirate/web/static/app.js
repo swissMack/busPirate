@@ -74,6 +74,14 @@ async function api(path, options) {
 
 async function loadState() {
   const data = await api("/api/state");
+  applyState(data);
+  data.traffic.forEach(addLogLine);
+  render();
+}
+
+/* Everything /api/state describes except the traffic backlog, which is only
+   replayed once, on first load. */
+function applyState(data) {
   state.status = data.status;
   state.panels = data.panels;
   state.cable = data.cable || [];
@@ -92,8 +100,6 @@ async function loadState() {
   if (!state.panels.some((p) => p.id === state.current)) {
     state.current = state.panels.length ? state.panels[0].id : null;
   }
-  data.traffic.forEach(addLogLine);
-  render();
 }
 
 function render() {
@@ -179,29 +185,36 @@ function flashUsbLed() {
   }, 120);
 }
 
+/* How one LED reads: lit, dark, or — null from the server — unknown, which
+   is what MODE and VREG are while the board's own terminal is open and its
+   commands drive them out of the dashboard's sight. */
+function ledLook(name, value) {
+  if (value === null) {
+    return { cls: "led led--unknown",
+      title: `${name}: unknown — the board's own terminal controls it — ${ledMeans(name)}` };
+  }
+  const on = value === true;
+  return { cls: on ? "led led--on" : "led", title: `${name}: ${on ? "lit" : "dark"} — ${ledMeans(name)}` };
+}
+
 function renderLeds(leds) {
   // The board photo is drawn once per panel render, which does not happen on
   // every status push — so repaint its LEDs in place rather than leaving a
   // picture that disagrees with the strip beside it.
   for (const rect of document.querySelectorAll(".card-img--board rect.led")) {
     const name = rect.dataset.led;
-    const on = leds[name] === true;
-    rect.classList.toggle("led--on", on);
+    const look = ledLook(name, leds[name]);
+    rect.setAttribute("class", look.cls);
     const title = rect.querySelector("title");
-    if (title) title.textContent = `${name}: ${on ? "lit" : "dark"} — ${ledMeans(name)}`;
+    if (title) title.textContent = look.title;
   }
 
   const box = $("leds");
   if (!box) return;
   box.replaceChildren(
     ...LED_ORDER.map((name) => {
-      const on = leds[name] === true;
-      return el("span", {
-        class: on ? "led led--on" : "led",
-        "data-led": name,
-        text: name,
-        title: `${name}: ${on ? "lit" : "dark"} — ${ledMeans(name)}`,
-      });
+      const look = ledLook(name, leds[name]);
+      return el("span", { class: look.cls, "data-led": name, text: name, title: look.title });
     })
   );
 }
@@ -298,7 +311,10 @@ function renderPanel() {
     && state.status.stream.input
     ? streamPane({ input: true })
     : null;
-  root.replaceChildren(
+  // Filtered because, unlike el(), replaceChildren() prints a null child as
+  // the text "null" — which a panel with no wiring card (the Terminal) used
+  // to show under its blurb.
+  root.replaceChildren(...[
     el("h1", { text: panel.title }),
     el("p", { class: "blurb", text: panel.blurb }),
     panel.wiring.length || panel.notes.length ? wiringCard(panel) : null,
@@ -310,8 +326,8 @@ function renderPanel() {
         : panel.actions
             .filter((action) => !action.hidden)
             .map((action) => actionBlock(panel, action))
-    )
-  );
+    ),
+  ].filter(Boolean));
 }
 
 function wiringCard(panel) {
@@ -517,7 +533,11 @@ function hexBlock(bytes, start) {
 let activeStream = null;
 
 function streamPane(result) {
-  const events = el("div", { class: "stream__events" });
+  // A console shows the board's replies as text in one <pre>, the way a
+  // serial terminal would; a sniffer shows decoded tokens.
+  const events = result.input
+    ? el("pre", { class: "stream__console" })
+    : el("div", { class: "stream__events" });
   const counter = el("span", { class: "muted", text: "waiting for traffic…" });
   const stop = el("button", { class: "btn btn--primary", text: "Stop" });
 
@@ -525,6 +545,13 @@ function streamPane(result) {
   // transcript — the Bus Pirate's own terminal is the one example today, but
   // this is driven by the flag, never by `result.kind` (a display label).
   const inputRow = result.input ? consoleInput() : null;
+  // Clicking the console puts you back at the keyboard — unless the click
+  // ended a text selection, which must survive so it can be copied.
+  if (inputRow) {
+    events.addEventListener("click", () => {
+      if (window.getSelection().isCollapsed) inputRow.querySelector("input").focus();
+    });
+  }
 
   const pane = el(
     "div",
@@ -549,57 +576,131 @@ function streamPane(result) {
     }
   });
 
-  activeStream = { events, counter, stop, inputRow };
+  activeStream = { events, counter, stop, inputRow, console: !!result.input };
   return pane;
 }
 
-/* The typed line that turns a console-carrying stream into something you can
-   actually drive. `send_line` lives on the Terminal panel and is
-   `allow_while_streaming`, so it works for as long as this stream holds the
-   port — but it is a plain action call, made directly rather than through the
-   generic action-button wiring, because this field belongs to the pane, not
-   to a form of its own. The field is never disabled while a send is in
-   flight: swallowing keystrokes would make the console worse than useless. */
+/* The typing surface that turns a console-carrying stream into something you
+   can drive. It works the way `screen` does: every key goes to the board the
+   moment it is typed, nothing is gathered into a line, and nothing is added.
+   The firmware reads raw keys, and several prompts want exactly one ("Space to
+   continue", "Any key to exit"); a line with Enter appended answered them
+   before anyone had read them. What you type shows up in the console above
+   through the board's own echo, so this field stays empty.
+
+   `send_keys` lives on the Terminal panel and is `allow_while_streaming`, so
+   it works for as long as this stream holds the port. The field is never
+   disabled while a send is in flight: swallowing keystrokes would make the
+   console worse than useless. Keys typed during a round trip are queued and
+   go out together, in order. */
 function consoleInput() {
   const field = el("input", {
     class: "stream__input",
-    placeholder: "Type a command, then press Enter…",
-    // The console field is the whole interaction surface of the terminal,
-    // and a placeholder is not an accessible name.
-    "aria-label": "Board terminal command",
+    placeholder: "Click here and type — each key goes straight to the board",
+    // The field is the whole interaction surface of the terminal, and a
+    // placeholder is not an accessible name.
+    "aria-label": "Keys for the board's terminal",
     "data-mono": true,
+    // Commands are case-sensitive and not words: `V` is a syntax error
+    // where `v` is the pin table.
+    autocapitalize: "off",
+    autocorrect: "off",
+    spellcheck: "false",
   });
-  const send = el("button", { class: "btn btn--small", text: "Send" });
 
-  const submit = async () => {
-    const line = field.value;
-    if (!line) return;
-    field.value = "";
+  let queued = "";
+  let inFlight = false;
+  const flush = async () => {
+    if (inFlight || !queued) return;
+    inFlight = true;
+    const keys = queued;
+    queued = "";
     try {
       await api("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ panel: state.current, action: "send_line", params: { line } }),
+        body: JSON.stringify({ panel: state.current, action: "send_keys", params: { keys } }),
       });
     } catch (error) {
       // The stream itself reports failures on the pane (e.g. it has already
       // stopped); nothing more to do with a failed send here.
     }
+    inFlight = false;
+    flush();
+  };
+  const send = (keys) => {
+    queued += keys;
+    flush();
+  };
+  // Whatever has landed in the field — a typed key, a composed ~, a paste —
+  // goes to the board, and the field is cleared again.
+  const takeField = () => {
+    const text = field.value.replace(/\r?\n/g, "\r");
+    field.value = "";
+    if (text) send(text);
   };
 
-  field.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    submit();
+  // A dead key (a Swiss or German layout's ~) is composed: nothing may go
+  // until the character lands, which is compositionend. The Return that
+  // commits it must still send a CR, and browsers disagree on the order:
+  // Chrome sends that Return while composing and ends the composition after;
+  // WebKit — this app's own window — ends it first, then sends a Return whose
+  // `key` is the committed text glued to a CR ("~\r"). `code` is the one
+  // field that says Enter in both.
+  let enterWhenComposed = false;
+  field.addEventListener("input", (event) => {
+    if (!event.isComposing) takeField();
   });
-  send.addEventListener("click", submit);
+  field.addEventListener("compositionend", () => {
+    takeField();
+    if (enterWhenComposed) {
+      enterWhenComposed = false;
+      send("\r");
+    }
+  });
+  field.addEventListener("keydown", (event) => {
+    // ⌘C, ⌘V and friends belong to the window, never to the board.
+    if (event.metaKey || event.ctrlKey) return;
+    const enter = event.key === "Enter" || event.code === "Enter" || event.code === "NumpadEnter";
+    if (enter) {
+      if (event.isComposing) {
+        enterWhenComposed = true;
+        return;
+      }
+      event.preventDefault();
+      takeField();
+      send("\r");
+    } else if (event.key === "Backspace" && !event.isComposing) {
+      // The field is always empty, so there is nothing local to delete: the
+      // backspace is the board's, and its BS-space-BS echo does the rest.
+      event.preventDefault();
+      send("\b");
+    }
+  });
 
-  return el("div", { class: "stream__inputrow" }, field, send);
+  return el("div", { class: "stream__inputrow" }, field);
 }
 
 function pushStreamEvents(message) {
   if (!activeStream) return;
   const { events, counter } = activeStream;
+  if (activeStream.console) {
+    // A backspace from the board takes back the character before it — the
+    // firmware answers one with BS, space, BS — but never a line break.
+    let text = events.textContent;
+    for (const event of message.events) {
+      for (const ch of event.text) {
+        if (ch !== "\b") text += ch;
+        else if (text && !text.endsWith("\n")) text = text.slice(0, -1);
+      }
+    }
+    // Keep the transcript bounded, trimming whole lines from the top.
+    if (text.length > 200000) text = text.slice(text.indexOf("\n", text.length - 150000) + 1);
+    events.textContent = text;
+    counter.textContent = "";
+    events.scrollTop = events.scrollHeight;
+    return;
+  }
   for (const event of message.events) {
     events.append(
       el("span", { class: `tok tok--${event.kind}`, title: event.ascii || "" }, event.text)
@@ -689,10 +790,11 @@ async function refreshPorts() {
   }
 }
 
-$("connect").addEventListener("click", async () => {
+async function connectTo(port) {
   const error = $("welcome-error");
+  const buttons = [$("connect"), $("connect-simulated")];
   error.hidden = true;
-  $("connect").disabled = true;
+  buttons.forEach((button) => (button.disabled = true));
   try {
     const body = await api("/api/run", {
       method: "POST",
@@ -700,7 +802,7 @@ $("connect").addEventListener("click", async () => {
       body: JSON.stringify({
         panel: "connection",
         action: "connect",
-        params: { port: $("port-select").value },
+        params: { port },
       }),
     });
     state.status = body.status;
@@ -710,9 +812,12 @@ $("connect").addEventListener("click", async () => {
     error.hidden = false;
     error.textContent = exception.message;
   } finally {
-    $("connect").disabled = false;
+    buttons.forEach((button) => (button.disabled = false));
   }
-});
+}
+
+$("connect").addEventListener("click", () => connectTo($("port-select").value));
+$("connect-simulated").addEventListener("click", () => connectTo("simulated-v3"));
 
 $("refresh-ports").addEventListener("click", refreshPorts);
 $("log-clear").addEventListener("click", () => {
@@ -890,13 +995,13 @@ function boardDiagram(panel) {
   // ten round pin rings above stay the only circles on the picture.
   const lit = state.status.leds || {};
   for (const [name, [x, y]] of Object.entries(board.leds || {})) {
-    const on = lit[name] === true;
+    const look = ledLook(name, lit[name]);
     marks.push(
       svg("rect", {
         x: x - 9, y: y - 6, width: 18, height: 12, rx: 2,
-        class: on ? "led led--on" : "led",
+        class: look.cls,
         "data-led": name,
-      }, svg("title", {}, `${name}: ${on ? "lit" : "dark"} — ${ledMeans(name)}`))
+      }, svg("title", {}, look.title))
     );
   }
 
@@ -1092,15 +1197,27 @@ function markdownToHtml(markdown) {
 
 $("guide-btn").addEventListener("click", () => openGuide(panelDoc() || "user-guide"));
 
-/* Keep the USB indicator honest: unplugging does not close the handle on
-   macOS, so the only way to notice is to re-check. */
+/* Keep the window honest. Unplugging does not close the handle on macOS, so
+   the only way to notice is to re-check — and the connection can change
+   somewhere else entirely: another window, or a script against the API. A
+   window that only checked while it believed it was connected sat on "Not
+   connected" over a live board. So check always, and when the connection or
+   the device changes, take the whole state (panels, board, variant) and
+   re-render, not just the header. */
 setInterval(async () => {
-  if (!state.status.connected || state.guide.open) return;
+  if (state.guide.open) return;
   try {
     const data = await api("/api/state");
-    const before = JSON.stringify(state.status);
-    state.status = data.status;
-    if (JSON.stringify(state.status) !== before) renderStatus();
+    const was = state.status;
+    const now = data.status;
+    if (was.connected !== now.connected || was.port !== now.port
+        || was.description !== now.description) {
+      applyState(data);
+      render();
+    } else if (JSON.stringify(now) !== JSON.stringify(was)) {
+      state.status = now;
+      renderStatus();
+    }
   } catch {
     /* the server went away; the websocket reconnect will notice */
   }
