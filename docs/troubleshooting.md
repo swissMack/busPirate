@@ -151,6 +151,9 @@ Checked on 2026-09-25 on a **Bus Pirate v3.a, firmware v6.1 r1676** and a
       and VREG lit at the end
 - [x] A board left at a menu question, or left in binary mode, still
       connects and is identified
+- [x] v4: the 2x6 header order against a real BPv4.0's silkscreen — which is
+      printed on the underside, so it reads mirrored (see
+      [the wiring card](wiring-card.html))
 
 ## Not yet verified against hardware
 
@@ -167,8 +170,6 @@ report here if they are wrong:
 - [ ] The I2C and SPI sniffers against real traffic — in particular whether
       stopping resynchronises cleanly on your firmware version
 - [ ] The v4 pull-up rail command on firmware that actually implements it
-- [ ] v4: the 2x6 header order against your own silkscreen (see
-      [the wiring card](wiring-card.html))
 - [ ] v4: the measured LED and pin coordinates land on the real parts
 - [ ] v4: AUX and CS actually move from the I2C panel's "Drive AUX or CS"
 - [ ] v4: AUX1 and AUX2 stay inert — nothing in the dashboard should move them

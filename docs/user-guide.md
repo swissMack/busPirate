@@ -37,6 +37,7 @@ yourself how the tool fits together.
 | Write a file back to SPI flash | Dashboard → SPI → **Write a file to flash** | erases first, then verifies |
 | Erase a flash chip | Dashboard → SPI → **Erase one sector** / **the whole chip** | not reversible |
 | Talk to something odd | Dashboard → Raw wire | [Raw wire](rawwire.md) |
+| Switch the supplies on or off | Dashboard → Pins & power → the **supplies switch** | one click, both supplies |
 | Measure a voltage | Dashboard → Pins & power → **Measure a voltage** | [Pins & power](pins-and-power.md) |
 | Drive pins by hand | Dashboard → Pins & power | |
 | Watch a voltage over time | Dashboard → Pins & power → **Watch a voltage** | continuous ADC |

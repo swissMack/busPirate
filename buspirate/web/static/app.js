@@ -365,11 +365,12 @@ function cssColour(value) {
 }
 
 function actionBlock(panel, action) {
+  if (action.switch) return switchBlock(panel, action);
   const fields = el("div", { class: "fields" }, ...action.params.map(fieldFor));
   const output = el("div", { class: "result" });
   const button = el("button", {
     class: action.primary ? "btn btn--primary" : "btn",
-    text: action.label,
+    text: action.button || action.label,
   });
   const block = el(
     "div",
@@ -417,6 +418,53 @@ function actionBlock(panel, action) {
     }
   });
   return block;
+}
+
+/* An action that flips one thing — the supplies — as a single button that
+   says which way it is and changes it in one click. Found on a real v3: the
+   supplies used to be a checkbox that did nothing until a separate "Set the
+   pins" button was pressed, and switching them on needed explaining. The
+   state comes from the server (`status[action.switch]`), so the button never
+   claims what the board has not been told. */
+function switchBlock(panel, action) {
+  const button = el("button", { class: "btn" });
+  const output = el("div", { class: "result" });
+  const paint = () => {
+    const on = state.status[action.switch];
+    button.disabled = on === null || on === undefined;
+    button.textContent = button.disabled
+      ? "Unknown — the board's own terminal has them"
+      : on ? "On — switch off" : "Off — switch on";
+    button.className = on ? "btn switch switch--on" : "btn btn--primary switch";
+  };
+  paint();
+  button.addEventListener("click", async () => {
+    const on = !state.status[action.switch];
+    button.disabled = true;
+    output.replaceChildren();
+    try {
+      const body = await api("/api/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ panel: panel.id, action: action.name, params: { on } }),
+      });
+      state.status = body.status;
+      state.panels = body.panels;
+      renderStatus();
+    } catch (error) {
+      output.replaceChildren(el("p", { class: "msg msg--warn", text: error.message }));
+    } finally {
+      paint();
+    }
+  });
+  return el(
+    "div",
+    { class: "action action--switch", "data-action": action.name },
+    el("div", { class: "action__head" }, el("h3", { text: action.label })),
+    action.help ? el("p", { class: "action__help", text: action.help }) : null,
+    button,
+    output
+  );
 }
 
 function fieldFor(param) {

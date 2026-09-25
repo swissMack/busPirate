@@ -451,6 +451,9 @@ class DeviceSession:
             "usb": self.usb_status(),
             "mode": self.mode_name,
             "stream": self.stream.describe() if self.stream else None,
+            # None while the board's own terminal is open: its commands can
+            # switch the supplies out of this session's sight.
+            "supplies": None if isinstance(self.stream, TerminalState) else self._supplies_on(),
             "variant": profile.variant,
             "firmware": profile.firmware,
             "bootloader": profile.bootloader,

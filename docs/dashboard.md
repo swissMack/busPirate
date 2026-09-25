@@ -194,9 +194,11 @@ Bit-level control for buses that are nearly SPI or nearly I2C. See
 [Raw wire](rawwire.md).
 
 ### Pins & power
-Drive each pin, set directions, switch the supplies, measure a voltage on the
-ADC pin, measure a frequency on AUX, output PWM. See
-[Pins & power](pins-and-power.md).
+The **supplies switch** comes first: one button that says whether the 3.3V
+and 5V supplies are on, and flips them in a click. Below it, drive each pin
+(tick what you want, then **Apply to the board** — nothing changes until you
+do), set directions, measure a voltage on the ADC pin, measure a frequency on
+AUX, output PWM. See [Pins & power](pins-and-power.md).
 
 ## Live streams
 

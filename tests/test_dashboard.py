@@ -265,8 +265,9 @@ def test_onewire_search_names_the_family(client):
 
 def test_pins_panel_reports_the_state_it_set(client):
     connect(client)
+    run(client, "pins", "supplies", on=True)
     status, body = run(
-        client, "pins", "set_pins", power=True, pullups=False, aux=False,
+        client, "pins", "set_pins", pullups=False, aux=False,
         mosi=False, clk=False, miso=False, cs=True,
     )
     assert status == 200, body
@@ -283,7 +284,7 @@ def test_switching_panels_switches_modes(client):
     run(client, "spi", "jedec_id", power=True, speed=3, spi_mode=0)
     assert client.get("/api/state").json()["status"]["mode"] == "spi"
     # The pins panel works in bitbang mode, so it leaves the protocol mode.
-    run(client, "pins", "set_pins", power=False, pullups=False, aux=False,
+    run(client, "pins", "set_pins", pullups=False, aux=False,
         mosi=False, clk=False, miso=False, cs=False)
     assert client.get("/api/state").json()["status"]["mode"] is None
 
@@ -617,7 +618,7 @@ def test_the_mode_led_stays_lit_in_a_bus_mode(client):
 def test_the_mode_led_stays_lit_with_no_protocol_mode(client):
     # The pins panel drops back to bitbang, which is still binary mode.
     connect(client)
-    run(client, "pins", "set_pins", power=False, pullups=False,
+    run(client, "pins", "set_pins", pullups=False,
         aux=False, mosi=False, clk=False, miso=False, cs=False)
     state = client.get("/api/state").json()["status"]
     assert state["mode"] is None
@@ -626,22 +627,17 @@ def test_the_mode_led_stays_lit_with_no_protocol_mode(client):
 
 def test_switching_the_supplies_on_lights_the_vreg_led(client):
     connect(client)
-    status, body = run(
-        client, "pins", "set_pins", power=True, pullups=False,
-        aux=False, mosi=False, clk=False, miso=False, cs=False,
-    )
+    status, body = run(client, "pins", "supplies", on=True)
     assert status == 200, body
     assert client.get("/api/state").json()["status"]["leds"]["VREG"] is True
 
 
 def test_switching_the_supplies_off_again_darkens_the_vreg_led(client):
     connect(client)
-    status, body = run(client, "pins", "set_pins", power=True, pullups=False,
-                       aux=False, mosi=False, clk=False, miso=False, cs=False)
+    status, body = run(client, "pins", "supplies", on=True)
     assert status == 200, body
     assert client.get("/api/state").json()["status"]["leds"]["VREG"] is True
-    status, body = run(client, "pins", "set_pins", power=False, pullups=False,
-                       aux=False, mosi=False, clk=False, miso=False, cs=False)
+    status, body = run(client, "pins", "supplies", on=False)
     assert status == 200, body
     assert client.get("/api/state").json()["status"]["leds"]["VREG"] is False
 
@@ -653,8 +649,8 @@ def test_the_led_caveat_says_the_states_are_inferred(client):
 
 def test_reconnecting_does_not_carry_the_old_vreg_state_over(client):
     connect(client)
-    run(client, "pins", "set_pins", power=True, pullups=False,
-        aux=False, mosi=False, clk=False, miso=False, cs=False)
+    run(client, "pins", "supplies", on=True)
+    assert client.get("/api/state").json()["status"]["leds"]["VREG"] is True
     status, body = run(client, "connection", "disconnect")
     assert status == 200, body
     connect(client)
@@ -1002,3 +998,52 @@ def test_the_wiring_card_uses_the_dashboards_colours(board):
     shown = dict(re.findall(r'data-signal="([^"]+)" data-colour="([^"]*)"', section))
     for signal, hexcode, name in SEEED_CABLE:
         assert shown[signal] == hexcode, signal
+
+
+# -- the supplies switch -----------------------------------------------------
+# Found on a real v3: asked to switch the supplies on, the user could not see
+# how. The only control was a checkbox that did nothing until a separate
+# "Set the pins" button was pressed.
+
+
+def _state(client):
+    return client.get("/api/state").json()["status"]
+
+
+def test_the_supplies_switch_turns_them_on_and_off_in_one_step(client):
+    connect(client)
+    status, body = run(client, "pins", "supplies", on=True)
+    assert status == 200, body
+    assert _state(client)["supplies"] is True
+    assert _state(client)["leds"]["VREG"] is True
+    run(client, "pins", "supplies", on=False)
+    assert _state(client)["supplies"] is False
+    assert _state(client)["leds"]["VREG"] is False
+
+
+def test_the_supplies_switch_is_offered_first_and_as_a_switch(client):
+    body = connect(client)
+    panels = {p["id"]: p for p in body["panels"]}
+    first = panels["pins"]["actions"][0]
+    assert first["name"] == "supplies"
+    assert first["switch"] == "supplies"
+
+
+def test_applying_pins_leaves_the_supplies_as_they_are(client):
+    # The pin card no longer carries a supplies box, so applying it must not
+    # quietly switch off supplies the switch just turned on.
+    connect(client)
+    run(client, "pins", "supplies", on=True)
+    status, body = run(client, "pins", "set_pins", pullups=False, aux=True,
+                       mosi=False, clk=False, miso=False, cs=False)
+    assert status == 200, body
+    assert _state(client)["supplies"] is True
+
+
+def test_the_pin_card_says_nothing_happens_until_it_is_applied(client):
+    body = connect(client)
+    panels = {p["id"]: p for p in body["panels"]}
+    card = next(a for a in panels["pins"]["actions"] if a["name"] == "set_pins")
+    assert "power" not in [p["name"] for p in card["params"]]
+    assert card["button"] == "Apply to the board"
+    assert "nothing changes" in card["help"].lower()

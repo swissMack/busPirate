@@ -224,13 +224,47 @@ check("SPI identify shows the raw id", jedec.querySelector(".result").textConten
 // --- pins panel renders pin tiles
 navButtons.find((b) => b.textContent === "Pins & power").click();
 await settle(200);
+// The supplies get a switch of their own: one click, and it says which way
+// it is. Found on a real v3 — the only control used to be a checkbox that did
+// nothing until a separate "Set the pins" button was pressed.
+const switchButton = () =>
+  $("panel").querySelector('[data-action="supplies"] button');
+const actionOrder = [...$("panel").querySelectorAll("[data-action]")].map((a) => a.dataset.action);
+check("the supplies switch comes first on Pins & power", actionOrder[0] === "supplies", actionOrder.join(","));
+const vregLit = () => $("leds").querySelector('[data-led="VREG"]').classList.contains("led--on");
+const saysOn = () => /^On — switch off$/.test(switchButton().textContent);
+const saysOff = () => /^Off — switch on$/.test(switchButton().textContent);
+check("the switch says which way the supplies are, and agrees with VREG",
+  (saysOn() && vregLit()) || (saysOff() && !vregLit()), switchButton().textContent);
+const wasOn = saysOn();
+switchButton().click();
+await settle(600);
+check("one click flips the supplies, and the switch and VREG both follow",
+  wasOn ? saysOff() && !vregLit() : saysOn() && vregLit(), switchButton().textContent);
+if (!saysOn()) {
+  switchButton().click();
+  await settle(600);
+}
+check("the switch can turn the supplies on", saysOn() && vregLit(), switchButton().textContent);
+
 const setPins = $("panel").querySelector('[data-action="set_pins"]');
-setPins.querySelector('[name="power"]').checked = true;
+check("the pin card has no supplies box — the switch owns them",
+  setPins.querySelector('[name="power"]') === null);
+check("the pin card's button says what it does",
+  setPins.querySelector("button").textContent === "Apply to the board",
+  setPins.querySelector("button").textContent);
+check("the pin card says nothing happens until Apply",
+  /nothing changes/i.test(setPins.textContent));
 setPins.querySelector("button").click();
 await settle(600);
 const pinTiles = setPins.querySelectorAll(".pin");
 check("pins render as tiles", pinTiles.length === 7, `${pinTiles.length}`);
-check("power reads high", [...pinTiles].some((p) => p.textContent === "power high"));
+check("applying the pins leaves the supplies on",
+  [...pinTiles].some((p) => p.textContent === "power high"));
+
+switchButton().click();
+await settle(600);
+check("and one more click switches them off", saysOff() && !vregLit(), switchButton().textContent);
 
 // --- a live sniffer takes the port and streams decoded events
 navButtons.find((b) => b.textContent === "I2C").click();

@@ -7,7 +7,11 @@ from ..registry import Action, Panel, Param, Wire, keyvalue, live, pins, text
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
 
 
-def _set_pins(ctx, power, pullups, aux, mosi, clk, miso, cs):
+def _set_pins(ctx, pullups, aux, mosi, clk, miso, cs, power=None):
+    # The pin card no longer offers the supplies — the switch above it does —
+    # so leave them as they are unless a caller (a script, a test) says.
+    if power is None:
+        power = bool(ctx.session.last_pins.get("power"))
     wanted = {
         "power": power,
         "pullups": pullups,
@@ -19,6 +23,17 @@ def _set_pins(ctx, power, pullups, aux, mosi, clk, miso, cs):
     }
     ctx.session.last_pins = wanted
     return pins(ctx.bp.decode_pins(ctx.bp.set_pins(**wanted)))
+
+
+def _supplies(ctx, on):
+    """The supplies switch: flip the supplies, and nothing else."""
+    wanted = dict(ctx.session.last_pins)
+    del wanted["power"]
+    _set_pins(ctx, power=on, **wanted)
+    return text(
+        "The 3.3V and 5V supplies are on." if on else "The 3.3V and 5V supplies are off.",
+        tone="info",
+    )
 
 
 def _directions(ctx, aux, mosi, clk, miso, cs):
@@ -92,11 +107,20 @@ PANEL = Panel(
     ],
     actions=[
         Action(
+            name="supplies",
+            label="3.3V and 5V supplies",
+            help="Both supplies together, switched in one click.",
+            params=[Param("on", "bool", "On", default=False)],
+            switch="supplies",
+            handler=_supplies,
+        ),
+        Action(
             name="set_pins",
             label="Set the pins",
-            primary=True,
+            button="Apply to the board",
+            help="Tick what you want, then press Apply — nothing changes on the "
+            "board until you do.",
             params=[
-                Param("power", "bool", "3.3V and 5V supplies (both, together)", default=False),
                 Param("pullups", "bool", "Pull-ups", default=False),
                 Param("aux", "bool", "AUX high", default=False),
                 Param("mosi", "bool", "MOSI high", default=False),

@@ -102,6 +102,12 @@ class Action:
     #: panel drives some other way (e.g. a console input row bound to a
     #: live stream rather than a standalone button).
     hidden: bool = False
+    #: Names a status field this action flips, and makes the frontend draw it
+    #: as one button that shows that state and changes it in a click — the
+    #: supplies switch. Its handler takes a single ``on`` parameter.
+    switch: str = ""
+    #: The button's text, when it should differ from the card's title.
+    button: str = ""
 
     def to_json(self) -> dict:
         return {
@@ -117,6 +123,8 @@ class Action:
             "stream": self.stream,
             "allow_while_streaming": self.allow_while_streaming,
             "hidden": self.hidden,
+            "switch": self.switch,
+            "button": self.button,
         }
 
 

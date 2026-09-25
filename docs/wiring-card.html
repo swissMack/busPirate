@@ -100,10 +100,11 @@ silkscreen labels it: left column and right column, top row first.</p>
 
 <section data-board="v4">
   <h2>Bus Pirate v4 — 2×6 header</h2>
-  <p class="sub">Two more pins than the v3: AUX1 and AUX2.</p>
-  <p class="warn"><b>Check before wiring:</b> this pin order comes from the board
-  drawings and the firmware, not yet from a real board. Compare it with the
-  silkscreen next to your own header first.</p>
+  <p class="sub">Two more pins than the v3: AUX1 and AUX2. Seen from the top,
+  LEDs at the top edge. Checked against a real BPv4.0's silkscreen.</p>
+  <p class="warn"><b>The silkscreen table is printed on the underside,</b> where
+  left and right are swapped: it reads <i>+5V · GND</i> across the top row. Same
+  pins, mirrored — the LEDs there read VREG, MODE, USB, PWR.</p>
   <div class="head"><span>Left</span><span>Right</span></div>
   <div class="header">
     <div class="row">
@@ -145,6 +146,9 @@ silkscreen labels it: left column and right column, top row first.</p>
       passed for grey and +5V's orange read as pink.</li>
     <li><b>Keep GND clear of both supplies.</b> The dashboard switches +3.3V and +5V
       on together.</li>
+    <li><b>No brown lead?</b> Black for GND is fine — it is the usual colour for
+      ground — but MISO is black too. Mark the MISO lead with tape so the two
+      never look alike.</li>
     <li><b>Measure when unsure.</b> Clip the yellow ADC lead to a supply lead and read
       it in Pins &amp; power → Measure a voltage: about 3.3 V or 5.0 V.</li>
   </ul>

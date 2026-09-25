@@ -294,8 +294,7 @@ def test_other_panels_are_refused_while_the_terminal_holds_the_port(client):
 
 
 def test_leaving_the_terminal_returns_to_binary_with_nothing_held(client):
-    run(client, "pins", "set_pins", power=True, pullups=False, aux=False,
-        mosi=False, clk=False, miso=False, cs=False)
+    run(client, "pins", "supplies", on=True)
     run(client, "terminal", "open_terminal")
     assert client.post("/api/stream/stop").status_code == 200
     state = status(client)
@@ -311,8 +310,7 @@ def test_mode_and_vreg_are_unknown_while_the_terminal_is_open(client):
     reset had switched the supplies off, and showed MODE and VREG dark while
     the ~ self-test had both lit. It cannot see either, so it must not guess.
     """
-    run(client, "pins", "set_pins", power=True, pullups=False, aux=False,
-        mosi=False, clk=False, miso=False, cs=False)
+    run(client, "pins", "supplies", on=True)
     assert status(client)["leds"]["VREG"] is True
     run(client, "terminal", "open_terminal")
     leds = status(client)["leds"]
