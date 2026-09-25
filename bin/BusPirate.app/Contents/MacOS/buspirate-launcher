@@ -49,4 +49,25 @@ if [ ! -f "$DASHBOARD_COMMAND" ]; then
   exit 1
 fi
 
+# macOS privacy protection (TCC) guards ~/Documents, ~/Desktop, ~/Downloads
+# and iCloud Drive. An app started from Finder needs its own grant to read
+# there, and an unsigned script bundle like this one is refused silently —
+# no prompt. stat() still succeeds, so the -f test above passes and `-r`
+# (access(2)) is no better; only actually opening the file reveals it. With
+# no terminal attached, the resulting "Operation not permitted" would go
+# nowhere and the app would appear to do nothing, so say it in an alert.
+if ! head -c 1 "$DASHBOARD_COMMAND" >/dev/null 2>&1; then
+  osascript \
+    -e 'on run argv' \
+    -e 'display alert "Bus Pirate" message (item 1 of argv) as critical' \
+    -e 'end run' \
+    "macOS blocked BusPirate.app from reading the repo at:
+
+$REPO
+
+That folder is protected by Privacy & Security (Documents, Desktop, Downloads and iCloud Drive are). Either move the repo somewhere else, such as ~/Code, or add BusPirate.app under System Settings › Privacy & Security › Full Disk Access." \
+    >/dev/null 2>&1 || true
+  exit 1
+fi
+
 exec "$DASHBOARD_COMMAND" "$@"
