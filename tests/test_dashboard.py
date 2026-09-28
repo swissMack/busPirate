@@ -791,19 +791,21 @@ def test_the_board_served_follows_the_detected_variant(client):
     )
 
 
-def test_the_aux_control_is_offered_on_v4_only(client):
+def test_the_aux_control_is_offered_on_v3_only(client):
     body = connect(client)
     panels = {p["id"]: p for p in body["panels"]}
     actions = {a["name"] for a in panels["i2c"]["actions"]}
-    if client.variant == "v4":
+    # On a v4 the command hangs the board: see test_device.py,
+    # test_extended_aux_is_never_offered_on_a_v4.
+    if client.variant == "v3":
         assert "extended_aux" in actions
     else:
         assert "extended_aux" not in actions
 
 
-def test_driving_aux_high_on_a_v4_reports_what_it_did(client):
-    if client.variant != "v4":
-        pytest.skip("extended AUX is a v4 command")
+def test_driving_aux_high_on_a_v3_reports_what_it_did(client):
+    if client.variant != "v3":
+        pytest.skip("extended AUX works on a v3 only")
     connect(client)
     status, body = run(client, "i2c", "extended_aux", pin="aux", level="high")
     assert status == 200, body
@@ -812,9 +814,9 @@ def test_driving_aux_high_on_a_v4_reports_what_it_did(client):
 
 @pytest.mark.parametrize("pin", ["aux", "cs"])
 @pytest.mark.parametrize("level", ["low", "high", "hiz"])
-def test_driving_every_aux_pin_and_level_combination_on_a_v4(client, pin, level):
-    if client.variant != "v4":
-        pytest.skip("extended AUX is a v4 command")
+def test_driving_every_aux_pin_and_level_combination_on_a_v3(client, pin, level):
+    if client.variant != "v3":
+        pytest.skip("extended AUX works on a v3 only")
     connect(client)
     status, body = run(client, "i2c", "extended_aux", pin=pin, level=level)
     assert status == 200, body
@@ -823,9 +825,9 @@ def test_driving_every_aux_pin_and_level_combination_on_a_v4(client, pin, level)
 
 @pytest.mark.parametrize("pin", ["aux", "cs"])
 @pytest.mark.parametrize("level", ["low", "high"])
-def test_reading_an_aux_pin_back_on_a_v4_reports_the_level_just_driven(client, pin, level):
-    if client.variant != "v4":
-        pytest.skip("extended AUX is a v4 command")
+def test_reading_an_aux_pin_back_on_a_v3_reports_the_level_just_driven(client, pin, level):
+    if client.variant != "v3":
+        pytest.skip("extended AUX works on a v3 only")
     connect(client)
     status, body = run(client, "i2c", "extended_aux", pin=pin, level=level)
     assert status == 200, body

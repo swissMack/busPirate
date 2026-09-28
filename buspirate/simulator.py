@@ -136,6 +136,9 @@ class FakeSerial:
         self._i2c_expect_address = False
         self._i2c_read_value = 0x00
         self._aux_pin = "aux"  # last pin selected via extended AUX 0x10/0x20
+        #: False to act like v4 firmware older than v6.1, which does not know
+        #: the extended AUX command at all.
+        self.extended_aux_supported = True
         self._aux_levels = {"aux": 0, "cs": 0}
         self._echoing = False
         self.closed = False
@@ -195,8 +198,10 @@ class FakeSerial:
         return getattr(self, f"_state_{self.state}")(self._in[0])
 
     def _supports(self, capability: str) -> bool:
-        if capability in ("pullup_voltage", "extended_aux"):
+        if capability == "pullup_voltage":
             return self.variant == "v4"
+        if capability == "extended_aux":
+            return self.variant == "v3"
         if capability == "self_test":
             return self.variant == "v3"
         return True
@@ -374,33 +379,21 @@ class FakeSerial:
             self._out += bytes([self._i2c_read_value])
             self._i2c_read_value = (self._i2c_read_value + 1) & 0xFF
             return 1
-        if cmd == 0x09:  # extended AUX, v4 only
-            if len(self._in) < 2:
-                return 0
+        if cmd == 0x09:  # extended AUX: v3, firmware v6.1 and later
+            # Firmware/I2C.c case 9: 0x01 at once ("command known"), then it
+            # waits for the sub-command and answers that with its result.
+            # Firmware without it (a real v4 on 6.0-a3) takes the default
+            # branch: 0x00, and the next byte is a new command.
             if not self._supports("extended_aux"):
-                raise AssertionError("v3 hardware has no extended AUX command")
-            sub = self._in[1]
-            if sub == 0x10:  # select AUX
-                self._aux_pin = "aux"
-                self._out += b"\x01"
-            elif sub == 0x20:  # select CS
-                self._aux_pin = "cs"
-                self._out += b"\x01"
-            elif sub == 0x00:  # drive low
-                self._aux_levels[self._aux_pin] = 0
-                self._out += b"\x01"
-            elif sub == 0x01:  # drive high
-                self._aux_levels[self._aux_pin] = 1
-                self._out += b"\x01"
-            elif sub == 0x02:  # release to HiZ; level unchanged, just ack
-                self._out += b"\x01"
-            elif sub == 0x03:  # read the selected pin's current level
-                self._out += bytes([self._aux_levels[self._aux_pin]])
-            else:
-                raise AssertionError(
-                    f"fake extended AUX got an unknown sub-command 0x{sub:02X}"
-                )
-            return 2
+                # A real v4 answers 0x01 and then hangs, waiting on a UART
+                # the host is not connected to; never send it one.
+                raise AssertionError("extended AUX hangs a v4 and must not be sent")
+            if not self.extended_aux_supported:
+                self._out += b"\x00"
+                return 1
+            self._out += b"\x01"
+            self.state = "i2c_extended_aux"
+            return 1
         if 0x10 <= cmd <= 0x1F:  # bulk write
             count = (cmd & 0x0F) + 1
             if len(self._in) < 1 + count:
@@ -424,6 +417,26 @@ class FakeSerial:
                 self._out += b"\x00"
             return 5 + write_count
         raise AssertionError(f"unexpected I2C command 0x{cmd:02X}")
+
+    def _state_i2c_extended_aux(self, sub: int) -> int:
+        self.state = "i2c"
+        if sub == 0x10:  # select AUX
+            self._aux_pin = "aux"
+        elif sub == 0x20:  # select CS
+            self._aux_pin = "cs"
+        elif sub == 0x00:  # drive low
+            self._aux_levels[self._aux_pin] = 0
+        elif sub == 0x01:  # drive high
+            self._aux_levels[self._aux_pin] = 1
+        elif sub == 0x02:  # release to HiZ; level unchanged
+            pass
+        elif sub == 0x03:  # read the selected pin's current level
+            self._out += bytes([self._aux_levels[self._aux_pin]])
+            return 1
+        else:
+            raise AssertionError(f"fake extended AUX got an unknown sub-command 0x{sub:02X}")
+        self._out += b"\x01"
+        return 1
 
     def _state_i2c_sniffer(self, cmd: int) -> int:
         """Any byte exits the sniffer."""

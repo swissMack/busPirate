@@ -32,7 +32,8 @@ def test_parses_a_v4_banner():
     assert profile.variant == "v4"
     assert profile.firmware == "v6.3-beta1"
     assert profile.has(CAP_PULLUP_VOLTAGE)
-    assert profile.has(CAP_EXTENDED_AUX)
+    # Extended AUX hangs a v4 — see test_extended_aux_is_never_offered_on_a_v4.
+    assert not profile.has(CAP_EXTENDED_AUX)
     # Binary self-test is v2go/v3 hardware only.
     assert not profile.has(CAP_SELF_TEST)
 
@@ -98,8 +99,6 @@ def test_v4_only_commands_are_refused_on_a_v3():
         with bp.i2c() as i2c:
             with pytest.raises(UnsupportedFeatureError, match="Bus Pirate v4"):
                 i2c.set_pullup_voltage(I2C.PULLUP_3V3)
-            with pytest.raises(UnsupportedFeatureError, match="Bus Pirate v4"):
-                i2c.extended_aux(0x01)
 
 
 def test_v4_only_commands_work_on_a_v4():
@@ -107,8 +106,83 @@ def test_v4_only_commands_work_on_a_v4():
     with make_device(fake) as bp:
         with bp.i2c() as i2c:
             i2c.set_pullup_voltage(I2C.PULLUP_5V)
-            i2c.extended_aux(0x10)
     assert b"\x52" in bytes(fake.written)
+
+
+# The v4 on the bench, before and after flashing bp4.0-fw-7.0.hex.
+V4_6_0_A3_BANNER = (
+    "Bus Pirate v4\r\n"
+    "Firmware v6.0-a3\r\n"
+    "DEVID:0x1019 REVID:0x0003 (24FJ256GB106 A3)\r\n"
+    "http://dangerousprototypes.com\r\n"
+    "HiZ>"
+)
+V4_7_0_BANNER = (
+    "Bus Pirate v4\r\n"
+    "Community Firmware v7.0 - goo.gl/gCzQnW \r\n"
+    "DEVID:0x1019 REVID:0x0004 (24FJ256GB106 UNK)\r\n"
+    "http://dangerousprototypes.com\r\n"
+    "HiZ>"
+)
+
+
+def test_extended_aux_is_never_offered_on_a_v4():
+    """Found on a real v4, 2026-09-28, on two firmware versions.
+
+    6.0-a3 predates the command and answers 0x09 with 0x00. 7.0 knows it and
+    answers 0x01 — then waits for the sub-command on the PIC's hardware UART
+    (Firmware/I2C.c case 9: ``while(U1STAbits.URXDA == 0)``). A v4 talks over
+    its own USB, read through ``UART1RX()`` = ``getc_cdc()``; nothing ever
+    arrives on the hardware UART, so the board hangs until it is unplugged.
+    """
+    for banner in (V4_6_0_A3_BANNER, V4_7_0_BANNER):
+        profile = parse_banner(banner)
+        assert profile.variant == "v4"
+        assert not profile.has(CAP_EXTENDED_AUX)
+    with pytest.raises(UnsupportedFeatureError, match="Bus Pirate v3"):
+        parse_banner(V4_7_0_BANNER).require(CAP_EXTENDED_AUX)
+
+
+def test_the_real_v7_0_banner_is_read():
+    profile = parse_banner(V4_7_0_BANNER)
+    assert (profile.variant, profile.firmware, profile.devid) == ("v4", "v7.0", "0x1019")
+    assert profile.i2c_speeds == {0: 5_000, 1: 50_000, 2: 100_000, 3: 400_000}
+
+
+def test_extended_aux_needs_v3_firmware_v6_1():
+    """On a v3 the hardware UART *is* the host link (the FT232R), so the
+    command works — from v6.1, where it arrived."""
+    assert parse_banner(BANNERS["v3"]).has(CAP_EXTENDED_AUX)  # v6.1
+    older = parse_banner("Bus Pirate v3.5\r\nFirmware v5.10 (r559)\r\nHiZ>")
+    assert older.variant == "v3"
+    assert not older.has(CAP_EXTENDED_AUX)
+
+
+def test_extended_aux_reads_both_of_its_replies():
+    """The firmware answers 0x09 with 0x01 at once, then the sub-command with
+    its result. Reading only one left a stale byte for the next command."""
+    fake = FakeSerial(variant="v3")
+    with make_device(fake) as bp:
+        with bp.i2c() as i2c:
+            assert i2c.extended_aux(0x10) == 0x01
+            assert i2c.extended_aux(0x01) == 0x01
+            assert i2c.extended_aux(0x03) == 1  # AUX reads back high
+            assert fake.read(16) == b""  # nothing left over
+            assert i2c.scan() == [0x50, 0x68]  # and the next command is in step
+
+
+def test_firmware_without_extended_aux_is_asked_before_it_is_told():
+    """0x09 goes out alone; on 0x00 the sub-command is never sent, so the
+    board is not left taking it for the start of a bulk write."""
+    fake = FakeSerial(variant="v3")
+    fake.extended_aux_supported = False
+    with make_device(fake) as bp:
+        with bp.i2c() as i2c:
+            fake.written.clear()
+            with pytest.raises(UnsupportedFeatureError, match="firmware"):
+                i2c.extended_aux(0x10)
+            assert bytes(fake.written) == b"\x09"
+            assert i2c.scan() == [0x50, 0x68]
 
 
 def test_self_test_is_refused_on_a_v4():

@@ -312,9 +312,10 @@ PANEL = Panel(
         Action(
             name="extended_aux",
             label="Drive AUX or CS",
-            help="Bus Pirate v4 only. Drives the AUX or CS pin directly while "
-            "in I2C mode. AUX1 and AUX2 on the v4 header are not reachable "
-            "this way — they are terminal-mode only.",
+            help="Bus Pirate v3 only, firmware v6.1 or newer. Drives or reads the AUX "
+            "or CS pin directly while in I2C mode. On a v4 the firmware hangs "
+            "on this command, so it is not offered; drive AUX from Pins & power "
+            "instead.",
             requires=device_module.CAP_EXTENDED_AUX,
             params=[
                 Param("pin", "enum", "Pin", default="aux", choices=_AUX_PINS),
