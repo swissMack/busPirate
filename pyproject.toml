@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "buspirate"
 version = "0.2.0"
-description = "Serial driver for the Bus Pirate binary (bitbang) protocol"
+description = "Driver and dashboard for the Bus Pirate v3/v4 and the ESP32 Bit Pirate"
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = ["pyserial>=3.4"]
@@ -19,7 +19,7 @@ app = ["pywebview>=5"]
 buspirate = "buspirate.cli:main"
 
 [tool.setuptools]
-packages = ["buspirate", "buspirate.web", "buspirate.web.panels"]
+packages = ["buspirate", "buspirate.bitpirate", "buspirate.web", "buspirate.web.panels"]
 
 [tool.setuptools.package-data]
 "buspirate.web" = ["static/*"]

@@ -95,8 +95,8 @@ check("VREG stays dark until the supplies are switched on", /VREG:off/.test(leds
 check("USB is not steadily lit — it only flashes on traffic", /USB:off/.test(leds()), leds());
 
 // --- the variant switch
-check("variant selector offers both boards",
-  $("variant") && [...$("variant").options].map((o) => o.value).join(",") === "auto,v3,v4",
+check("variant selector offers every board",
+  $("variant") && [...$("variant").options].map((o) => o.value).join(",") === "auto,v3,v4,bitpirate",
   $("variant") ? [...$("variant").options].map((o) => o.value).join(",") : "no #variant");
 check("no mismatch warning while following detection", $("variant-warning").hidden);
 
@@ -556,6 +556,31 @@ await settle(6000);
 check("a window showing Not connected notices a connect made elsewhere",
   $("welcome").hidden && !$("panel").hidden && /v4/.test($("status-text").textContent),
   $("status-text").textContent);
+
+// --- an ESP32 Bit Pirate: no probe cable, no supplies, DevKit pins
+await serverSide("connect", { port: "simulated-bitpirate" });
+await settle(6000);
+check("the Bit Pirate is named in the status",
+  /ESP32 Bit Pirate/.test($("status-text").textContent), $("status-text").textContent);
+const bitNav = [...$("nav").children].map((b) => b.textContent);
+check("panels a Bit Pirate cannot drive are not in the nav",
+  bitNav.includes("I2C") && !bitNav.includes("1-Wire") && !bitNav.includes("Pins & power"),
+  bitNav.join("|"));
+[...$("nav").children].find((b) => b.textContent === "I2C").click();
+await settle(300);
+const bitBoard = $("panel").querySelector(".card-img--board");
+check("the I2C diagram is the DevKit",
+  bitBoard && bitBoard.querySelector("image").getAttribute("href") === "/static/img/board-bitpirate.svg",
+  bitBoard ? bitBoard.querySelector("image").getAttribute("href") : "no board");
+const bitCallouts = bitBoard ? [...bitBoard.querySelectorAll(".boardlabel")].map((t) => t.textContent) : [];
+check("its callouts name the GPIOs", bitCallouts.includes("GPIO7 → SCL") && bitCallouts.includes("GPIO6 → SDA"),
+  bitCallouts.join("|"));
+check("no Bus Pirate reference cards or cable caveat for it",
+  $("panel").querySelectorAll(".card-img").length === 1 && !$("panel").textContent.includes("SparkFun"),
+  `${$("panel").querySelectorAll(".card-img").length}`);
+check("no colour swatches in its wiring table", $("panel").querySelector(".wiring .swatch") === null);
+check("the scan form has no power switch",
+  $("panel").querySelector('[data-action="scan"] [name="power"]') === null);
 
 console.log(failures.length ? `\n${failures.length} FAILED` : "\nall frontend checks passed");
 process.exit(failures.length ? 1 : 0);

@@ -6,6 +6,10 @@ SPI, UART, 1-Wire and raw wire, over the binary protocol rather than by
 scraping the device's terminal. It talks to chips, watches other people's
 buses, and reads, erases and programmes SPI flash.
 
+It also drives an [ESP32 Bit Pirate](docs/bitpirate.md) on an ESP32-S3
+DevKit — I2C, SPI and UART from the same panels, through that firmware's own
+command line.
+
 ## Start here
 
 Plug the Bus Pirate in and double-click **`bin/dashboard.command`**. It builds
@@ -16,8 +20,8 @@ UI. From a terminal, the equivalent commands are `buspirate app` (window) and
 `buspirate dashboard` (browser).
 
 No hardware to hand? Press **Try a simulated one** on the connect screen, or
-pick `simulated-v3` / `simulated-v4` from the port list — the whole dashboard
-works against a simulated Bus Pirate. **`bin/demo.command`** starts straight
+pick `simulated-v3`, `simulated-v4` or `simulated-bitpirate` from the port
+list — the whole dashboard works against a simulated board. **`bin/demo.command`** starts straight
 into one.
 
 **→ [The user guide](docs/user-guide.md) is the place to start**, especially
@@ -93,6 +97,7 @@ device back to its terminal, so an interrupted script never strands it.
 | [Command line](docs/cli.md) | every subcommand |
 | [I2C](docs/i2c.md) · [SPI](docs/spi.md) · [UART](docs/uart.md) · [1-Wire](docs/onewire.md) · [Pins & power](docs/pins-and-power.md) | per protocol: wiring, examples, gotchas |
 | [Bus Pirate v4](docs/bus-pirate-v4.md) | what differs from a v3 |
+| [ESP32 Bit Pirate](docs/bitpirate.md) | the third board: what it can and cannot do |
 | [Troubleshooting](docs/troubleshooting.md) | when it does not work |
 | [Protocol reference](docs/protocol-reference.md) | the binary command tables |
 | [Extending](docs/extending.md) | add a protocol, end to end |
@@ -127,4 +132,6 @@ firmware 6.0-a3: connecting, the LEDs, the board's own terminal and the `~`
 self-test are verified. Not yet verified, for want of chips on the bench: the
 SPI clock phase mapping, a flash write round trip, an EEPROM, and the
 sniffers — see the checklists at the end of
-[troubleshooting](docs/troubleshooting.md).
+[troubleshooting](docs/troubleshooting.md). The ESP32 Bit Pirate support is
+built from the firmware's source and a simulator of it, and has not yet met a
+real board.

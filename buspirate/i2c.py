@@ -174,6 +174,26 @@ class I2C(Mode):
         finally:
             self.stop()
 
+    def read_after_write(self, address: int, pointer: bytes, count: int) -> bytes:
+        """Write ``pointer``, repeated start, read ``count`` bytes.
+
+        The 24Cxx EEPROM read: a one- or two-byte memory address, then read
+        straight through. Raises :class:`NackError` if the address or the
+        pointer is not acknowledged.
+        """
+        if count < 1:
+            raise ValueError("count must be >= 1")
+        self.start()
+        try:
+            acks = self.write_bytes(bytes([_addr_byte(address, read=False)]) + bytes(pointer))
+            if not all(acks):
+                raise NackError(f"0x{address:02X} did not acknowledge")
+            self.start()  # repeated start
+            self.write_bytes(bytes([_addr_byte(address, read=True)]))
+            return bytes(self.read_byte(ack=(i < count - 1)) for i in range(count))
+        finally:
+            self.stop()
+
     def write_register(self, address: int, register: int, data: bytes) -> None:
         self.write(address, bytes([register & 0xFF]) + bytes(data))
 

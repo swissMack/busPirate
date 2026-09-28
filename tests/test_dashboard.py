@@ -86,10 +86,12 @@ def hardware_client(monkeypatch):
         yield client
 
 
-def test_hardware_launch_still_offers_both_simulators(hardware_client):
+def test_hardware_launch_still_offers_every_simulator(hardware_client):
     ports = hardware_client.get("/api/ports").json()["ports"]
     simulated = {p["device"]: p for p in ports if p.get("simulated")}
-    assert set(simulated) == {"simulated-v3", "simulated-v4"}
+    assert set(simulated) == {
+        "simulated-v3", "simulated-v4", "simulated-bitpirate"
+    }
     # Offered, but never what "detect automatically" picks.
     assert not any(p["likely"] for p in simulated.values())
 
@@ -704,7 +706,7 @@ def test_the_led_note_is_per_variant(client):
 def test_the_board_registry_is_keyed_by_variant():
     from buspirate.web.wiring import BOARDS
 
-    assert set(BOARDS) == {"v3", "v4"}
+    assert list(BOARDS) == ["v3", "v4", "bitpirate"]
     board = BOARDS["v3"]
     assert board["label"] == "Bus Pirate v3.6"
     assert len(board["pins"]) == 10
@@ -721,7 +723,7 @@ def test_the_state_reports_the_detected_variant(client):
     assert body["variant"] == client.variant
     assert body["variant_detected"] == client.variant
     assert body["variant_source"] == "detected"
-    assert body["variants"] == ["v3", "v4"]
+    assert body["variants"] == ["v3", "v4", "bitpirate"]
 
 
 def test_an_unconnected_dashboard_defaults_to_v3_and_says_so(client):

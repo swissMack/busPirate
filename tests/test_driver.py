@@ -548,3 +548,20 @@ def test_the_i2c_scan_command_warns_when_every_address_answers(monkeypatch, caps
     assert cli.cmd_i2c_scan(args) == 1
     out = capsys.readouterr().out
     assert "VPU" in out and "device(s)" not in out
+
+
+def test_read_after_write_is_a_pointer_write_then_a_repeated_start_read(bp, fake):
+    """The EEPROM read the I2C panel used to spell out byte by byte."""
+    from buspirate.exceptions import NackError
+
+    i2c = bp.i2c()
+    fake.written.clear()
+    assert i2c.read_after_write(0x50, b"\x00\x10", 3) == b"\x00\x01\x02"
+    # start, 3-byte bulk write (address+W, pointer), start, 1-byte bulk write
+    # (address+R), read ACK read ACK read NACK, stop.
+    assert bytes(fake.written) == bytes(
+        [0x02, 0x12, 0xA0, 0x00, 0x10, 0x02, 0x10, 0xA1,
+         0x04, 0x06, 0x04, 0x06, 0x04, 0x07, 0x03]
+    )
+    with pytest.raises(NackError, match="0x33"):
+        i2c.read_after_write(0x33, b"\x00", 1)

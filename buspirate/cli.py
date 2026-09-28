@@ -74,8 +74,9 @@ def build_parser() -> argparse.ArgumentParser:
     dash.add_argument(
         "--variant",
         default="v3",
-        choices=["v3", "v4"],
-        help="which device the demo simulates (default: v3)",
+        choices=["v3", "v4", "bitpirate"],
+        help="which device the demo simulates: a Bus Pirate v3 or v4, or an "
+        "ESP32 Bit Pirate (default: v3)",
     )
     dash.add_argument("--no-browser", action="store_true", help="do not open a browser")
 
@@ -89,8 +90,9 @@ def build_parser() -> argparse.ArgumentParser:
     appcmd.add_argument(
         "--variant",
         default="v3",
-        choices=["v3", "v4"],
-        help="which device the demo simulates (default: v3)",
+        choices=["v3", "v4", "bitpirate"],
+        help="which device the demo simulates: a Bus Pirate v3 or v4, or an "
+        "ESP32 Bit Pirate (default: v3)",
     )
     return parser
 

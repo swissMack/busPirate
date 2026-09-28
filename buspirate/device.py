@@ -23,11 +23,39 @@ CAP_FREQUENCY = "frequency_count"
 CAP_PULLUP_VOLTAGE = "pullup_voltage_select"
 CAP_EXTENDED_AUX = "extended_aux"
 
+# What every Bus Pirate's binary protocol offers and the ESP32 Bit Pirate's
+# text command line does not. Offered to v3, v4 and unidentified boards alike,
+# so nothing the dashboard showed a Bus Pirate before is hidden from it now.
+CAP_BITBANG_PINS = "bitbang_pins"
+CAP_SUPPLIES = "switchable_supplies"
+CAP_ONEWIRE = "onewire"
+CAP_RAWWIRE = "rawwire"
+CAP_SNIFFER = "sniffer"
+CAP_SPI_MODES = "spi_modes"
+CAP_UART_BUFFERED = "uart_buffered_receive"
+CAP_UART_BRIDGE = "uart_bridge"
+CAP_SPI_FLASH_PROGRAM = "spi_flash_program"
+
+BUS_PIRATE_ONLY = frozenset(
+    {
+        CAP_BITBANG_PINS,
+        CAP_SUPPLIES,
+        CAP_ONEWIRE,
+        CAP_RAWWIRE,
+        CAP_SNIFFER,
+        CAP_SPI_MODES,
+        CAP_UART_BUFFERED,
+        CAP_UART_BRIDGE,
+        CAP_SPI_FLASH_PROGRAM,
+    }
+)
+
 # Which variant to name in an error when a capability is missing.
 _CAPABILITY_HOME = {
     CAP_SELF_TEST: "Bus Pirate v3 (and v2go)",
     CAP_PULLUP_VOLTAGE: "Bus Pirate v4",
     CAP_EXTENDED_AUX: "Bus Pirate v4",
+    **{capability: "Bus Pirate v3 and v4" for capability in BUS_PIRATE_ONLY},
 }
 
 # I2C speed tables. Firmware v4.2 widened this from two speeds to four.
@@ -50,7 +78,7 @@ SPI_SPEEDS = {
 class DeviceProfile:
     """What this particular Bus Pirate can do."""
 
-    variant: str = "unknown"  # "v3", "v4" or "unknown"
+    variant: str = "unknown"  # "v3", "v4", "bitpirate" or "unknown"
     firmware: Optional[str] = None
     bootloader: Optional[str] = None
     devid: Optional[str] = None
@@ -73,9 +101,11 @@ class DeviceProfile:
         )
 
     def describe(self) -> str:
-        parts = {"v3": "Bus Pirate v3", "v4": "Bus Pirate v4"}.get(
-            self.variant, "unidentified Bus Pirate"
-        )
+        parts = {
+            "v3": "Bus Pirate v3",
+            "v4": "Bus Pirate v4",
+            "bitpirate": "ESP32 Bit Pirate",
+        }.get(self.variant, "unidentified Bus Pirate")
         if self.firmware:
             parts += f", firmware {self.firmware}"
         return parts
@@ -105,15 +135,22 @@ def _firmware_tuple(firmware: Optional[str]) -> tuple:
 
 
 def capabilities_for(variant: str) -> FrozenSet[str]:
+    if variant == "bitpirate":
+        # A text command line, not the binary protocol: none of the binary
+        # extras, and no supplies to switch. What it can do is I2C, SPI and
+        # UART through its own commands — see buspirate.bitpirate.
+        return frozenset()
     if variant == "v4":
         # The wiki notes binary self-tests are v2go/v3 hardware only.
-        return frozenset(
+        return BUS_PIRATE_ONLY | frozenset(
             {CAP_PWM, CAP_ADC, CAP_FREQUENCY, CAP_PULLUP_VOLTAGE, CAP_EXTENDED_AUX}
         )
     if variant == "v3":
-        return frozenset({CAP_PWM, CAP_ADC, CAP_FREQUENCY, CAP_SELF_TEST})
+        return BUS_PIRATE_ONLY | frozenset(
+            {CAP_PWM, CAP_ADC, CAP_FREQUENCY, CAP_SELF_TEST}
+        )
     # Unidentified: offer only what every documented variant shares.
-    return frozenset({CAP_PWM, CAP_ADC, CAP_FREQUENCY})
+    return BUS_PIRATE_ONLY | frozenset({CAP_PWM, CAP_ADC, CAP_FREQUENCY})
 
 
 # The firmware's 'i' banner looks like:
@@ -156,3 +193,40 @@ def parse_banner(text: str) -> DeviceProfile:
 
 
 UNKNOWN_PROFILE = DeviceProfile(capabilities=capabilities_for("unknown"))
+
+
+# The ESP32 Bit Pirate's welcome screen (src/Views/SerialTerminalView.cpp):
+#        ESP32 SWISS ARMY KNIFE
+#   Version 1.7           Ready to board
+# It is printed once, after the first key following boot, so a board met
+# mid-session never shows it and its version stays unknown.
+_RE_BITPIRATE_VERSION = re.compile(r"Version\s+(\d[\w.\-]*)")
+# Its prompt is the mode in capitals, '>' and a space: "HIZ> ", "I2C> ". A Bus
+# Pirate's is mixed case with no space ("HiZ>"), so the two never collide.
+_RE_BITPIRATE_PROMPT = re.compile(r"(?m)^[A-Z0-9]*> ")
+
+
+def looks_like_bitpirate(text: str) -> bool:
+    """Whether terminal output came from an ESP32 Bit Pirate.
+
+    Matches its banner, its "Press any key" boot pause, its line-redraw escape
+    (every key it echoes is ``\\r<prompt><line>ESC[K``) or its prompt.
+    """
+    if any(mark in text for mark in ("SWISS ARMY", "Bit Pirate", "Press any key")):
+        return True
+    if "\x1b[K" in text:
+        return True
+    # Only what follows the last carriage return of each line is on screen.
+    lines = [line.rsplit("\r", 1)[-1] for line in text.replace("\r\n", "\n").split("\n")]
+    return bool(_RE_BITPIRATE_PROMPT.search("\n".join(lines)))
+
+
+def parse_bitpirate_banner(text: str) -> DeviceProfile:
+    """A Bit Pirate profile, with the firmware version if the banner was seen."""
+    found = _RE_BITPIRATE_VERSION.search(text)
+    return DeviceProfile(
+        variant="bitpirate",
+        firmware=found.group(1) if found else None,
+        capabilities=capabilities_for("bitpirate"),
+        banner=text.strip(),
+    )

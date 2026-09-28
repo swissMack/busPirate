@@ -133,3 +133,21 @@ silent read of zeros. Add your mode there, and the dashboard tests in
 make test
 make demo     # drive the new panel by hand, no hardware
 ```
+
+## A board that is not a Bus Pirate
+
+The ESP32 Bit Pirate shows how a different board fits in without the panels
+learning about it:
+
+- **A driver with the same surface.** `buspirate/bitpirate/` offers the calls
+  the panels make, `i2c()`, `scan()`, `write_then_read()` and so on, on top of
+  a different protocol.
+- **Chosen before the first byte.** `buspirate/connect.py` picks the driver
+  from the USB ID.
+- **Capabilities hide what it cannot do.** `Panel.requires`, `Action.requires`
+  and `Param.requires` name a capability, and `server._panels_json` drops
+  whatever the connected board's profile lacks.
+- **The board replaces wording, not code.** An entry in
+  `web/wiring.py` `BOARDS` can carry `"panels"`, which swaps a panel's wiring,
+  notes and action text for that board.
+

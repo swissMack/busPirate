@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 
+from ... import device as device_module
 from ...spi import SPI
 from ...spiflash import SECTOR_SIZE, SPIFlash
 from ..registry import Action, Panel, Param, Wire, hexdump, keyvalue, live, text
@@ -43,9 +44,11 @@ MODE_CHOICES = [
 ]
 
 _SETUP = [
-    Param("power", "bool", "Power the target (3.3V + 5V)", default=True),
+    Param("power", "bool", "Power the target (3.3V + 5V)", default=True,
+          requires=device_module.CAP_SUPPLIES),
     Param("speed", "enum", "Clock", default=3, choices=SPEED_CHOICES),
-    Param("spi_mode", "enum", "SPI mode", default=0, choices=MODE_CHOICES),
+    Param("spi_mode", "enum", "SPI mode", default=0, choices=MODE_CHOICES,
+          requires=device_module.CAP_SPI_MODES),
 ]
 
 
@@ -268,6 +271,7 @@ PANEL = Panel(
         ),
         Action(
             name="flash_write",
+            requires=device_module.CAP_SPI_FLASH_PROGRAM,
             label="Write a file to flash",
             long_running=True,
             confirm="This erases the sectors it covers and reprogrammes them. "
@@ -297,6 +301,7 @@ PANEL = Panel(
         ),
         Action(
             name="flash_erase_sector",
+            requires=device_module.CAP_SPI_FLASH_PROGRAM,
             label="Erase one sector",
             confirm="Erasing cannot be undone. Continue?",
             help="Clears the 4 KB sector containing the address you give.",
@@ -306,6 +311,7 @@ PANEL = Panel(
         ),
         Action(
             name="flash_erase_chip",
+            requires=device_module.CAP_SPI_FLASH_PROGRAM,
             label="Erase the whole chip",
             confirm="This erases every byte on the chip and cannot be undone. "
             "Dump it first if you might want it back. Continue?",
@@ -319,6 +325,7 @@ PANEL = Panel(
             label="Sniff the bus",
             recipe=True,
             stream=True,
+            requires=device_module.CAP_SNIFFER,
             help="Passively watch an existing master and chip. Wire CLK, MOSI, "
             "MISO and CS in parallel with them and share the ground.",
             params=[

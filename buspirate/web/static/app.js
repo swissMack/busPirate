@@ -139,7 +139,7 @@ function ledMeans(name) {
   return (state.ledRules[name] || {}).means || "";
 }
 
-const VARIANT_LABELS = { v3: "Bus Pirate v3", v4: "Bus Pirate v4" };
+const VARIANT_LABELS = { v3: "Bus Pirate v3", v4: "Bus Pirate v4", bitpirate: "ESP32 Bit Pirate" };
 
 function renderVariant() {
   const select = $("variant");
@@ -335,7 +335,11 @@ function wiringCard(panel) {
     el(
       "tr",
       {},
-      el("td", { class: "sig" }, el("span", { class: "swatch", style: `background:${cssColour(wire.colour)}` }), wire.signal),
+      // A board without a probe cable (the ESP32 Bit Pirate) has no colours
+      // to show, so no swatch rather than an empty one.
+      el("td", { class: "sig" },
+        wire.colour ? el("span", { class: "swatch", style: `background:${cssColour(wire.colour)}` }) : null,
+        wire.signal),
       el("td", { class: "arrow", text: "→" }),
       el("td", { class: "sig", text: wire.target }),
       el("td", { class: "note", text: wire.note })
@@ -1069,7 +1073,26 @@ function hookupDiagram(panel) {
   // this page are drawn from. state.status.variant is the raw detected
   // hardware and disagrees with the photo whenever an override is active or
   // nothing is connected, so it must not drive the caption.
-  const board = state.variant === "v4" ? "Bus Pirate v4" : "Bus Pirate v3";
+  const board = VARIANT_LABELS[state.variant] || "Bus Pirate v3";
+  const pinsCaption = panel.wiring.length
+    ? el("p", {
+        class: "caption",
+        text: `${state.board ? state.board.label : board} — the ringed pins are the ones this panel uses.`,
+      })
+    : null;
+  const ledCaption = el("p", { class: "caption", text: `LEDs — ${state.ledNote}` });
+  // No probe cable, so neither the Dangerous Prototypes reference cards nor
+  // the cable caveat say anything true about this board.
+  if (state.board && state.board.cable === false) {
+    return el(
+      "div",
+      { class: "diagram" },
+      panel.wiring.length ? boardDiagram(panel) : null,
+      pinsCaption,
+      el("p", { class: "caption", text: state.boardCaveat }),
+      ledCaption
+    );
+  }
   const columnNote = panel.refcard_column
     ? `Highlighted: the ${panel.refcard_column} column — what each probe wire becomes on this bus.`
     : "Highlighted: the pins this panel drives.";
@@ -1077,16 +1100,11 @@ function hookupDiagram(panel) {
     "div",
     { class: "diagram" },
     panel.wiring.length ? boardDiagram(panel) : null,
-    panel.wiring.length
-      ? el("p", {
-          class: "caption",
-          text: `${state.board ? state.board.label : board} — the ringed pins are the ones this panel uses.`,
-        })
-      : null,
+    pinsCaption,
     el("div", { class: "diagram__cards" }, refcardDiagram(panel), cableDiagram(panel)),
     el("p", { class: "caption", text: `${board} · ${columnNote}` }),
     el("p", { class: "caption", text: state.cableCaveat }),
-    el("p", { class: "caption", text: `LEDs — ${state.ledNote}` }),
+    ledCaption,
     el("p", {
       class: "caption credit",
       text: "Reference cards: Dangerous Prototypes wiki (dangerousprototypes.com), CC BY-SA.",

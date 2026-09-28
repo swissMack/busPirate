@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ... import device as device_module
+
 from ..registry import Action, Panel, Param, Wire, hexdump, keyvalue, text
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
 
@@ -79,6 +81,7 @@ def _cs(ctx, low):
 
 PANEL = Panel(
     id="rawwire",
+    requires=device_module.CAP_RAWWIRE,
     doc="rawwire",
     refcard_rows=["supplies", "GND"],
     title="Raw wire",
