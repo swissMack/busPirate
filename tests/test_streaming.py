@@ -85,6 +85,30 @@ def test_console_decoder_shows_tabs_and_keeps_control_bytes_visible():
     assert text == "GND\t3.3V\ufffd"
 
 
+def test_console_decoder_keeps_a_bare_carriage_return_for_the_pane():
+    # The ESP32 Bit Pirate redraws its line on every key as
+    # "\r<prompt><line>ESC[K". A bare CR means "back to the start of the line",
+    # which the pane applies; only CR LF is a newline.
+    decoder = make_decoder("console")
+    text = "".join(e["text"] for e in decoder.feed(b"\rHIZ> m\x1b[K\rHIZ> mo\x1b[K\r\nOK"))
+    assert text == "\rHIZ> m\rHIZ> mo\nOK"
+
+
+def test_console_decoder_holds_a_trailing_cr_until_it_knows_what_follows():
+    decoder = make_decoder("console")
+    first = "".join(e["text"] for e in decoder.feed(b"line\r"))
+    second = "".join(e["text"] for e in decoder.feed(b"HIZ> "))
+    assert (first, second) == ("line", "\rHIZ> ")
+
+
+def test_console_decoder_drops_escape_sequences_even_split_across_reads():
+    decoder = make_decoder("console")
+    text = "".join(
+        e["text"] for chunk in (b"ab\x1b", b"[", b"K", b"c\x1b[D\x1b[2Jd") for e in decoder.feed(chunk)
+    )
+    assert text == "abcd"
+
+
 def test_console_decoder_passes_backspace_through_for_the_pane_to_apply():
     # The firmware answers a backspace with BS, space, BS. The pane applies
     # it; turning it into U+FFFD would leave the deleted character on screen.

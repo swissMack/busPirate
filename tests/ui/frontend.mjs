@@ -582,5 +582,29 @@ check("no colour swatches in its wiring table", $("panel").querySelector(".wirin
 check("the scan form has no power switch",
   $("panel").querySelector('[data-action="scan"] [name="power"]') === null);
 
+// Its terminal redraws the line on every key: "\r<prompt><line>ESC[K". Found
+// in the simulator on 2026-09-28 — the pane printed each redraw after the
+// last, with ESC as U+FFFD: "HIZ> m�[KHIZ> mo�[K…".
+[...$("nav").children].find((b) => b.textContent === "Terminal").click();
+await settle(300);
+$("panel").querySelector('[data-action="open_terminal"] button').click();
+await settle(900);
+const bitLine = $("panel").querySelector(".stream__input");
+typeKeys(bitLine, "mode");
+enter(bitLine);
+await settle(1200);
+check("the Bit Pirate's line redraw shows as one clean line",
+  consoleText().includes("HIZ> mode\n") && !consoleText().includes("HIZ> HIZ>")
+    && !consoleText().includes("\ufffd") && !consoleText().includes("[K"),
+  JSON.stringify(consoleText().slice(0, 160)));
+check("mode on its own shows the numbered menu",
+  consoleText().includes("Select mode:") && consoleText().trimEnd().endsWith("Mode Number >"),
+  JSON.stringify(consoleText().slice(-80)));
+typeKeys(bitLine, "2");
+enter(bitLine);
+await settle(900);
+$("panel").querySelector(".stream button").click();  // Stop
+await settle(1500);
+
 console.log(failures.length ? `\n${failures.length} FAILED` : "\nall frontend checks passed");
 process.exit(failures.length ? 1 : 0);
