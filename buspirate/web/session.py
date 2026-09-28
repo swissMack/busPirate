@@ -201,7 +201,11 @@ class DeviceSession:
         self.port_info: Optional[Dict[str, Any]] = None
         self.mode_name: Optional[str] = None
         self._mode = None
-        self.lock = asyncio.Lock()
+        # Made on first use, inside the running loop. On Python 3.8 and 3.9 a
+        # Lock grabs the thread's event loop when it is created, and building
+        # one here — with no loop running — fails once an earlier loop in the
+        # thread has been closed.
+        self._lock: Optional[asyncio.Lock] = None
         self.traffic: deque = deque(maxlen=TRAFFIC_HISTORY)
         self.subscribers: Set[asyncio.Queue] = set()
         self.panels: List[Panel] = load_panels()
@@ -222,6 +226,13 @@ class DeviceSession:
         #: Manual override of the variant the UI presents. None = follow
         #: whatever the banner said.
         self.display_variant: Optional[str] = None
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        """The lock around every use of the port. Only touched from the loop."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     # -- events ------------------------------------------------------------
 
