@@ -57,14 +57,16 @@ MENU_ANSWER_LIMIT = 10
 PORT_RETURN_SECONDS = 2.0
 
 
-class BusPirate:
-    """Owns the serial port, the device profile and the raw bitbang protocol.
+class SerialLink:
+    """A serial port with traffic observers: what every supported board shares.
 
-    The Bus Pirate boots into a human-readable terminal. :meth:`open`
-    identifies the hardware from that terminal, then switches to binary mode,
-    from which each protocol mode is entered with :meth:`i2c`, :meth:`spi`,
-    :meth:`uart`, :meth:`onewire` or :meth:`rawwire`.
+    :class:`BusPirate` speaks the binary protocol over it and
+    :class:`~buspirate.bitpirate.BitPirate` the ESP32 Bit Pirate's text
+    command line; both open, read, write and report traffic the same way.
     """
+
+    #: How the device is named in error messages.
+    device_name = "Bus Pirate"
 
     def __init__(
         self,
@@ -73,55 +75,18 @@ class BusPirate:
         timeout: float = 0.2,
         serial_factory=None,
         on_traffic: Optional[TrafficHook] = None,
-        identify_timeout: float = 0.4,
     ) -> None:
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
-        self.identify_timeout = identify_timeout
         self._serial_factory = serial_factory
         self.serial = None
-        self.profile: DeviceProfile = UNKNOWN_PROFILE
-        self.bitbang_version: Optional[int] = None
-        self._mode = None
         #: True while a sniffer or bridge is streaming and the port no longer
         #: carries command replies.
         self.streaming = False
         self._traffic_hooks: List[TrafficHook] = []
         if on_traffic is not None:
             self._traffic_hooks.append(on_traffic)
-
-    # -- transport ---------------------------------------------------------
-
-    def open(self, identify: bool = True) -> "BusPirate":
-        """Open the port, identify the device, and enter binary bitbang mode."""
-        if self.serial is None:
-            self.serial = self._make_serial()
-        if identify:
-            if self._already_in_binary_mode():
-                # Left there by a program that let go without resetting it.
-                # `i` means nothing in binary mode — a real v4 connected as
-                # "unidentified" — and the terminal is only reached by a
-                # reset, which a v4 follows by leaving USB for a moment.
-                self.reset_hardware()
-                self.reopen_if_reenumerated()
-            self.identify()
-        self.enter_binary_mode()
-        return self
-
-    def _already_in_binary_mode(self) -> bool:
-        """Probe with one null: binary mode answers it, the terminal ignores it.
-
-        The firmware leaves its terminal only after 20 nulls in a row, so a
-        single one is harmless there, while in binary mode it is the
-        "reset to bitbang" command and is answered at once.
-        """
-        self.flush_input()
-        self.write(b"\x00")
-        reply = self.serial.read(banner_length(BANNER_BITBANG))
-        if reply:
-            self._notify("rx", reply)
-        return reply.startswith(BANNER_BITBANG.encode())
 
     def _make_serial(self):
         if self._serial_factory is not None:
@@ -142,7 +107,7 @@ class BusPirate:
                 time.sleep(0.05)
             if not os.path.exists(self.port):
                 raise ConnectionError(
-                    f"{self.port} is not there. Is the Bus Pirate plugged in? "
+                    f"{self.port} is not there. Is the {self.device_name} plugged in? "
                     "Refresh the port list after plugging it back in."
                 )
         try:
@@ -154,26 +119,6 @@ class BusPirate:
                 f"cannot open {self.port}: {exc}. If the port exists, something "
                 "else is probably holding it — check for a screen session."
             ) from exc
-
-    def close(self) -> None:
-        """Return the Bus Pirate to its terminal mode and close the port."""
-        if self.serial is None:
-            return
-        try:
-            if self._mode is not None:
-                self._mode.close()
-            self.reset_hardware()
-        except (ProtocolError, ModeError, OSError):
-            log.debug("reset on close failed; closing anyway", exc_info=True)
-        finally:
-            self.serial.close()
-            self.serial = None
-
-    def __enter__(self) -> "BusPirate":
-        return self.open()
-
-    def __exit__(self, *exc_info) -> None:
-        self.close()
 
     @property
     def is_open(self) -> bool:
@@ -243,23 +188,6 @@ class BusPirate:
             self._notify("rx", bytes(collected))
         return bytes(collected)
 
-    def stop_stream(self) -> None:
-        """Leave a sniffer and return to a known state.
-
-        Any byte stops a sniffer, but *where* the firmware puts its 0x01
-        acknowledgement changed between versions — the SPI page says as much.
-        Rather than guess, this drains whatever comes back and then knocks the
-        device into bitbang mode, which is unambiguous on every version.
-        """
-        self.streaming = False
-        if self.serial is None:
-            return
-        self.write(b"\x00")
-        self.drain(0.15)
-        self.flush_input()
-        self.enter_binary_mode()
-        self._mode = None
-
     def read_text(self, settle: float = 0.4, limit: int = 4096) -> str:
         """Drain whatever text the terminal is emitting, until it goes quiet."""
         if self.serial is None:
@@ -287,6 +215,102 @@ class BusPirate:
         else:  # minimal fakes and older pyserial
             while self.serial.read(256):
                 pass
+
+
+class BusPirate(SerialLink):
+    """Owns the serial port, the device profile and the raw bitbang protocol.
+
+    The Bus Pirate boots into a human-readable terminal. :meth:`open`
+    identifies the hardware from that terminal, then switches to binary mode,
+    from which each protocol mode is entered with :meth:`i2c`, :meth:`spi`,
+    :meth:`uart`, :meth:`onewire` or :meth:`rawwire`.
+    """
+
+    def __init__(
+        self,
+        port: str,
+        baudrate: int = 115200,
+        timeout: float = 0.2,
+        serial_factory=None,
+        on_traffic: Optional[TrafficHook] = None,
+        identify_timeout: float = 0.4,
+    ) -> None:
+        super().__init__(port, baudrate, timeout, serial_factory, on_traffic)
+        self.identify_timeout = identify_timeout
+        self.profile: DeviceProfile = UNKNOWN_PROFILE
+        self.bitbang_version: Optional[int] = None
+        self._mode = None
+
+    # -- transport ---------------------------------------------------------
+
+    def open(self, identify: bool = True) -> "BusPirate":
+        """Open the port, identify the device, and enter binary bitbang mode."""
+        if self.serial is None:
+            self.serial = self._make_serial()
+        if identify:
+            if self._already_in_binary_mode():
+                # Left there by a program that let go without resetting it.
+                # `i` means nothing in binary mode — a real v4 connected as
+                # "unidentified" — and the terminal is only reached by a
+                # reset, which a v4 follows by leaving USB for a moment.
+                self.reset_hardware()
+                self.reopen_if_reenumerated()
+            self.identify()
+        self.enter_binary_mode()
+        return self
+
+    def _already_in_binary_mode(self) -> bool:
+        """Probe with one null: binary mode answers it, the terminal ignores it.
+
+        The firmware leaves its terminal only after 20 nulls in a row, so a
+        single one is harmless there, while in binary mode it is the
+        "reset to bitbang" command and is answered at once.
+        """
+        self.flush_input()
+        self.write(b"\x00")
+        reply = self.serial.read(banner_length(BANNER_BITBANG))
+        if reply:
+            self._notify("rx", reply)
+        return reply.startswith(BANNER_BITBANG.encode())
+
+    def close(self) -> None:
+        """Return the Bus Pirate to its terminal mode and close the port."""
+        if self.serial is None:
+            return
+        try:
+            if self._mode is not None:
+                self._mode.close()
+            self.reset_hardware()
+        except (ProtocolError, ModeError, OSError):
+            log.debug("reset on close failed; closing anyway", exc_info=True)
+        finally:
+            self.serial.close()
+            self.serial = None
+
+    def __enter__(self) -> "BusPirate":
+        return self.open()
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
+
+    # -- primitives --------------------------------------------------------
+
+    def stop_stream(self) -> None:
+        """Leave a sniffer and return to a known state.
+
+        Any byte stops a sniffer, but *where* the firmware puts its 0x01
+        acknowledgement changed between versions — the SPI page says as much.
+        Rather than guess, this drains whatever comes back and then knocks the
+        device into bitbang mode, which is unambiguous on every version.
+        """
+        self.streaming = False
+        if self.serial is None:
+            return
+        self.write(b"\x00")
+        self.drain(0.15)
+        self.flush_input()
+        self.enter_binary_mode()
+        self._mode = None
 
     def command(self, byte: int, response_len: int = 1) -> bytes:
         """Send one command byte and read a fixed-length response."""
@@ -395,6 +419,25 @@ class BusPirate:
             "Check that the port is right, that the Bus Pirate is at "
             "115200 8N1, and that nothing else holds the port open."
         )
+
+    #: What the dashboard's identify card calls the way it talks to the board.
+    @property
+    def protocol_label(self) -> str:
+        return f"binary bitbang (BBIO{self.bitbang_version})"
+
+    def resync(self) -> None:
+        """Back to a known state after a mode would not close cleanly."""
+        self.enter_binary_mode()
+
+    def release_to_terminal(self, settle: float) -> None:
+        """Hand the board to its own terminal: leave binary mode, which resets it.
+
+        ``settle`` doubles as the v3's boot time; a v4 re-enumerates within
+        it and is reopened.
+        """
+        self.reset_hardware()
+        self.reopen_if_reenumerated(watch=settle)
+        self.flush_input()
 
     def reset_hardware(self) -> None:
         """Reset the Bus Pirate back to its human-readable terminal."""

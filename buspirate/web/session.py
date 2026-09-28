@@ -17,7 +17,7 @@ import time
 from collections import deque
 from typing import Any, Dict, List, Optional, Set
 
-from ..base import BusPirate
+from ..connect import open_device
 from ..exceptions import BusPirateError, ConnectionError, ModeError
 from ..ports import discover, resolve
 from .decoders import make_decoder
@@ -45,7 +45,14 @@ STREAM_STOP_TIMEOUT_SECONDS = 15.0
 #: Port names that mean "a simulated board", offered in every port list so
 #: the dashboard can be tried without hardware, whatever it was launched with.
 SIMULATED_PREFIX = "simulated-"
-SIMULATED_VARIANTS = ("v3", "v4")
+SIMULATED_VARIANTS = ("v3", "v4", "bitpirate")
+
+#: How each simulated board is named in the port list.
+SIMULATED_NAMES = {
+    "v3": "simulated Bus Pirate v3",
+    "v4": "simulated Bus Pirate v4",
+    "bitpirate": "simulated ESP32 Bit Pirate",
+}
 
 
 def simulated_variant(port: Optional[str]) -> Optional[str]:
@@ -187,7 +194,8 @@ class DeviceSession:
     def __init__(self, use_fake: bool = False, fake_variant: str = "v3") -> None:
         self.use_fake = use_fake
         self.fake_variant = fake_variant
-        self.bp: Optional[BusPirate] = None
+        #: A BusPirate or a BitPirate — the dashboard only uses what both offer.
+        self.bp = None
         self.port: Optional[str] = None
         #: What discovery knew about the port we connected to.
         self.port_info: Optional[Dict[str, Any]] = None
@@ -266,9 +274,22 @@ class DeviceSession:
             return simulated_variant(self.port) is not None
         return self.use_fake
 
-    def _make_device(self, port: str) -> BusPirate:
+    def _open_device(self, port: str):
+        """Open the board on ``port`` with the driver it needs."""
         variant = simulated_variant(port)
+        if variant == "bitpirate":
+            from ..bitpirate import BitPirate
+            from ..simulator import fake_factory
+            from ..simulator_bitpirate import FakeBitPirateSerial
+
+            return BitPirate(
+                port,
+                serial_factory=fake_factory(FakeBitPirateSerial(booting=True)),
+                on_traffic=self._on_traffic,
+                connect_timeout=0.3,
+            ).open()
         if variant is not None:
+            from ..base import BusPirate
             from ..simulator import FakeSerial, fake_factory
 
             fake = FakeSerial(variant=variant)
@@ -277,8 +298,12 @@ class DeviceSession:
                 serial_factory=fake_factory(fake),
                 on_traffic=self._on_traffic,
                 identify_timeout=0.05,
-            )
-        return BusPirate(port, on_traffic=self._on_traffic)
+            ).open()
+        return open_device(
+            port,
+            usb_id=(self.port_info or {}).get("usb_id"),
+            on_traffic=self._on_traffic,
+        )
 
     def _resolve(self, port: Optional[str]) -> str:
         """Turn what the user picked into a port name, real or simulated."""
@@ -301,9 +326,7 @@ class DeviceSession:
         self.disconnect_blocking()
         resolved = self._resolve(port)
         self.port_info = self._describe_port(resolved)
-        device = self._make_device(resolved)
-        device.open()
-        self.bp = device
+        self.bp = self._open_device(resolved)
         self.port = resolved
         self.mode_name = None
         self._mode = None
@@ -345,7 +368,7 @@ class DeviceSession:
             return {
                 "device": device,
                 "usb_id": None,
-                "description": f"simulated Bus Pirate {variant}",
+                "description": SIMULATED_NAMES[variant],
                 "note": "no hardware involved",
             }
         for candidate in discover(include_unlikely=True):
@@ -473,7 +496,7 @@ class DeviceSession:
         simulators = [
             {
                 "device": SIMULATED_PREFIX + variant,
-                "note": f"simulated Bus Pirate {variant}, no hardware",
+                "note": f"{SIMULATED_NAMES[variant]}, no hardware",
                 "likely": self.use_fake and variant == self.fake_variant,
                 "usb_id": None,
                 "simulated": True,
@@ -508,7 +531,7 @@ class DeviceSession:
             try:
                 self._mode.close()
             except (BusPirateError, OSError):
-                self.bp.enter_binary_mode()
+                self.bp.resync()
             self._mode = None
             self.mode_name = None
         if mode_name is None:
@@ -538,8 +561,10 @@ class DeviceSession:
             raise BusPirateError(
                 f"{self.stream.kind} is running and has the port. Stop it first."
             )
-        if action.requires and self.bp is not None:
-            self.bp.profile.require(action.requires)
+        if self.bp is not None:
+            for required in (panel.requires, action.requires):
+                if required:
+                    self.bp.profile.require(required)
         mode = self.ensure_mode(panel.mode)
         context = ActionContext(self, mode)
         result = action.handler(context, **params)
@@ -639,7 +664,7 @@ class DeviceSession:
             finally:
                 self._finish_stream(stream)
 
-    def _drain_inbox(self, stream: "TerminalState", device: BusPirate) -> bool:
+    def _drain_inbox(self, stream: "TerminalState", device) -> bool:
         """Write everything the user has typed. False means the port is gone.
 
         ``BusPirate.write`` raises ConnectionError when the handle has gone
@@ -756,11 +781,11 @@ class DeviceSession:
         # writes 0x0F and then flushes: it can raise with the command
         # already sent.
         try:
-            self.bp.reset_hardware()
-            # Doubles as the v3's boot settle: on a board that stays on USB it
-            # simply runs out the window.
-            self.bp.reopen_if_reenumerated(watch=TERMINAL_SETTLE_SECONDS)
-            self.bp.flush_input()
+            # On a Bus Pirate: reset, and follow a v4 off USB and back. The
+            # settle doubles as the v3's boot time; on a board that stays on
+            # USB it simply runs out the window. A Bit Pirate has nothing to
+            # leave, and is only nudged to show a fresh prompt.
+            self.bp.release_to_terminal(TERMINAL_SETTLE_SECONDS)
         except BusPirateError:
             self._drop_connection()
             raise
@@ -770,12 +795,12 @@ class DeviceSession:
                 "the board was sent out of binary mode but its terminal "
                 f"could not be opened: {exc}"
             ) from exc
-        return live(
-            "Board terminal",
-            decoder="console",
-            caption="The Bus Pirate's own terminal. Type a command; '?' lists them.",
-            input=True,
+        caption = (
+            "The Bit Pirate's own command line. Type a command; 'help' lists them."
+            if self.bp.profile.variant == "bitpirate"
+            else "The Bus Pirate's own terminal. Type a command; '?' lists them."
         )
+        return live("Board terminal", decoder="console", caption=caption, input=True)
 
     def send_terminal_keys(self, keys: str) -> None:
         """Queue keys for the board exactly as typed, the way `screen` does.

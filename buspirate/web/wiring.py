@@ -208,9 +208,160 @@ _BOARD_V4 = {
     ),
 }
 
+# The ESP32-S3-DevKitC-1 the ESP32 Bit Pirate runs on, as drawn in
+# static/img/board-bitpirate.svg (scripts/draw_devkit_board.py draws it from
+# these same lists, so the picture and the pin rings cannot disagree).
+#
+# Both 22-pin headers, pin 1 at the top with the USB ports at the bottom, from
+# Espressif's ESP32-S3-DevKitC-1 v1.1 user guide. TX and RX on J3 are GPIO43
+# and GPIO44. Every pin the firmware's s3-devkit build uses for I2C, SPI and
+# UART sits on J1.
+DEVKIT_J1 = [
+    "3V3", "3V3", "RST", "GPIO4", "GPIO5", "GPIO6", "GPIO7", "GPIO15",
+    "GPIO16", "GPIO17", "GPIO18", "GPIO8", "GPIO3", "GPIO46", "GPIO9",
+    "GPIO10", "GPIO11", "GPIO12", "GPIO13", "GPIO14", "5V", "GND",
+]
+DEVKIT_J3 = [
+    "GND", "GPIO43", "GPIO44", "GPIO1", "GPIO2", "GPIO42", "GPIO41",
+    "GPIO40", "GPIO39", "GPIO38", "GPIO37", "GPIO36", "GPIO35", "GPIO0",
+    "GPIO45", "GPIO48", "GPIO47", "GPIO21", "GPIO20", "GPIO19", "GND", "GND",
+]
+DEVKIT_GEOMETRY = {
+    "width": 700, "height": 525,
+    "j1_x": 225, "j3_x": 475, "first_y": 45, "pitch": 20,
+}
+
+
+def _devkit_pins():
+    """Pin name to position, first occurrence only (3V3 and GND repeat)."""
+    g = DEVKIT_GEOMETRY
+    pins, side = {}, {}
+    for column, x, where in ((DEVKIT_J1, g["j1_x"], "left"), (DEVKIT_J3, g["j3_x"], "right")):
+        for index, name in enumerate(column):
+            if name not in pins:
+                pins[name] = [x, g["first_y"] + index * g["pitch"]]
+                side[name] = where
+    return pins, side
+
+
+_DEVKIT_PINS, _DEVKIT_SIDE = _devkit_pins()
+
+
+def _wire(signal: str, target: str, note: str = "") -> Dict[str, str]:
+    # No colour: a DevKit is wired with whatever jumper leads are to hand.
+    return {"signal": signal, "colour": "", "target": target, "note": note}
+
+
+_BITPIRATE_GND = _wire("GND", "GND", "always connect this first")
+_BITPIRATE_3V3 = _wire(
+    "3V3", "VCC", "only to power a small target; there is no switch, and it is 3.3V only"
+)
+_BITPIRATE_PINS_NOTE = (
+    "These are the s3-devkit build's default pins. Every pin can be moved: "
+    "type 'config' in the board's terminal, and 'profile' to keep the change. "
+    "The dashboard does not follow a moved pin in this picture."
+)
+_BITPIRATE_VOLTAGE_NOTE = (
+    "The ESP32-S3 is a 3.3V part and its pins are not 5V tolerant. Level-shift "
+    "anything that drives 5V, and never feed a pin more than 3.3V."
+)
+
+_BOARD_BITPIRATE = {
+    "image": "/static/img/board-bitpirate.svg",
+    "width": DEVKIT_GEOMETRY["width"],
+    "height": DEVKIT_GEOMETRY["height"],
+    "gutter": 290,
+    "gutter_left": 290,
+    "label": "ESP32 Bit Pirate on an ESP32-S3-DevKitC-1",
+    "pins": _DEVKIT_PINS,
+    "side": _DEVKIT_SIDE,
+    "leds": {"PWR": [250, 497]},
+    #: Not a Bus Pirate: there is no probe cable, so no cable colours and no
+    #: Dangerous Prototypes reference cards.
+    "cable": False,
+    "caveat": (
+        "Drawn from Espressif's pinout for the ESP32-S3-DevKitC-1 v1.1. Other "
+        "S3 boards differ — check the silkscreen next to your own headers."
+    ),
+    #: What replaces a panel's Bus Pirate wording on this board. See
+    #: server._panels_json.
+    "panels": {
+        "terminal": {
+            "blurb": "The Bit Pirate's own command line — the `HIZ>` prompt.",
+            "actions": {
+                "open_terminal": {
+                    "confirm": "",
+                    "help": "Gives you the Bit Pirate's own command line. "
+                    "Nothing is reset. Everything else in the dashboard is "
+                    "unavailable until you close it.",
+                },
+            },
+        },
+        "i2c": {
+            "wiring": [
+                _wire("GPIO7", "SCL", "clock"),
+                _wire("GPIO6", "SDA", "data, both directions"),
+                _BITPIRATE_GND,
+                _BITPIRATE_3V3,
+            ],
+            "notes": [
+                "I2C needs pull-ups on SDA and SCL. The ESP32's internal ones "
+                "(the pull-up switch) are weak — about 45 kΩ — and fine for a "
+                "short bus at 100 kHz; fit 4.7 kΩ to 3.3V for anything longer "
+                "or faster.",
+                "Writes are checked by pinging the address first: the Bit "
+                "Pirate does not report an ACK for each byte the way a Bus "
+                "Pirate does.",
+                _BITPIRATE_VOLTAGE_NOTE,
+                _BITPIRATE_PINS_NOTE,
+            ],
+        },
+        "spi": {
+            "wiring": [
+                _wire("GPIO12", "SCK / CLK", "clock"),
+                _wire("GPIO13", "DI / MOSI", "Bit Pirate out, chip in"),
+                _wire("GPIO11", "DO / MISO", "chip out, Bit Pirate in"),
+                _wire("GPIO10", "CS / SS", "active low"),
+                _BITPIRATE_GND,
+                _BITPIRATE_3V3,
+            ],
+            "notes": [
+                "Serial flash chips also have WP and HOLD pins. Tie both high, "
+                "or the chip may never respond.",
+                "Reading and dumping flash work here; writing and erasing are "
+                "left to the Bus Pirates for now — the Bit Pirate's command "
+                "line cannot carry a whole 256-byte page in one transfer.",
+                "The clock is set in whole MHz: 1, 2, 4 or 8 MHz from the list.",
+                "A reply of all 0x00 or all 0xFF almost always means MISO is "
+                "not connected, not that the chip is blank.",
+                _BITPIRATE_VOLTAGE_NOTE,
+                _BITPIRATE_PINS_NOTE,
+            ],
+        },
+        "uart": {
+            "wiring": [
+                _wire("GPIO17", "TX", "the Bit Pirate's RX listens to the target's transmit pin"),
+                _wire("GPIO18", "RX", "the Bit Pirate's TX drives the target's receive pin"),
+                _BITPIRATE_GND,
+            ],
+            "notes": [
+                "TX and RX cross over. If you see nothing, swapping GPIO17 and "
+                "GPIO18 is the first thing to try.",
+                "Garbled characters mean the baud rate is wrong, not the wiring.",
+                _BITPIRATE_VOLTAGE_NOTE,
+                _BITPIRATE_PINS_NOTE,
+            ],
+        },
+    },
+}
+
 #: Board geometry by variant. The dashboard serves one of these, chosen by
 #: DeviceSession.effective_variant().
-BOARDS: Dict[str, Dict[str, Any]] = {"v3": _BOARD_V3, "v4": _BOARD_V4}
+BOARDS: Dict[str, Dict[str, Any]] = {
+    "v3": _BOARD_V3,
+    "v4": _BOARD_V4,
+    "bitpirate": _BOARD_BITPIRATE,
+}
 
 #: What to present when nothing is connected, or the banner was unreadable.
 DEFAULT_VARIANT = "v3"
@@ -274,6 +425,13 @@ LED_RULES: Dict[str, Dict[str, Dict[str, str]]] = {
             "means": "the on-board 3.3V and 5V supplies are on",
         },
     },
+    "bitpirate": {
+        "PWR": {
+            "driver": "hardware",
+            "inference": "powered",
+            "means": "USB power is reaching the DevKit",
+        },
+    },
 }
 
 _LED_NOTE_COMMON = (
@@ -290,6 +448,9 @@ LED_NOTES: Dict[str, str] = {
     "v4": _LED_NOTE_COMMON
     + " On a v4 both MODE and USB are software-driven, and USB goes dark once "
     "the board has enumerated — dark is the healthy state, not a fault.",
+    "bitpirate": "Only the DevKit's power LED is shown, lit while the port is "
+    "open. Its RGB LED (GPIO48) is the firmware's to drive, and the dashboard "
+    "does not know what it is showing.",
 }
 
 CABLE_CAVEAT = (

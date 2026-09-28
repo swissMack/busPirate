@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ... import device as device_module
 from ...uart import UART
 from ..registry import Action, Panel, Param, Wire, hexdump, live, text
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
@@ -129,12 +130,14 @@ PANEL = Panel(
                     default=1,
                     choices=[{"value": 1, "label": "1"}, {"value": 2, "label": "2"}],
                 ),
-                Param("power", "bool", "Power the target (3.3V + 5V)", default=False),
+                Param("power", "bool", "Power the target (3.3V + 5V)", default=False,
+                      requires=device_module.CAP_SUPPLIES),
             ],
             handler=_configure,
         ),
         Action(
             name="listen",
+            requires=device_module.CAP_UART_BUFFERED,
             label="Start or stop listening",
             help="While listening, the Bus Pirate forwards everything it hears.",
             params=[Param("enable", "bool", "Listening", default=True)],
@@ -142,6 +145,7 @@ PANEL = Panel(
         ),
         Action(
             name="read",
+            requires=device_module.CAP_UART_BUFFERED,
             label="Read what arrived",
             params=[Param("max_bytes", "int", "Up to", default=256, minimum=1, maximum=4096)],
             handler=_read,
@@ -172,6 +176,7 @@ PANEL = Panel(
         ),
         Action(
             name="bridge",
+            requires=device_module.CAP_UART_BRIDGE,
             label="Transparent bridge",
             stream=True,
             confirm="Bridge mode cannot be stopped from software — you will "

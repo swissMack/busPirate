@@ -15,8 +15,10 @@ from typing import List, Optional
 
 from .exceptions import ConnectionError
 
-# USB bridges the Bus Pirate has shipped with, plus the v4's own CDC device.
+# USB bridges the Bus Pirate has shipped with, plus the v4's own CDC device,
+# and the ESP32-S3's own USB port, which is where the ESP32 Bit Pirate talks.
 KNOWN_ADAPTERS = {
+    (0x303A, 0x1001): "Espressif ESP32-S3 USB (ESP32 Bit Pirate)",
     (0x0403, 0x6001): "FTDI FT232R (Bus Pirate v3)",
     (0x0403, 0x6015): "FTDI FT231X",
     (0x04D8, 0xFB00): "Microchip CDC (Bus Pirate v4)",
@@ -96,6 +98,9 @@ def _score(info) -> PortCandidate:
         return candidate
 
     adapter = KNOWN_ADAPTERS.get((info.vid, info.pid))
+    if adapter is None and info.vid == 0x303A:
+        # Espressif's PID depends on the board and how the firmware was built.
+        adapter = "Espressif ESP32 USB (ESP32 Bit Pirate)"
     if adapter:
         candidate.score = 60
         candidate.note = adapter

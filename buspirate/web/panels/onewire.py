@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ... import device as device_module
+
 import time
 
 from ...onewire import ROM_MATCH
@@ -79,6 +81,7 @@ _BUS = [
 
 PANEL = Panel(
     id="onewire",
+    requires=device_module.CAP_ONEWIRE,
     refcard_column='1-Wire',
     refcard_rows=['VPU', 'supplies', 'GND'],
     doc="onewire",

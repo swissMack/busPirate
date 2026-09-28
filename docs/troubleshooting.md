@@ -177,3 +177,23 @@ report here if they are wrong:
       (0 or 1), not an ack — every other sub-command replies `0x01`. Taken
       from a reading of the firmware, not observed on hardware.
 - [ ] v4: the `~` self-test and its jumpers
+
+### ESP32 Bit Pirate (ESP32-S3-DevKitC-1, firmware 1.7)
+
+Nothing here has met a real board yet. The driver follows the firmware's
+source, so check these first, in this order:
+
+- [ ] The USB ID the port reports (Espressif `303A:`, PID not yet known) and
+      that auto-detect picks it
+- [ ] Opening the port does not reset the board; a fresh boot's "Press any
+      key" is answered and the banner's version is read
+- [ ] `m i2c` the first time: the config questions are answered and the
+      prompt comes back as `I2C> `
+- [ ] `scan` with nothing on the bus, and with one device
+- [ ] A register read (`[0x68 0x00 r:8]`) returns the right bytes, and a read
+      from an empty address fails cleanly rather than timing out
+- [ ] `P` and `p` switch the internal pull-ups (measure SDA to 3V3)
+- [ ] SPI JEDEC ID on a real flash chip, and a 64 KB dump at 8 MHz
+- [ ] UART send, and the monitor stopping cleanly on Stop
+- [ ] Terminal open and close, then an I2C scan — the session back in step
+- [ ] Disconnect leaves the board at `HIZ> `

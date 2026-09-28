@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ... import device as device_module
+from ...exceptions import NackError
 from ...i2c import (
     AUX_HIGH,
     AUX_HIZ,
@@ -93,9 +94,15 @@ def _read_register(ctx, address, register, count):
 
 def _write(ctx, address, data):
     ctx.mode.write(address, data)
+    if getattr(ctx.mode, "reports_byte_acks", True):
+        return text(
+            f"Wrote {len(data)} byte(s) to 0x{address:02X} and every byte was "
+            "acknowledged.",
+            tone="good",
+        )
     return text(
-        f"Wrote {len(data)} byte(s) to 0x{address:02X} and every byte was "
-        "acknowledged.",
+        f"Wrote {len(data)} byte(s) to 0x{address:02X}. It acknowledged its "
+        "address; this board cannot report the bytes after it.",
         tone="good",
     )
 
@@ -112,22 +119,14 @@ def _eeprom_read(ctx, address, offset, length, address_bytes):
         if address_bytes == 1
         else bytes([(offset >> 8) & 0xFF, offset & 0xFF])
     )
-    ctx.mode.start()
     try:
-        acks = ctx.mode.write_bytes(bytes([address << 1]) + pointer)
-        if not all(acks):
-            return text(
-                f"0x{address:02X} did not acknowledge. If the chip is a 24C32 "
-                "or larger it needs a 2-byte address.",
-                tone="warn",
-            )
-        ctx.mode.start()  # repeated start
-        ctx.mode.write_bytes(bytes([(address << 1) | 1]))
-        data = bytes(
-            ctx.mode.read_byte(ack=(i < length - 1)) for i in range(length)
+        data = ctx.mode.read_after_write(address, pointer, length)
+    except NackError:
+        return text(
+            f"0x{address:02X} did not acknowledge. If the chip is a 24C32 "
+            "or larger it needs a 2-byte address.",
+            tone="warn",
         )
-    finally:
-        ctx.mode.stop()
     return hexdump(data, start=offset, caption=f"EEPROM 0x{address:02X}")
 
 
@@ -171,7 +170,8 @@ def _extended_aux(ctx, pin, level):
 
 
 _BUS_PARAMS = [
-    Param("power", "bool", "Power the target (3.3V + 5V)", default=True),
+    Param("power", "bool", "Power the target (3.3V + 5V)", default=True,
+          requires=device_module.CAP_SUPPLIES),
     Param("pullups", "bool", "Enable the on-board pull-ups", default=True),
     Param("speed", "enum", "Bus speed", default=2, choices=SPEED_CHOICES),
 ]
@@ -280,6 +280,7 @@ PANEL = Panel(
             label="Sniff the bus",
             recipe=True,
             stream=True,
+            requires=device_module.CAP_SNIFFER,
             help="Passively watch traffic between two other devices. Wire SDA "
             "and SCL in parallel with the existing bus and share the ground; "
             "leave power and pull-ups off if the bus already has them.",

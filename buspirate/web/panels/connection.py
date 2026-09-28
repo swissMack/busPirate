@@ -28,7 +28,7 @@ def _identify(ctx):
             ["Firmware", profile.firmware or "not reported"],
             ["Bootloader", profile.bootloader or "not reported"],
             ["Device ID", profile.devid or "not reported"],
-            ["Bitbang protocol", f"BBIO{ctx.bp.bitbang_version}"],
+            ["Talks over", ctx.bp.protocol_label],
             ["Features", ", ".join(sorted(profile.capabilities)) or "none detected"],
         ],
         caption="Read from the firmware's 'i' command at connect time",
@@ -60,7 +60,7 @@ def _set_variant(ctx, variant):
     if variant not in BOARDS:
         raise BusPirateError(
             f"{variant!r} is not a board this dashboard knows — "
-            f"pick one of: auto, {', '.join(sorted(BOARDS))}"
+            f"pick one of: auto, {', '.join(BOARDS)}"
         )
     ctx.session.display_variant = variant
     return text(f"Showing {BOARDS[variant]['label']}.", tone="good")
@@ -102,8 +102,9 @@ PANEL = Panel(
                     "Port",
                     default="",
                     placeholder="auto",
-                    help="A /dev path, simulated-v3 or simulated-v4 for a board "
-                    "with no hardware, or blank for automatic.",
+                    help="A /dev path; simulated-v3, simulated-v4 or "
+                    "simulated-bitpirate for a board with no hardware; or blank "
+                    "for automatic.",
                 )
             ],
             handler=_connect,
@@ -142,7 +143,7 @@ PANEL = Panel(
                         {"value": "auto", "label": "Follow the connected board"},
                         *(
                             {"value": variant, "label": BOARDS[variant]["label"]}
-                            for variant in sorted(BOARDS)
+                            for variant in BOARDS
                         ),
                     ],
                 ),

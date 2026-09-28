@@ -86,6 +86,7 @@ def _pwm_clear(ctx):
 
 PANEL = Panel(
     id="pins",
+    requires=device_module.CAP_BITBANG_PINS,
     refcard_rows=['AUX', 'ADC', 'supplies', 'GND'],
     doc="pins-and-power",
     title="Pins & power",

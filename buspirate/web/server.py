@@ -71,15 +71,29 @@ def create_app(
 
     def _panels_json() -> list:
         capabilities = session.available_capabilities()
+
+        def offered(item: dict) -> bool:
+            required = item.get("requires")
+            return capabilities is None or not required or required in capabilities
+
+        # A board that is not a Bus Pirate (the ESP32 Bit Pirate) has its own
+        # pins and caveats; it replaces a panel's wiring, notes and wording
+        # rather than the panel modules learning about every board.
+        overrides = BOARDS[session.effective_variant()].get("panels", {})
         panels = []
         for panel in session.panels:
             data = panel.to_json()
-            if capabilities is not None:
-                data["actions"] = [
-                    action
-                    for action in data["actions"]
-                    if not action["requires"] or action["requires"] in capabilities
-                ]
+            if not offered(data):
+                continue
+            data["actions"] = [a for a in data["actions"] if offered(a)]
+            for action in data["actions"]:
+                action["params"] = [p for p in action["params"] if offered(p)]
+            override = overrides.get(panel.id, {})
+            for key in ("blurb", "wiring", "notes"):
+                if key in override:
+                    data[key] = override[key]
+            for action in data["actions"]:
+                action.update(override.get("actions", {}).get(action["name"], {}))
             panels.append(data)
         return panels
 
@@ -122,7 +136,8 @@ def create_app(
             "variant": variant,
             "variant_detected": session.detected_variant(),
             "variant_source": session.variant_source(),
-            "variants": sorted(BOARDS),
+            # Declared order, so the picker reads v3, v4, then the Bit Pirate.
+            "variants": list(BOARDS),
             "led_note": LED_NOTES[variant],
             "led_rules": LED_RULES[variant],
         }

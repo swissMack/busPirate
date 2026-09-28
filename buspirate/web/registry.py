@@ -49,6 +49,10 @@ class Param:
     minimum: Optional[int] = None
     maximum: Optional[int] = None
     placeholder: str = ""
+    #: Capability this input needs. Without it the input is not shown and
+    #: the handler receives the default — the power switch on a board that
+    #: has no supplies to switch.
+    requires: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.type not in PARAM_TYPES:
@@ -67,6 +71,7 @@ class Param:
             "minimum": self.minimum,
             "maximum": self.maximum,
             "placeholder": self.placeholder,
+            "requires": self.requires,
         }
 
 
@@ -167,6 +172,8 @@ class Panel:
     refcard_column: Optional[str] = None
     #: Extra reference-card rows worth highlighting for this bus.
     refcard_rows: List[str] = field(default_factory=list)
+    #: Capability the whole panel needs. Without it the panel is not offered.
+    requires: Optional[str] = None
 
     def action(self, name: str) -> Action:
         for action in self.actions:
@@ -185,6 +192,7 @@ class Panel:
             "doc": self.doc,
             "refcard_column": self.refcard_column,
             "refcard_rows": self.refcard_rows,
+            "requires": self.requires,
             "actions": [a.to_json() for a in self.actions],
         }
 
