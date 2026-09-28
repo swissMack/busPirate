@@ -49,7 +49,7 @@ leave bitbang mode.**
 | `0000 0110` | send ACK |
 | `0000 0111` | send NACK |
 | `0000 1000` | write-then-read (**firmware v5.1+**) |
-| `0000 1001` | extended AUX (**v4 only**) |
+| `0000 1001` | extended AUX (**v3, firmware v6.1+**; hangs a v4) |
 | `0000 1111` | start the bus sniffer |
 | `0001 xxxx` | bulk write 1–16 bytes (`0000` = 1 byte) |
 | `0100 wxyz` | peripherals: `w` power, `x` pull-ups, `y` AUX, `z` CS |

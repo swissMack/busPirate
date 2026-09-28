@@ -1,8 +1,8 @@
 """Device variants, firmware capabilities and the banner parser.
 
 A Bus Pirate v3 and a v4 speak nearly the same binary protocol, but not
-quite: the v4 adds pull-up voltage selection and an extended AUX command, the
-v3 has binary self-tests the v4 does not, and firmware v4.2 redefined the I2C
+quite: the v4 adds pull-up voltage selection, the v3 has binary self-tests the
+v4 does not, and only a v3 can use the extended AUX command, and firmware v4.2 redefined the I2C
 speed table. Rather than scatter version checks through the modes, the device
 is identified once at connect time and every conditional asks the profile.
 """
@@ -54,7 +54,7 @@ BUS_PIRATE_ONLY = frozenset(
 _CAPABILITY_HOME = {
     CAP_SELF_TEST: "Bus Pirate v3 (and v2go)",
     CAP_PULLUP_VOLTAGE: "Bus Pirate v4",
-    CAP_EXTENDED_AUX: "Bus Pirate v4",
+    CAP_EXTENDED_AUX: "Bus Pirate v3 with firmware v6.1 or newer",
     **{capability: "Bus Pirate v3 and v4" for capability in BUS_PIRATE_ONLY},
 }
 
@@ -142,12 +142,16 @@ def capabilities_for(variant: str) -> FrozenSet[str]:
         return frozenset()
     if variant == "v4":
         # The wiki notes binary self-tests are v2go/v3 hardware only.
+        # No extended AUX: the firmware reads its sub-command from the PIC's
+        # hardware UART, which on a v4 is not the host link — it waits
+        # forever. Found on a real v4 on firmware 7.0, 2026-09-28.
         return BUS_PIRATE_ONLY | frozenset(
-            {CAP_PWM, CAP_ADC, CAP_FREQUENCY, CAP_PULLUP_VOLTAGE, CAP_EXTENDED_AUX}
+            {CAP_PWM, CAP_ADC, CAP_FREQUENCY, CAP_PULLUP_VOLTAGE}
         )
     if variant == "v3":
+        # On a v3 that UART is the FT232R link, so extended AUX works.
         return BUS_PIRATE_ONLY | frozenset(
-            {CAP_PWM, CAP_ADC, CAP_FREQUENCY, CAP_SELF_TEST}
+            {CAP_PWM, CAP_ADC, CAP_FREQUENCY, CAP_SELF_TEST, CAP_EXTENDED_AUX}
         )
     # Unidentified: offer only what every documented variant shares.
     return BUS_PIRATE_ONLY | frozenset({CAP_PWM, CAP_ADC, CAP_FREQUENCY})
@@ -182,12 +186,18 @@ def parse_banner(text: str) -> DeviceProfile:
         found = pattern.search(text)
         return found.group(1) if found else None
 
+    firmware = _find(_RE_FIRMWARE)
+    capabilities = capabilities_for(variant)
+    if _firmware_tuple(firmware) < (6, 1):
+        # The extended AUX command arrived in v6.1; older firmware answers
+        # it as an unknown command (seen on a real v4 on 6.0-a3).
+        capabilities -= {CAP_EXTENDED_AUX}
     return DeviceProfile(
         variant=variant,
-        firmware=_find(_RE_FIRMWARE),
+        firmware=firmware,
         bootloader=_find(_RE_BOOTLOADER),
         devid=_find(_RE_DEVID),
-        capabilities=capabilities_for(variant),
+        capabilities=capabilities,
         banner=text.strip(),
     )
 

@@ -16,7 +16,7 @@ with BusPirate("auto") as bp:
 | Feature | v3 | v4 |
 |---------|----|----|
 | Pull-up rail select (`010100xy`) | — | yes, connects VPU to 3.3V or 5V |
-| Extended AUX command (`0x09`) | — | yes, drives or reads AUX/CS directly |
+| Extended AUX command (`0x09`) | yes, firmware v6.1+ | **no** — the firmware hangs on it; see below |
 | Binary self-test (`0001000x`) | yes | — (the v4 uses a different mechanism) |
 | USB bridge | FTDI FT232R | the PIC's own CDC |
 | PWM, ADC, frequency counter | yes | yes |
@@ -99,9 +99,60 @@ variants, lives in [Pins & power](pins-and-power.md#the-four-leds).
 
 ## Driving AUX and CS from the dashboard
 
-On a v4, the I2C panel's **Drive AUX or CS** action reaches the extended AUX
-command (binary sub-command `0x09`, `Firmware/I2C.c:935`) and can drive or
-read back `AUX` and `CS` directly, independent of whatever protocol mode is
-active. `AUX1` and `AUX2` are not reachable this way — see the header
-section above. Keep the two facts separate: `AUX`/`CS` move from the
-dashboard, `AUX1`/`AUX2` never do.
+**On a v4, drive `AUX` from Pins & power.** The I2C panel's **Drive AUX or
+CS** action is not offered on a v4, and that is deliberate.
+
+It uses the extended AUX command (`0x09`, `Firmware/I2C.c` case 9). Tried on
+a real v4 on 2026-09-28, the command fails on both firmware versions:
+
+- **Firmware 6.0-a3** predates the command and answers it with `0x00`.
+- **Firmware 7.0** knows it and answers `0x01`, then **hangs** until the
+  board is unplugged.
+
+The firmware reads the command's second byte straight from the PIC's hardware
+UART (`while(U1STAbits.URXDA == 0)`). A v4 talks to the computer over its own
+USB, read through `UART1RX()` = `getc_cdc()`, so nothing ever arrives on that
+UART. Every firmware with the command reads it this way, so no update fixes
+it.
+
+On a **v3** that UART is the FT232R's link to the computer, so the command
+works there, from firmware v6.1, and the dashboard offers it.
+
+`AUX1` and `AUX2` are not reachable from the dashboard either way — see the
+header section above.
+
+## Updating the firmware
+
+Done on a real v4 on 2026-09-28, from firmware 6.0-a3 to **7.0**:
+
+1. **Get the tool and the firmware.**
+   - Build `pirate-loader` from `Bootloaders/pirate-loader/pirate-loader.c` in
+     the [official repository](https://github.com/BusPirate/Bus_Pirate). It is
+     one C file: `cc -O2 -o pirate-loader pirate-loader.c`.
+   - Download `bp4.0-fw-7.0.hex` from that repository's v7.0 release.
+2. **Enter the bootloader with a jumper.** Unplug the board, put a jumper
+   between the **PGC** and **PGD** pins, and plug it back in.
+   - The **VREG** LED lights with PWR, and the board comes up with a new USB
+     ID, `04D8:000A`.
+   - `buspirate ports --all` shows which ID it has.
+   - The terminal's `$` command did not work on 6.0-a3: the board went
+     straight back to its firmware.
+3. **Check the bootloader (optional).**
+   `pirate-loader --dev=/dev/cu.usbmodem… --hello` reports the bootloader
+   (4.06 here) and the chip (PIC24FJ256GB106).
+   - It ends with "ERROR, timeout". That is its goodbye, which restarts the
+     board, and it is harmless.
+   - Because of that restart, unplug and replug (jumper still on) before
+     flashing.
+4. **Flash.** `pirate-loader --dev=/dev/cu.usbmodem… --hex=bp4.0-fw-7.0.hex`
+   takes about a minute.
+   - The last page is "SKIPPED by bootloader": that is the protected
+     configuration page, and it is expected.
+   - It ends with "Firmware updated successfully! :)", then the harmless
+     timeout.
+5. **Restart normally.** Unplug, remove the jumper, and plug it back in. `i`
+   now reads `Community Firmware v7.0`.
+
+The bootloader refuses to overwrite itself, the reset vector or the
+configuration page. So an interrupted update leaves it intact: enter it
+again with the jumper and flash again.

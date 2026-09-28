@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Iterable, List
 
 from . import device as device_module
-from .exceptions import ExternalVoltageError, NackError, ProtocolError
+from .exceptions import (
+    ExternalVoltageError,
+    NackError,
+    ProtocolError,
+    UnsupportedFeatureError,
+)
 from .mode import ACK, Mode
 
 CMD_START = 0x02
@@ -44,7 +49,8 @@ def stuck_bus_warning(found: Iterable[int], probed: Iterable[int]) -> str:
         "on the bus is holding SDA down."
     )
 
-# Argument bytes for the v4 extended AUX command.
+# Argument bytes for the extended AUX command. It works on a v3 only: a v4
+# hangs waiting for the argument (see device.capabilities_for).
 AUX_LOW = 0x00
 AUX_HIGH = 0x01
 AUX_HIZ = 0x02
@@ -292,14 +298,28 @@ class I2C(Mode):
             )
 
     def extended_aux(self, command: int) -> int:
-        """Drive or read AUX/CS directly. **BPv4 only.** Returns the reply byte.
+        """Drive or read AUX/CS directly. **BPv3 only.** Returns the reply byte.
 
         For ``AUX_READ`` the reply is the pin state, 0 or 1. Every other
         sub-command replies 0x01 to acknowledge.
+
+        The firmware (Firmware/I2C.c, case 9) answers twice: 0x01 as soon as
+        it knows the command, then the sub-command's result. So 0x09 goes out
+        alone and is answered first. Firmware older than v6.1 does not know
+        it and answers 0x00 — found on a real v4 on 6.0-a3. Sending the
+        sub-command anyway would then start some other command (0x10 is a
+        bulk write), so it is not sent.
         """
         self._check_active()
         self.bp.profile.require(device_module.CAP_EXTENDED_AUX)
-        self.bp.write(bytes([CMD_EXTENDED_AUX, command & 0xFF]))
+        self.bp.write(bytes([CMD_EXTENDED_AUX]))
+        if self.bp.read(1)[0] != ACK:
+            raise UnsupportedFeatureError(
+                "this Bus Pirate's firmware does not know the extended AUX "
+                f"command ({self.bp.profile.describe()}). It needs firmware "
+                "v6.1 or newer."
+            )
+        self.bp.write(bytes([command & 0xFF]))
         response = self.bp.read(1)[0]
         if command != AUX_READ and response != ACK:
             raise ProtocolError(
