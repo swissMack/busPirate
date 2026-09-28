@@ -186,6 +186,9 @@ class FakeBitPirateSerial:
         if self._state == "question":
             self._question_key(char)
             return
+        if self._state == "mode_number":
+            self._mode_number_key(char)
+            return
         # The command line.
         if char in "\r\n":
             self._println()
@@ -253,8 +256,12 @@ class FakeBitPirateSerial:
             return
         root, _, rest = line.partition(" ")
         rest = rest.strip()
-        if root in ("m", "mode"):
+        if root in ("m", "mode") and not rest:
+            self._mode_menu()
+        elif root in ("m", "mode"):
             self._mode_change(rest)
+        elif root in ("help", "h", "?"):
+            self._help()
         elif root in ("P", "p"):
             enable = root == "P"
             message = PULLUP_MESSAGES.get((self.mode, enable))
@@ -284,10 +291,72 @@ class FakeBitPirateSerial:
             return
         self._println(f"Mode changed to {wanted}")
         self._println()
+        self._enter(wanted)
+
+    def _enter(self, wanted: str) -> None:
         self.mode = wanted
         if wanted in self.settings and wanted not in self.configured:
             self.configured.add(wanted)
             self._configure(wanted)
+
+    # Controllers/UtilityController.cpp handleModeSelect: ModeEnum's names in
+    # order, "None" included, then a number read by
+    # Managers/UserInputManager.cpp readModeNumber (digits only).
+    _MENU = ("None",) + MODES
+
+    def _mode_menu(self) -> None:
+        self._println()
+        self._println("Select mode:")
+        for number, name in enumerate(self._MENU, start=1):
+            self._println(f"  {number}. {name}")
+        self._println()
+        self._emit("Mode Number > ")
+        self._answer = ""
+        self._state = "mode_number"
+
+    def _mode_number_key(self, char: str) -> None:
+        if char in "\r\n":
+            self._println()
+            number, self._answer = self._answer, ""
+            self._state = "prompt"
+            if not number:
+                self._println()
+                self._println()
+                self._println("Invalid input.")
+            elif 1 <= int(number) <= len(self._MENU):
+                chosen = self._MENU[int(number) - 1]
+                self._println()
+                self._println(f"Mode changed to {chosen}")
+                self._println()
+                if chosen != "None":
+                    self._enter(chosen)
+            else:
+                self._println()
+                self._println("Invalid mode number.")
+                self._println()
+            if self._state == "prompt":
+                self._prompt()
+        elif char.isdigit():
+            self._answer += char
+            self._emit(char)
+
+    def _help(self) -> None:
+        # An abbreviation of Shells/HelpShell.cpp: the real list is far longer.
+        self._println()
+        self._println("General commands:")
+        self._println("  help / h / ?     This help")
+        self._println("  mode / m [name]  Change mode (no name: pick from a list)")
+        self._println("  P / p            Pull-ups on / off")
+        self._println("  config           Pins and speed for the current mode")
+        self._println("  [0x.. r:N]       Bus instructions: write bytes, read N")
+        self._println()
+        if self.mode == "I2C":
+            self._println("I2C commands: scan, ping <addr>, read <addr> [reg], write <addr> [reg] [val]")
+        elif self.mode == "UART":
+            self._println("UART commands: read, write <text>")
+        elif self.mode == "SPI":
+            self._println("SPI commands: flash, eeprom, sniff")
+        self._println()
 
     def _scan(self) -> None:
         # Controllers/I2cController.cpp handleScan.

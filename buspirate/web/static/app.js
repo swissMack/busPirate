@@ -739,10 +739,14 @@ function pushStreamEvents(message) {
   if (activeStream.console) {
     // A backspace from the board takes back the character before it — the
     // firmware answers one with BS, space, BS — but never a line break.
+    // A carriage return on its own (the decoder turns CR LF into a newline)
+    // goes back to the start of the line: the ESP32 Bit Pirate redraws its
+    // whole line that way on every key, so what follows replaces the line.
     let text = events.textContent;
     for (const event of message.events) {
       for (const ch of event.text) {
-        if (ch !== "\b") text += ch;
+        if (ch === "\r") text = text.slice(0, text.lastIndexOf("\n") + 1);
+        else if (ch !== "\b") text += ch;
         else if (text && !text.endsWith("\n")) text = text.slice(0, -1);
       }
     }

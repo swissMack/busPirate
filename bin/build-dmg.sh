@@ -84,6 +84,8 @@ check() {  # check <description> <path-inside-Contents>
 echo "==> checking the bundle"
 check "frontend (static/)" "Frameworks/buspirate/web/static/index.html"
 check "board photos"       "Frameworks/buspirate/web/static/img/board-v3.png"
+check "Bit Pirate drawing" "Frameworks/buspirate/web/static/img/board-bitpirate.svg"
+check "Bit Pirate guide"   "Frameworks/docs/bitpirate.md"
 check "guide (docs/)"      "Frameworks/docs/user-guide.md"
 check "executable"         "MacOS/BusPirate"
 

@@ -212,3 +212,37 @@ def test_a_board_that_never_prompts_fails_to_connect_with_advice():
 
     with pytest.raises(ModeError, match="port marked USB"):
         make(Silent(), connect_timeout=0.05).open()
+
+
+# -- the simulator's own terminal, as typed into the Terminal panel --------
+
+
+def type_line(fake, line):
+    fake.write(line.encode() + b"\r")
+    from buspirate.bitpirate.cli import screen_lines
+
+    return screen_lines(fake.read(100000).decode())
+
+
+def test_mode_on_its_own_offers_the_numbered_menu(fake):
+    screen = type_line(fake, "mode")
+    assert "Select mode:" in screen
+    assert "  2. HIZ" in screen  # "None" is first, as in the firmware
+    assert screen[-1] == "Mode Number > "
+    number = str(screen.index("  6. I2C") - screen.index("  1. None") + 1)
+    screen = type_line(fake, number)
+    assert "Mode changed to I2C" in screen
+    assert screen[-1] == "SDA GPIO [6]: "  # first entry asks its questions
+
+
+def test_a_mode_number_out_of_range_is_refused(fake):
+    type_line(fake, "m")
+    screen = type_line(fake, "99")
+    assert "Invalid mode number." in screen
+    assert screen[-1] == "HIZ> "
+
+
+def test_help_lists_the_commands(fake):
+    screen = type_line(fake, "help")
+    assert "General commands:" in screen
+    assert screen[-1] == "HIZ> "

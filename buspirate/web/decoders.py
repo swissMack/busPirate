@@ -115,9 +115,15 @@ class TextDecoder(Decoder):
 class ConsoleDecoder(Decoder):
     """The board's own terminal, as the text a serial terminal would show.
 
-    The firmware ends lines with CR LF. Dropping every CR, rather than
-    translating the pair, means a CR and its LF split across two reads still
-    come out as one newline. Tabs are kept — the v3 pin table is laid out with
+    The firmware ends lines with CR LF, which comes out as one newline even
+    when the pair is split across two reads: a CR at the end of a read is held
+    until the next byte shows which it is. A CR on its own is passed on as
+    ``\\r`` for the pane to apply — back to the start of the line. The ESP32
+    Bit Pirate redraws its line that way on every key it echoes,
+    ``\\r<prompt><line>ESC[K``.
+
+    Escape sequences (``ESC[K``, cursor moves) are dropped, and may also be
+    split across reads. Tabs are kept — the v3 pin table is laid out with
     them — and so is backspace, which the firmware echoes as BS, space, BS
     and the pane applies. Any other non-printable byte becomes U+FFFD, so a
     garbled line looks garbled instead of silently losing characters.
@@ -125,12 +131,41 @@ class ConsoleDecoder(Decoder):
 
     legend = "The board's replies, as its own terminal prints them"
 
+    def __init__(self) -> None:
+        self._pending_cr = False
+        #: An escape sequence still being read, possibly across feeds.
+        self._escape = b""
+
     def feed(self, data: bytes) -> List[Dict]:
-        text = "".join(
-            chr(b) if 32 <= b < 127 or b in (0x08, 0x09, 0x0A) else "\N{REPLACEMENT CHARACTER}"
-            for b in data
-            if b != 0x0D
-        )
+        out = []
+        for b in data:
+            if self._escape:
+                self._escape += bytes([b])
+                # ESC [ ... ends on a byte from @ to ~; a two-byte ESC x ends
+                # at once. A runaway sequence is abandoned rather than eat the
+                # rest of the stream.
+                if len(self._escape) == 2 and b != 0x5B:
+                    self._escape = b""
+                elif len(self._escape) > 2 and 0x40 <= b <= 0x7E:
+                    self._escape = b""
+                elif len(self._escape) > 16:
+                    self._escape = b""
+                continue
+            if self._pending_cr:
+                self._pending_cr = False
+                if b == 0x0A:
+                    out.append("\n")
+                    continue
+                out.append("\r")
+            if b == 0x0D:
+                self._pending_cr = True
+            elif b == 0x1B:
+                self._escape = b"\x1b"
+            elif 32 <= b < 127 or b in (0x08, 0x09, 0x0A):
+                out.append(chr(b))
+            else:
+                out.append("\N{REPLACEMENT CHARACTER}")
+        text = "".join(out)
         return [{"kind": "console", "text": text}] if text else []
 
 
