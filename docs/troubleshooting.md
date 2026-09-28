@@ -155,6 +155,22 @@ Checked on 2026-09-25 on a **Bus Pirate v3.a, firmware v6.1 r1676** and a
       printed on the underside, so it reads mirrored (see
       [the wiring card](wiring-card.html))
 
+Checked on 2026-09-28 on the same **Bus Pirate v4, firmware v6.0-a3**:
+
+- [x] The one-click supplies switch: one click turns the supplies on — VREG
+      lights on the board and in the dashboard — and one click turns them off
+- [x] "Apply to the board" on the pin card leaves the supplies as they were:
+      VREG stays lit and the switch still says On
+- [x] Extended AUX (`0x09`) on a v4: firmware 6.0-a3 refuses it with `0x00`;
+      after updating the same board to **firmware 7.0**, it answers `0x01`
+      and then hangs for good, waiting on a UART the host is not connected
+      to. The dashboard no longer offers it on a v4
+- [x] v4 on 7.0: AUX moves from Pins & power — made an output and driven
+      high it measured 3.3 V, driven low 0 V, and released as an input again
+- [x] The v4 updates to firmware 7.0 with `pirate-loader`, entering its
+      bootloader (v4.06) with a PGC–PGD jumper — see
+      [Bus Pirate v4](bus-pirate-v4.md#updating-the-firmware)
+
 ## Not yet verified against hardware
 
 These still deserve a check the first time you have the hardware, and a bug
@@ -171,11 +187,11 @@ report here if they are wrong:
       stopping resynchronises cleanly on your firmware version
 - [ ] The v4 pull-up rail command on firmware that actually implements it
 - [ ] v4: the measured LED and pin coordinates land on the real parts
-- [ ] v4: AUX and CS actually move from the I2C panel's "Drive AUX or CS"
+- [ ] v3: AUX and CS actually move from the I2C panel's "Drive AUX or CS"
+      (firmware v6.1+), and its `read` sub-command (`0x03`) replies with the
+      pin state, 0 or 1. Taken from the firmware source; on a v4 the same
+      command hangs the board — see [Bus Pirate v4](bus-pirate-v4.md)
 - [ ] v4: AUX1 and AUX2 stay inert — nothing in the dashboard should move them
-- [ ] v4: extended AUX's `read` sub-command (`0x03`) reply is the pin state
-      (0 or 1), not an ack — every other sub-command replies `0x01`. Taken
-      from a reading of the firmware, not observed on hardware.
 - [ ] v4: the `~` self-test and its jumpers
 
 ### ESP32 Bit Pirate (ESP32-S3-DevKitC-1, firmware 1.7)
