@@ -171,6 +171,46 @@ Checked on 2026-09-28 on the same **Bus Pirate v4, firmware v6.0-a3**:
       bootloader (v4.06) with a PGC–PGD jumper — see
       [Bus Pirate v4](bus-pirate-v4.md#updating-the-firmware)
 
+Checked on 2026-09-29 on the same **Bus Pirate v4, firmware 7.0**, with real
+parts and then with the probe cable alone:
+
+- [x] I2C: an AHT20 + BMP280 module (0x38, 0x77) scans cleanly with the
+      Bus Pirate's pull-ups **off** (the module has its own); with them on and
+      VPU unconnected the scan reported 18 phantom addresses. Read the sensors
+      gave 29.1 °C / 44 %RH and 29 °C / 938.8 hPa, the AHT20's CRC OK
+- [x] 1-Wire: a DS18B20 probe needed an external 4.7 kΩ pull-up — its
+      "module" had none. Search, ROM CRC and scratchpad CRC all OK; 29.69 °C,
+      31.9 °C held. The search reply is `01`, 8 bytes per device, eight `FF`
+      (the driver had expected a fixed 256 bytes)
+- [x] Analog: an AD595 thermocouple amplifier on the ADC read 0.37 V =
+      36.9 °C with the probe held
+- [x] I2C: a 16×2 HD44780 LCD on a PCF8574 backpack at 0x27, driven from
+      Translate for an LCD / Send to an LCD
+- [x] The pull-up rail command works on 7.0: VPU measured 3.29 V at 3.3V,
+      4.97 V at 5V, 0 V off. With the rail at 3.3V and pull-ups on, MOSI read
+      3.29 V; pull-ups off gave 0.02 V, and pull-ups on with the rail off 0 V
+- [x] ADC against a multimeter: GND 0.000 V exactly; the 3.3V rail (3.295 V
+      on the meter) read 3.403 V and the 5V rail (4.985 V) read 5.066 V — the
+      ADC reads 2–3 % high between 3 and 5 V
+- [x] UART loopback (MOSI jumpered to MISO): "Hi", "Hello" and a 44-byte
+      message come back complete, sent four bytes at a time while listening.
+      Listening before the line was set up left it floating at 300 baud and
+      forwarded noise (`18`) ahead of every reply — the dashboard now sets the
+      line up first and keeps stray bytes out of replies
+- [x] AUX1 and AUX2 stay at 0 V while AUX is driven to 3.29 V and to 0 V
+- [x] `~` self-test: 0 errors with ADC jumpered to +3.3V (it asks for
+      nothing else on a v4). Without the jumper, the only failure is
+      `ADC(0.00)`
+- [x] The terminal's mode menu lists 11 modes, the same numbering as the v3:
+      HiZ, 1-WIRE, UART, I2C, SPI, 2WIRE, 3WIRE, KEYB, LCD, PIC, DIO. `i`
+      reports `REVID:0x0004 (24FJ256GB106 UNK)` — an unrecognised silicon
+      revision, cosmetic only
+- [x] The terminal on 7.0: open, `i`, `m`, `~`, then Stop — the dashboard
+      is back in binary mode at once (twenty `00`s answered `BBIO1`) and the
+      next Measure a voltage answers normally, with no reconnect. With
+      nothing on the ADC lead it reads a clean 0.000 V: the input divider
+      pulls it to ground
+
 ## Not yet verified against hardware
 
 These still deserve a check the first time you have the hardware, and a bug
@@ -183,16 +223,15 @@ report here if they are wrong:
       been checked against the documentation, not a scope.
 - [ ] A flash erase/write/verify round trip on a real chip, ideally one you
       have dumped first
+- [ ] SPI "Read a sensor" with a real MAX31855 — checked against its
+      datasheet only
 - [ ] The I2C and SPI sniffers against real traffic — in particular whether
       stopping resynchronises cleanly on your firmware version
-- [ ] The v4 pull-up rail command on firmware that actually implements it
 - [ ] v4: the measured LED and pin coordinates land on the real parts
 - [ ] v3: AUX and CS actually move from the I2C panel's "Drive AUX or CS"
       (firmware v6.1+), and its `read` sub-command (`0x03`) replies with the
       pin state, 0 or 1. Taken from the firmware source; on a v4 the same
       command hangs the board — see [Bus Pirate v4](bus-pirate-v4.md)
-- [ ] v4: AUX1 and AUX2 stay inert — nothing in the dashboard should move them
-- [ ] v4: the `~` self-test and its jumpers
 
 ### ESP32 Bit Pirate (ESP32-S3-DevKitC-1, firmware 1.7)
 
