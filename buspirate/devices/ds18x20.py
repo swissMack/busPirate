@@ -83,7 +83,8 @@ def _measure_with(name: str, decode):
 
 DEVICES = [
     Device("DS18B20", "onewire", "thermometer", families=(0x28,),
-           measure=_measure_with("DS18B20", decode_b)),
+           measure=_measure_with("DS18B20", decode_b),
+           verified=True),  # v4 + probe with a 4k7 pull-up, 2026-09-29
     Device("DS1822", "onewire", "thermometer", families=(0x22,),
            measure=_measure_with("DS1822", decode_b)),
     Device("DS1825", "onewire", "thermometer", families=(0x3B,),

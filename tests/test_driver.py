@@ -1,6 +1,7 @@
 import pytest
 
 from buspirate import I2C, ModeError, NackError
+from buspirate.exceptions import ProtocolError
 from buspirate.i2c import address_byte
 from tests.conftest import make_device
 from tests.fake_serial import FakeSerial
@@ -267,9 +268,24 @@ def test_uart_framing_flags_pack(bp, fake):
         assert fake.written[0] == 0x9A
 
 
-def test_onewire_search_drops_the_empty_slots(bp):
+def test_onewire_search_reads_up_to_the_end_marker(bp):
     with bp.onewire() as ow:
         assert ow.search_rom() == [b"\x28\x11\x22\x33\x44\x55\x66\x77"]
+
+
+def test_onewire_search_on_an_empty_bus_is_an_empty_list(bp, fake):
+    # The exact reply a real v4 on firmware 7.0 gave with nothing found:
+    # 01 ff ff ff ff ff ff ff ff. The old driver waited for 256 bytes.
+    fake.onewire_roms = []
+    with bp.onewire() as ow:
+        assert ow.search_rom() == []
+
+
+def test_onewire_search_returns_every_device(bp, fake):
+    roms = [bytes([0x28, i, 0, 0, 0, 0, 0, i]) for i in range(1, 4)]
+    fake.onewire_roms = roms + [b"\x00" * 8]
+    with bp.onewire() as ow:
+        assert ow.search_rom() == roms
 
 
 # -- terminal ----------------------------------------------------------
@@ -565,3 +581,24 @@ def test_read_after_write_is_a_pointer_write_then_a_repeated_start_read(bp, fake
     )
     with pytest.raises(NackError, match="0x33"):
         i2c.read_after_write(0x33, b"\x00", 1)
+
+
+def test_a_failed_exit_still_lets_the_mode_be_entered_again(bp, fake, monkeypatch):
+    # On real hardware the reply to "leave this mode" can go missing. The
+    # mode then counted as closed while the device still pointed at it, so
+    # the dashboard failed with "already in OneWire; close it first" until
+    # it reconnected.
+    ow = bp.onewire()
+    real_read = bp.read
+
+    def lost_reply(count):
+        raise ProtocolError(f"expected {count} byte(s), got 0: b''")
+
+    monkeypatch.setattr(bp, "read", lost_reply)
+    with pytest.raises(ProtocolError):
+        ow.close()
+    monkeypatch.setattr(bp, "read", real_read)
+    ow.close()  # a second close, as the dashboard does, is a no-op
+    # No resync here: in the dashboard that recovery can fail too, and the
+    # device must not be left pointing at a mode that says it is closed.
+    assert bp._mode is None

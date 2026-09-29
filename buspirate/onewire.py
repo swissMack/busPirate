@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import List
 
+from .exceptions import ProtocolError
 from .mode import Mode
 
 CMD_RESET = 0x02
@@ -15,6 +16,11 @@ ROM_SEARCH = 0xF0
 ROM_READ = 0x33
 ROM_MATCH = 0x55
 ROM_SKIP = 0xCC
+
+#: The search reply ends with eight 0xFF bytes. Stop well before a runaway
+#: stream could fill memory if that marker never comes.
+END_OF_SEARCH = b"\xff" * 8
+MAX_SEARCH_DEVICES = 256
 
 
 class OneWire(Mode):
@@ -44,14 +50,25 @@ class OneWire(Mode):
     def search_rom(self, alarm: bool = False) -> List[bytes]:
         """Run the firmware's ROM search and return the 8-byte addresses.
 
-        The firmware streams a fixed 32 slots of 8 bytes; unused slots come
-        back as all-``0xFF`` and are dropped here.
+        The firmware answers ``0x01``, then one 8-byte address per device,
+        then eight ``0xFF`` bytes to end the list — so an empty bus is
+        ``01 ff ff ff ff ff ff ff ff``. An all-zero address (a data line held
+        low) is dropped rather than reported as a device.
         """
         self._check_active()
         self.bp.write(bytes([CMD_ALARM_SEARCH if alarm else CMD_ROM_SEARCH]))
-        raw = self.bp.read(8 * 32)
-        addresses = [raw[i : i + 8] for i in range(0, len(raw), 8)]
-        return [a for a in addresses if a != b"\xff" * 8 and a != b"\x00" * 8]
+        ack = self.bp.read(1)
+        if ack != b"\x01":
+            raise ProtocolError(f"ROM search was refused: got {ack.hex()} instead of 01")
+        found = []
+        for _ in range(MAX_SEARCH_DEVICES):
+            address = self.bp.read(8)
+            if address == END_OF_SEARCH:
+                return [a for a in found if a != b"\x00" * 8]
+            found.append(address)
+        raise ProtocolError(
+            f"ROM search sent {MAX_SEARCH_DEVICES} addresses without an end marker"
+        )
 
     def read_rom(self) -> bytes:
         """Read the single device's 8-byte ROM. Only valid with one device."""

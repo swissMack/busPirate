@@ -215,6 +215,15 @@ def test_ds18b20_matches_the_datasheet_table(lsb, msb, expected):
     assert value(meaning, "Checksum").endswith("OK")
 
 
+def test_ds18b20_translates_a_real_reading():
+    # Read from a probe on the bench (v4, firmware 7.0) on 2026-09-29; the
+    # AHT20 beside it read about 29 °C.
+    rom = bytes.fromhex("28 7f 4b 6e 00 00 00 be")
+    assert ds18x20.crc8(rom[:7]) == rom[7]
+    meaning = ds18x20.decode_b(bytes.fromhex("db 01 7f 80 7f ff 05 10 a8"))
+    assert meaning == [("Temperature", "29.69 °C (85.4 °F)"), ("Checksum", "0xa8: OK")]
+
+
 def test_ds18s20_counts_in_half_degrees_not_sixteenths():
     # DS18S20 datasheet: 0x0032 is +25.0 °C and 0xFFCE is -25.0 °C. The old
     # 1-Wire panel divided by 16 for every family and read these as 3.1 °C.

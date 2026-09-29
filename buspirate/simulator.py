@@ -111,6 +111,8 @@ class FakeSerial:
         frequency=1000,
     ):
         self.i2c_devices = set(i2c_devices)
+        #: What a 1-Wire ROM search finds.
+        self.onewire_roms = [b"\x28\x11\x22\x33\x44\x55\x66\x77"]
         self.spi_fill = spi_fill
         #: Set to a FakeFlash to make SPI behave like a real flash chip.
         self.flash = None
@@ -567,8 +569,9 @@ class FakeSerial:
             self._out += b"\x28"
             return 1
         if cmd in (0x08, 0x09):
-            found = b"\x28\x11\x22\x33\x44\x55\x66\x77"
-            self._out += found + b"\xff" * (8 * 31)
+            # As measured on a v4 (firmware 7.0): ack, each ROM, then eight
+            # 0xFF to end the list.
+            self._out += b"\x01" + b"".join(self.onewire_roms) + b"\xff" * 8
             return 1
         if 0x10 <= cmd <= 0x1F:
             count = (cmd & 0x0F) + 1
