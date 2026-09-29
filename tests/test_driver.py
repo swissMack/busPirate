@@ -602,3 +602,112 @@ def test_a_failed_exit_still_lets_the_mode_be_entered_again(bp, fake, monkeypatc
     # No resync here: in the dashboard that recovery can fail too, and the
     # device must not be left pointing at a mode that says it is closed.
     assert bp._mode is None
+
+
+def test_uart_stray_received_bytes_are_not_taken_for_replies(bp, fake):
+    # On a v4, listening on a floating line forwarded noise (0x18) that sat
+    # in front of every reply: "UART bulk write: got 0x18, want 0x01".
+    from buspirate.uart import UART
+
+    with bp.uart() as uart:
+        uart.configure()
+        uart.start_receive()
+        fake.uart_rx += b"\x18\x18\x18"
+        uart.write(b"Hi\r\n")
+        fake.uart_rx += b"\x18"
+        uart.set_baudrate(UART.BAUD_115200)
+        fake.uart_rx += b"\x18\x18"
+        uart.stop_receive()
+        # Nothing was lost: the stray bytes are there to be read, in order.
+        assert uart.read_available(4096) == b"\x18" * 6
+
+
+def test_sending_sets_the_line_up_and_listens(bp, fake):
+    # There is no "start listening" button any more: the line is set up
+    # (115200, driven) and listened to before the first send.
+    from buspirate.web.panels import uart as panel
+
+    with bp.uart() as uart:
+        class Ctx:
+            mode = uart
+
+        fake.written.clear()
+        panel._send_text(Ctx(), "Hi", False)
+        assert list(fake.written[:3]) == [0x6A, 0x90, 0x02]
+        assert uart.listening
+
+
+def test_sending_sets_the_line_up_first(bp, fake):
+    # After Watch the line stops, UART mode is entered afresh; a send then
+    # went out at 300 baud from a pin that was not driving, yet every byte
+    # was acknowledged.
+    from buspirate.web.panels import uart as panel
+
+    with bp.uart() as uart:
+        class Ctx:
+            mode = uart
+
+        fake.written.clear()
+        result = panel._send_text(Ctx(), "Hi", True)
+        assert "was not set up" in result["caption"]
+        assert list(fake.written[:2]) == [0x6A, 0x90]
+        fake.written.clear()
+        assert "was not set up" not in panel._send_bytes(Ctx(), b"\x41")["caption"]
+
+
+def test_sending_shows_the_reply(bp, fake, monkeypatch):
+    # On the v4 the loopback worked, but the reply only showed after a
+    # separate Read what arrived, which nobody would know to press.
+    from buspirate.web.panels import uart as panel
+
+    monkeypatch.setattr(panel, "REPLY_WAIT", 0)
+    with bp.uart() as uart:
+        class Ctx:
+            mode = uart
+
+        fake.uart_loopback = True
+        result = panel._send_text(Ctx(), "Hi", True)
+        # What was sent and what came back, each on its own line.
+        assert result["rows"] == [["→ sent", "48 69 0d 0a", "Hi.."],
+                                  ["← received", "48 69 0d 0a", "Hi.."]]
+        assert "the same as sent" in result["caption"]
+
+        fake.uart_loopback = False
+        fake.uart_rx += b"OK\r\n"  # a device answering differently
+        answered = panel._send_text(Ctx(), "AT", True)
+        assert answered["rows"][1] == ["← received", "4f 4b 0d 0a", "OK.."]
+        assert "the same as sent" not in answered["caption"]
+
+        silent = panel._send_text(Ctx(), "x", False)
+        assert [r[0] for r in silent["rows"]] == ["→ sent"]
+        assert "Nothing came back" in silent["caption"]
+
+
+def test_a_long_message_loops_back_complete(bp, fake, monkeypatch):
+    # On the v4, "Hello" + CR LF came back as just "H": the firmware keeps
+    # only about four received bytes while a write runs. Writing four at a
+    # time while listening keeps the whole message.
+    from buspirate.web.panels import uart as panel
+
+    monkeypatch.setattr(panel, "REPLY_WAIT", 0)
+    with bp.uart() as uart:
+        class Ctx:
+            mode = uart
+
+        fake.uart_loopback = True
+        message = "Hello, loopback test!"
+        result = panel._send_text(Ctx(), message, True)
+        want = (message.encode() + b"\r\n").hex(" ")
+        assert result["rows"][1][1] == want
+        headers = [b for b in fake.written if 0x10 <= b <= 0x1F]
+        assert headers and max(headers) <= 0x13  # never more than 4 at once
+
+
+def test_the_uart_panel_has_no_listening_button():
+    from buspirate.web.panels import uart as panel
+
+    names = [a.name for a in panel.PANEL.actions]
+    assert "listen" not in names
+    assert names.index("send_text") < names.index("read") < names.index("monitor")
+    read = next(a for a in panel.PANEL.actions if a.name == "read")
+    assert read.label == "Check for more replies"

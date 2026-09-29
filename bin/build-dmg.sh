@@ -98,10 +98,17 @@ if codesign -v "$APP" 2>/dev/null; then
 else
   echo "    WARNING: signature missing or invalid — re-signing" >&2
   # A checkout under ~/Documents is synced by iCloud, which stamps Finder
-  # and file-provider attributes on the fresh bundle; codesign refuses any
-  # "detritus" like that, so strip it first.
-  xattr -cr "$APP"
-  codesign --force --deep --sign - "$APP"
+  # and file-provider attributes on the fresh bundle — and re-stamps them
+  # as fast as xattr can strip them — so codesign refuses the "detritus".
+  # Sign a copy somewhere iCloud does not reach, then bring it back: the
+  # attributes iCloud adds afterwards do not invalidate a finished signature.
+  SIGN_DIR="$(mktemp -d)"
+  ditto --noextattr --noqtn "$APP" "$SIGN_DIR/BusPirate.app"
+  xattr -cr "$SIGN_DIR/BusPirate.app"
+  codesign --force --deep --sign - "$SIGN_DIR/BusPirate.app"
+  rm -rf "$APP"
+  ditto "$SIGN_DIR/BusPirate.app" "$APP"
+  rm -rf "$SIGN_DIR"
   if codesign -v "$APP"; then
     echo "    ok   ad-hoc signature valid"
   else

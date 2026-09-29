@@ -34,7 +34,8 @@ yourself how the tool fits together.
 | Read a 24Cxx EEPROM | Dashboard → I2C → **Read a 24Cxx EEPROM** | 24C32 and up need a 2-byte address |
 | Work out what an SPI flash chip is | Dashboard → SPI → **Identify the chip** | [SPI](spi.md) |
 | Dump an SPI flash to a file | Dashboard → SPI → **Dump flash to a file** | lands in `captures/` |
-| Watch a serial line | Dashboard → UART → **Set the line up**, then **Start listening** | [UART](uart.md) |
+| Talk to a serial device | Dashboard → UART → **Set the line up**, then **Send text** — replies show under it | [UART](uart.md) |
+| Watch a serial line | Dashboard → UART → **Watch the line** | [UART](uart.md) |
 | Read DS18B20 temperatures | Dashboard → 1-Wire → **Read the sensors** | needs a 4k7 pull-up |
 | Read a sensor in real units | Dashboard → I2C → **Read the sensors** | knows the AHT20 and BMP280/BME280; see [Extending](extending.md#adding-a-device) to add more |
 | Watch two other devices talk | Dashboard → I2C or SPI → **Sniff the bus** | passive; nothing is driven |
