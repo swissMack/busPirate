@@ -137,11 +137,12 @@ driver reads one acknowledgement and drains any extra.
 | `0000 0000` | exit to bitbang |
 | `0000 0010` | reset pulse |
 | `0000 0100` | read one byte |
-| `0000 1000` | ROM search, returns 32 slots of 8 bytes |
+| `0000 1000` | ROM search: `01`, then 8 bytes per device, then eight `FF` |
 | `0000 1001` | ALARM search |
 | `0001 xxxx` | bulk write 1–16 bytes |
 
-Unused search slots come back as all `FF` and are dropped by the driver.
+The search reply has no fixed length: the eight `FF` bytes end it, so an empty
+bus answers `01 ff ff ff ff ff ff ff ff` (measured on a v4, firmware 7.0).
 
 ## Raw wire (`RAWx`) — page *Raw wire (binary)*
 

@@ -267,9 +267,24 @@ def test_uart_framing_flags_pack(bp, fake):
         assert fake.written[0] == 0x9A
 
 
-def test_onewire_search_drops_the_empty_slots(bp):
+def test_onewire_search_reads_up_to_the_end_marker(bp):
     with bp.onewire() as ow:
         assert ow.search_rom() == [b"\x28\x11\x22\x33\x44\x55\x66\x77"]
+
+
+def test_onewire_search_on_an_empty_bus_is_an_empty_list(bp, fake):
+    # The exact reply a real v4 on firmware 7.0 gave with nothing found:
+    # 01 ff ff ff ff ff ff ff ff. The old driver waited for 256 bytes.
+    fake.onewire_roms = []
+    with bp.onewire() as ow:
+        assert ow.search_rom() == []
+
+
+def test_onewire_search_returns_every_device(bp, fake):
+    roms = [bytes([0x28, i, 0, 0, 0, 0, 0, i]) for i in range(1, 4)]
+    fake.onewire_roms = roms + [b"\x00" * 8]
+    with bp.onewire() as ow:
+        assert ow.search_rom() == roms
 
 
 # -- terminal ----------------------------------------------------------
