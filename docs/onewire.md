@@ -64,3 +64,11 @@ DS18S20 (family `0x10`) counts in half degrees, not sixteenths, so the
 - Parasite power (no VDD wire) works, but needs a strong pull-up during
   conversion. If parasite-powered sensors read 85.0 °C, give them a VDD wire.
 - Long runs of ordinary wire work surprisingly well; star topologies do not.
+- **Search finds nothing and Read ROM returns all `00`:** the data line is
+  stuck low, which almost always means no pull-up. Many DS18B20 probes and
+  "modules" have no resistor, whatever the listing says: fit 4.7 kΩ from
+  DQ to the supply. On a v4, ticking the on-board pull-ups does nothing
+  unless VPU is wired to a supply.
+- **Wire by function, not by colour.** A probe's yellow lead is data and
+  goes to **MOSI** (grey on the Seeed cable); the Bus Pirate's yellow lead
+  is the ADC. A probe's black goes to GND, not to a black MISO lead.
