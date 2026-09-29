@@ -212,7 +212,10 @@ The **supplies switch** comes first: one button that says whether the 3.3V
 and 5V supplies are on, and flips them in a click. Below it, drive each pin
 (tick what you want, then **Apply to the board** — nothing changes until you
 do), set directions, measure a voltage on the ADC pin, measure a frequency on
-AUX, output PWM. See [Pins & power](pins-and-power.md).
+AUX, output PWM. **Measure a voltage** has a **Translate as** choice: with
+the ADC lead on an analog sensor's output, it shows the voltage and then
+what it means — an AD595 thermocouple amplifier's 0.37 V as 36.9 °C. See
+[Pins & power](pins-and-power.md).
 
 ## Live streams
 

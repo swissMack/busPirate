@@ -7,7 +7,7 @@ import struct
 import pytest
 
 from buspirate import devices
-from buspirate.devices import aht20, bmp280, ds18x20, max31855
+from buspirate.devices import ad595, aht20, bmp280, ds18x20, max31855
 
 # A real AHT20 reply, read from the bench board on 2026-09-29.
 AHT20_REPLY = bytes.fromhex("0c 70 e2 a6 53 48 b9")
@@ -113,6 +113,8 @@ def test_every_device_is_well_formed():
             assert device.families, device
         if device.bus == "spi":
             assert device.measure, f"{device.name}: an SPI entry is only useful if it can read"
+        if device.bus == "analog":
+            assert device.from_volts, f"{device.name}: an analog entry needs from_volts"
 
 
 def test_scan_labels_come_from_the_catalog():
@@ -259,6 +261,25 @@ def test_max31855_names_its_faults():
     assert "nothing is driving MISO" in max31855.decode(b"\xff\xff\xff\xff")[0][1]
 
 
+# -- AD595 -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("volts, expected", [
+    (0.0027, "0.0 °C"),    # the datasheet's output at 0 °C
+    (0.250, "25.0 °C"),    # its calibration point
+    (1.0157, "100.0 °C"),  # (4.096 mV + 11 µV) x 247.3
+    (0.37, "36.9 °C"),     # the bench probe, held in the fingers
+])
+def test_ad595_follows_its_datasheet_transfer_function(volts, expected):
+    assert value(ad595.from_volts(volts), "Temperature") == expected
+
+
+def test_ad595_says_when_it_cannot_be_trusted():
+    assert "open or disconnected" in value(ad595.from_volts(4.9), "Note")
+    assert "cannot go below 0 °C" in value(ad595.from_volts(0.0), "Note")
+    assert "above the 0–500 °C" in value(ad595.from_volts(5.5), "Note")
+
+
 # -- the panels use the catalog ---------------------------------------------
 
 
@@ -337,3 +358,20 @@ def test_every_package_is_listed_in_pyproject():
         if "__init__.py" in files
     }
     assert on_disk - listed == set(), "add these to packages in pyproject.toml"
+
+
+def test_measure_a_voltage_translates_when_asked():
+    from buspirate.web.panels import pins as panel
+
+    class FakeBP:
+        def read_voltage(self):
+            return 0.37
+
+    class Ctx:
+        bp = FakeBP()
+
+    plain = panel._voltage(Ctx())
+    assert plain["pairs"] == [["ADC probe", "0.370 V"]] and "meaning" not in plain
+    translated = panel._voltage(Ctx(), translate="AD595")
+    assert translated["pairs"] == [["ADC probe", "0.370 V"]]
+    assert ["Temperature", "36.9 °C"] in translated["meaning"]
