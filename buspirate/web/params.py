@@ -130,5 +130,6 @@ _HANDLERS = {
     "enum": _enum,
     "bytes": _bytes,
     "text": _text,
+    "multiline": _text,
     "filename": _filename,
 }

@@ -33,7 +33,7 @@ from typing import Any, Callable, Dict, List, Optional
 # ---------------------------------------------------------------------------
 
 #: Parameter types the frontend knows how to render.
-PARAM_TYPES = ("int", "hex", "bytes", "bool", "enum", "text", "filename")
+PARAM_TYPES = ("int", "hex", "bytes", "bool", "enum", "text", "multiline", "filename")
 
 
 @dataclass
@@ -255,6 +255,16 @@ def show_as(data: bytes, show: str, *, start: int = 0, caption: str = "",
             f"the last byte (0x{data[-1]:02x}) is left over — read an even count"
         )
     return table([where, "Hex", "Decimal"], rows, caption=caption)
+
+
+def fill(action: str, param: str, value: str, message: str) -> dict:
+    """Put ``value`` into another action's field on the same panel.
+
+    For a two-step tool — translate, then send — where the user should see,
+    and may edit, what the first step produced before the second sends it.
+    """
+    return {"render": "fill", "action": action, "param": param, "value": value,
+            "text": message}
 
 
 def with_meaning(result: dict, meaning: List[Any]) -> dict:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ... import device as device_module
 from ... import devices
+from ...devices import hd44780
 from ...exceptions import NackError
 from ...i2c import (
     AUX_HIGH,
@@ -23,6 +24,7 @@ from ..registry import (
     Param,
     Wire,
     chips,
+    fill,
     hexdump,
     live,
     show_as,
@@ -110,6 +112,36 @@ def _read(ctx, address, count, show):
     data = ctx.mode.read(address, count)
     result = show_as(data, show, caption=f"{count} byte(s) from 0x{address:02X}")
     return with_meaning(result, devices.explain_i2c_read(address, data))
+
+
+def _lcd_translate(ctx, message, size, backlight):
+    steps = hd44780.compose(message, size, backlight)
+    sent = sum(len(data) for data, _ in steps)
+    return fill(
+        "lcd_send",
+        "script",
+        hd44780.script(steps),
+        f"Translated into {sent} bytes in {sum(1 for d, _ in steps if d)} steps, "
+        "below in Send to an LCD — one step per line, with what it means. "
+        "Edit it if you like, then send.",
+    )
+
+
+def _lcd_send(ctx, address, script):
+    try:
+        transfers = hd44780.parse_script(script)
+    except ValueError as exc:
+        return text(f"Nothing sent: {exc}.", tone="warn")
+    if not transfers:
+        return text("Nothing to send. Type a message above and press Translate first.",
+                    tone="warn")
+    sent = hd44780.send(ctx.mode, address, transfers)
+    return text(
+        f"Sent {sent} bytes to 0x{address:02X} in {len(transfers)} steps, pausing after "
+        "each. The display cannot answer, so check the screen: if you see only "
+        "solid blocks, turn the contrast screw on the back.",
+        tone="good",
+    )
 
 
 def _read_sensors(ctx):
@@ -290,6 +322,36 @@ PANEL = Panel(
                 ),
             ],
             handler=_write,
+        ),
+        Action(
+            name="lcd_translate",
+            label="Translate for an LCD",
+            help="For a character LCD on a PCF8574 backpack. Type text, one "
+            "line per row; plain words work as commands: clear, home, line 2, "
+            "backlight off, cursor on, blink on. Nothing is sent yet: the hex "
+            "appears in Send to an LCD, one step per line with its meaning.",
+            params=[
+                Param("message", "multiline", "Message",
+                      default="Hello, Bus Pirate\nIt works!"),
+                Param("size", "enum", "Size", default="16x2",
+                      choices=[{"value": s, "label": s} for s in hd44780.SIZES]),
+                Param("backlight", "bool", "Backlight", default=True),
+            ],
+            handler=_lcd_translate,
+        ),
+        Action(
+            name="lcd_send",
+            label="Send to an LCD",
+            help="Writes each line as its own transfer with a pause after it, "
+            "the timing the display needs. Scan with Power ticked first; the "
+            "display must have been powered off and on if an earlier attempt "
+            "left it half set up.",
+            params=[
+                Param("address", "hex", "Device address (7-bit)", default=0x27),
+                Param("script", "multiline", "Bytes to send",
+                      placeholder="Press Translate for an LCD first"),
+            ],
+            handler=_lcd_send,
         ),
         Action(
             name="eeprom_read",

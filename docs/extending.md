@@ -100,6 +100,7 @@ need:
    | `ds18x20.py` | 1-Wire: recognised by the family code, the ROM's first byte |
    | `max31855.py` | SPI: no addresses, so the user picks the chip from a list |
    | `ad595.py` | analog: a voltage on the ADC lead, translated by `from_volts` |
+   | `hd44780.py` | an output device: text in, hex out (`compose`, `script`, `send`) |
 
 2. **Change the facts** from the datasheet: address or family code, the
    "measure" command, how long to wait, and the formula in `decode()`.
