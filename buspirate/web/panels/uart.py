@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from ... import device as device_module
 from ...uart import UART
 from ..registry import Action, Panel, Param, Wire, hexdump, live, text
@@ -40,17 +42,40 @@ def _send_text(ctx, message, newline):
     payload = message.encode("utf-8", "replace")
     if newline:
         payload += b"\r\n"
-    # Without a setup the transmit pin is not driving: the firmware would
-    # acknowledge every byte while nothing reached the wire.
-    note = _set_up_if_needed(ctx)
-    ctx.mode.write(payload)
-    return text(f"{note}Sent {len(payload)} byte(s).", tone="good")
+    return _send(ctx, payload)
 
 
 def _send_bytes(ctx, data):
+    return _send(ctx, data)
+
+
+#: How long to wait for a reply before showing what came back.
+REPLY_WAIT = 0.3
+
+
+def _send(ctx, payload):
+    """Send, then show what came back, so nobody has to know to press Read.
+
+    Without a setup the transmit pin is not driving: the firmware would
+    acknowledge every byte while nothing reached the wire, so set it up.
+    """
     note = _set_up_if_needed(ctx)
-    ctx.mode.write(data)
-    return text(f"{note}Sent {len(data)} byte(s).", tone="good")
+    ctx.mode.write(payload)
+    sent = f"{note}Sent {len(payload)} byte(s)."
+    if not getattr(ctx.mode, "listening", False):
+        return text(sent + " Not listening, so replies are not collected: "
+                    "start listening to see them.", tone="good")
+    time.sleep(REPLY_WAIT)
+    reply = ctx.mode.read_available(4096)
+    if not reply:
+        return text(sent + f" Nothing came back within {REPLY_WAIT:.1f} s; "
+                    "Read what arrived collects anything slower.", tone="good")
+    return hexdump(reply, caption=f"{sent} Received back {len(reply)} byte(s): "
+                                  f"{_printable(reply)}")
+
+
+def _printable(data: bytes) -> str:
+    return "".join(chr(b) if 32 <= b < 127 else "." for b in data)
 
 
 def _set_up_if_needed(ctx) -> str:
@@ -86,8 +111,7 @@ def _read(ctx, max_bytes):
             "Nothing received yet. If you expected traffic, check that MISO is "
             "on the target's TX pin and that the baud rate matches."
         )
-    printable = "".join(chr(b) if 32 <= b < 127 else "." for b in data)
-    return hexdump(data, caption=f"{len(data)} byte(s) received — {printable}")
+    return hexdump(data, caption=f"{len(data)} byte(s) received — {_printable(data)}")
 
 
 def _monitor(ctx):

@@ -34,6 +34,11 @@ class UART(Mode):
         #: for :meth:`read_available` rather than mistaken for a reply.
         self._received = bytearray()
 
+    @property
+    def listening(self) -> bool:
+        """True while received bytes are being forwarded (echo on)."""
+        return self._echoing
+
     def _set_aside_received(self) -> None:
         """While echo is on, received bytes arrive unasked, and may be queued
         ahead of the next command's reply. Move them out of the way first.

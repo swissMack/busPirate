@@ -658,3 +658,23 @@ def test_sending_sets_the_line_up_first(bp, fake):
         assert list(fake.written[:2]) == [0x6A, 0x90]
         fake.written.clear()
         assert "was not set up" not in panel._send_bytes(Ctx(), b"\x41")["text"]
+
+
+def test_sending_while_listening_shows_the_reply(bp, fake, monkeypatch):
+    # On the v4 the loopback worked, but the reply only showed after a
+    # separate Read what arrived, which nobody would know to press.
+    from buspirate.web.panels import uart as panel
+
+    monkeypatch.setattr(panel, "REPLY_WAIT", 0)
+    with bp.uart() as uart:
+        class Ctx:
+            mode = uart
+
+        quiet = panel._send_text(Ctx(), "Hi", True)
+        assert "Not listening" in quiet["text"]
+
+        panel._listen(Ctx(), True)
+        fake.uart_rx += b"Hi\r\n"  # what the MOSI-MISO loop sends back
+        result = panel._send_text(Ctx(), "Hi", True)
+        assert result["render"] == "hex" and bytes(result["data"]) == b"Hi\r\n"
+        assert "Received back 4 byte(s): Hi.." in result["caption"]
