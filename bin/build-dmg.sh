@@ -96,6 +96,10 @@ if codesign -dv "$APP" 2>&1 | grep -q 'Signature=adhoc'; then
 else
   echo "    WARNING: no ad-hoc signature — the app may not launch" >&2
   echo "    applying one" >&2
+  # A checkout under ~/Documents is synced by iCloud, which stamps Finder
+  # and file-provider attributes on the fresh bundle; codesign refuses any
+  # "detritus" like that, so strip it first.
+  xattr -cr "$APP"
   codesign --force --deep --sign - "$APP"
 fi
 
