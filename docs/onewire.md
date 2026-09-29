@@ -51,8 +51,10 @@ raw = int.from_bytes(ow.read(9)[0:2], "little", signed=True)
 print(raw / 16.0, "°C")
 ```
 
-The dashboard's **Read temperatures** does all of that for every sensor it
-finds.
+The dashboard's **Read the sensors** does all of that for every sensor it
+finds, checks the scratchpad's CRC, and uses each family's own formula: a
+DS18S20 (family `0x10`) counts in half degrees, not sixteenths, so the
+`raw / 16.0` above is only right for the DS18B20, DS1822 and DS1825.
 
 ## Gotchas
 

@@ -76,6 +76,91 @@ PANEL = Panel(
 
 That is the whole change. Restart the dashboard and the tab is there.
 
+## Adding a device
+
+Chips live in the **device catalog**, `buspirate/devices/`: one small module
+per chip (or family), each describing a `Device`. The panels ask the catalog,
+so adding a chip needs **no panel code and no JavaScript**. Pick the level you
+need:
+
+| You want | Do this |
+|---|---|
+| The chip **named** in I2C scan or 1-Wire search results | One line in `buspirate/devices/names.py` |
+| An SPI flash **maker** named by Identify the chip | One line in `JEDEC_MANUFACTURERS`, same file |
+| Its readings **translated** into real units | A module of its own — below |
+
+### A translated chip, in four steps
+
+1. **Copy the closest example** in `buspirate/devices/`:
+
+   | Example | Copy it for |
+   |---|---|
+   | `aht20.py` | an I2C chip with a fixed address: send a command, read the reply |
+   | `bmp280.py` | an I2C chip that shares its address (confirmed by an ID register), or needs calibration data |
+   | `ds18x20.py` | 1-Wire: recognised by the family code, the ROM's first byte |
+   | `max31855.py` | SPI: no addresses, so the user picks the chip from a list |
+
+2. **Change the facts** from the datasheet: address or family code, the
+   "measure" command, how long to wait, and the formula in `decode()`.
+   `decode()` returns label/value pairs — `[("Temperature", "29.07 °C")]` —
+   and should say so plainly when the bytes cannot be right (a busy flag, a
+   bad checksum, a power-on value).
+
+3. **Register it**: add the module to `_MODULES` in
+   `buspirate/devices/__init__.py`. Modules are listed by hand so the built
+   app can never leave one out; a test fails if you forget.
+
+4. **Test it against the datasheet.** Most datasheets print worked examples —
+   raw bytes and the temperature they mean. Put those in
+   `tests/test_devices.py`, as the existing chips do. When it has worked on a
+   real board, set `verified=True`.
+
+A minimal I2C sensor:
+
+```python
+# buspirate/devices/mychip.py
+import time
+
+from . import Device, Meaning, Reading
+
+ADDRESS = 0x44
+
+
+def decode(raw: bytes) -> Meaning:
+    celsius = int.from_bytes(raw[0:2], "big") * 175 / 65535 - 45
+    return [("Temperature", f"{celsius:.2f} °C")]
+
+
+def measure(i2c, address: int) -> Reading:
+    i2c.write(address, bytes([0x24, 0x00]))   # "measure now"
+    time.sleep(0.02)
+    raw = i2c.read(address, 6)
+    return Reading("MYCHIP", f"0x{address:02X}", raw, decode(raw))
+
+
+DEVICES = [
+    Device("MYCHIP", "i2c", "temperature", addresses=(ADDRESS,),
+           measure=measure,
+           explain_read=lambda address, data: decode(data)),
+]
+```
+
+What each `Device` field is for:
+
+| Field | Bus | Used for |
+|---|---|---|
+| `addresses` | I2C | where it can live; also names it in scan results |
+| `families` | 1-Wire | its family code(s) |
+| `probe(i2c, address)` | I2C | telling it apart from other chips at a shared address |
+| `measure(...)` | all | **Read the sensors** / **Read a sensor**: make it measure, return a `Reading` |
+| `explain_read(address, data)` | I2C | the "What it means" box under a hand-made **Read bytes** |
+| `explain_register(i2c, address, register, data)` | I2C | the same under **Read a register**; may read calibration, never starts a measurement |
+| `verified` | all | `True` once it has worked on real hardware |
+
+Use the bus methods every board has: `read`, `write` and `read_register` for
+I2C (the Bit Pirate has no `write_register`); `reset`, `write` and `read` for
+1-Wire; `write_then_read` for SPI.
+
 ## Parameters
 
 | Type | Renders as | Accepts |

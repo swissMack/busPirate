@@ -187,6 +187,9 @@ connects VPU to 3.3V or 5V. See [I2C](i2c.md).
 
 ### SPI
 **Identify the chip** sends `0x9F` and decodes manufacturer and capacity.
+**Read a sensor** reads an SPI sensor you pick from a list (SPI has no
+addresses, so the app cannot find it for you) and shows the raw bytes with
+what they mean — the MAX31855 thermocouple converter so far.
 **Read from flash** and **Dump flash to a file** use the standard `0x03`
 read; dumps go to `captures/` with a progress bar. See [SPI](spi.md).
 
@@ -196,8 +199,9 @@ cross over. See [UART](uart.md).
 
 ### 1-Wire
 **Find devices** runs the ROM search and names the family.
-**Read temperatures** reads every DS18B20-family sensor. See
-[1-Wire](onewire.md).
+**Read the sensors** reads every device in the catalog — the DS18B20
+family so far — and shows its raw scratchpad beside the temperature, with
+the checksum checked. See [1-Wire](onewire.md).
 
 ### Raw wire
 Bit-level control for buses that are nearly SPI or nearly I2C. See

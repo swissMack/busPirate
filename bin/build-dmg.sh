@@ -90,17 +90,24 @@ check "guide (docs/)"      "Frameworks/docs/user-guide.md"
 check "executable"         "MacOS/BusPirate"
 
 # arm64 refuses to execute an unsigned binary at all, so the ad-hoc signature
-# PyInstaller applies is load-bearing, not cosmetic.
-if codesign -dv "$APP" 2>&1 | grep -q 'Signature=adhoc'; then
-  echo "    ok   ad-hoc signature present"
+# PyInstaller applies is load-bearing, not cosmetic. Check that it is *valid*,
+# not just present: PyInstaller's signing can fail halfway and leave a
+# signature behind that codesign then rejects.
+if codesign -v "$APP" 2>/dev/null; then
+  echo "    ok   ad-hoc signature valid"
 else
-  echo "    WARNING: no ad-hoc signature — the app may not launch" >&2
-  echo "    applying one" >&2
+  echo "    WARNING: signature missing or invalid — re-signing" >&2
   # A checkout under ~/Documents is synced by iCloud, which stamps Finder
   # and file-provider attributes on the fresh bundle; codesign refuses any
   # "detritus" like that, so strip it first.
   xattr -cr "$APP"
   codesign --force --deep --sign - "$APP"
+  if codesign -v "$APP"; then
+    echo "    ok   ad-hoc signature valid"
+  else
+    echo "    signing failed" >&2
+    fail=1
+  fi
 fi
 
 [ "$fail" = 0 ] || { echo "bundle is incomplete" >&2; exit 1; }
