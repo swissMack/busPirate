@@ -85,9 +85,9 @@ class Device:
             raise ValueError(f"{self.name}: bus must be one of {BUSES}")
 
 
-from . import ad595, aht20, bmp280, ds18x20, max31855, names  # noqa: E402
+from . import ad595, aht20, bmp280, ds18x20, hd44780, max31855, names  # noqa: E402
 
-_MODULES = (ad595, aht20, bmp280, ds18x20, max31855, names)
+_MODULES = (ad595, aht20, bmp280, ds18x20, hd44780, max31855, names)
 
 CATALOG: List[Device] = [device for module in _MODULES for device in module.DEVICES]
 

@@ -206,6 +206,23 @@ check("Read the sensors lists raw bytes and what they mean",
 check("chips it does not know are called not recognised, not guessed at",
   sensorsTable && sensorsTable.textContent.includes("not recognised"));
 
+// --- LCD: type a message, see the hex (with meanings), then send it
+const lcdTranslate = $("panel").querySelector('[data-action="lcd_translate"]');
+const lcdSend = $("panel").querySelector('[data-action="lcd_send"]');
+check("the LCD message box is a multi-line text area",
+  lcdTranslate && lcdTranslate.querySelector('textarea[name="message"]') !== null);
+lcdTranslate.querySelector("button").click();
+await settle(600);
+const lcdScript = lcdSend.querySelector('textarea[name="script"]').value;
+check("Translate fills Send to an LCD with hex and what each step means",
+  lcdScript.includes("3c 38") && lcdScript.includes("# wake-up 1 of 3") && lcdScript.includes("# 'H'"),
+  lcdScript.slice(0, 80));
+lcdSend.querySelector('[name="address"]').value = "0x50";  // the simulator has no LCD
+lcdSend.querySelector("button").click();
+await settle(1500);
+check("Send writes the edited script", /Sent \d+ bytes to 0x50/.test(lcdSend.querySelector(".result").textContent),
+  lcdSend.querySelector(".result").textContent.slice(0, 80));
+
 // --- hex rendering
 const reg = $("panel").querySelector('[data-action="read_register"]');
 reg.querySelector("button").click();

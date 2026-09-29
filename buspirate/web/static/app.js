@@ -434,6 +434,13 @@ function actionBlock(panel, action) {
         renderPanel();
         return;
       }
+      if (body.result && body.result.render === "fill") {
+        // Hand the value to the other form, where it can be read and edited
+        // before anything is sent.
+        const target = $("panel").querySelector(
+          `[data-action="${body.result.action}"] [name="${body.result.param}"]`);
+        if (target) target.value = body.result.value;
+      }
       output.replaceChildren(renderResult(body.result));
     } catch (error) {
       output.replaceChildren(el("p", { class: "msg msg--warn", text: error.message }));
@@ -501,7 +508,16 @@ function fieldFor(param) {
     );
   }
   let input;
-  if (param.type === "enum") {
+  if (param.type === "multiline") {
+    input = el("textarea", {
+      name: param.name,
+      rows: 8,
+      cols: 48,
+      placeholder: param.placeholder || "",
+      spellcheck: "false",
+    });
+    input.value = formatDefault(param);
+  } else if (param.type === "enum") {
     input = el(
       "select",
       { name: param.name },
@@ -537,6 +553,7 @@ function renderResult(result) {
   const caption = result.caption ? el("p", { class: "caption", text: result.caption }) : null;
   const body = {
     text: () => el("p", { class: "msg msg--" + (result.tone || "info"), text: result.text }),
+    fill: () => el("p", { class: "msg msg--good", text: result.text }),
     hex: () => hexBlock(result.data, result.start || 0),
     table: () =>
       el(

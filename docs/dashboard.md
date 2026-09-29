@@ -177,6 +177,14 @@ anything else is listed as not recognised. **Read bytes** and **Read a
 register** also add a "What it means" block under the hex when the address
 is one of those chips — an AHT20 reply, a BMP280 chip ID, calibration or
 measurement.
+**Translate for an LCD** goes the other way, for a character LCD on a
+PCF8574 backpack (0x27 or 0x3F): type text, one line per row, with plain
+words as commands (`clear`, `line 2`, `backlight off`, `cursor on`), and it
+fills **Send to an LCD** with the hex — one step per line, each with what it
+means. Edit it or not, then send; each line goes as its own transfer with a
+pause after it, which the display's slow steps need. The display's size
+cannot be read over I2C, so pick it (16×2 is the usual). A row of solid
+blocks means it is powered but not set up: power it off and on, then send.
 **Read a register** writes the register number then reads, with a repeated
 start — the pattern nearly every sensor expects. It and **Read bytes** have a
 **Show as** choice: hex, each byte in decimal, or 16-bit words (signed or

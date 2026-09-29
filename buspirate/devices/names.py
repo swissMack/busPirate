@@ -23,7 +23,6 @@ DEVICES = [
     _i2c("AK8963 magnetometer", 0x0C),
     _i2c("HMC5883L magnetometer", 0x1E),
     _i2c("PCF8574 / MCP23017 I/O expander", 0x20),
-    _i2c("PCF8574 LCD backpack", 0x27),
     _i2c("TSL2561 light sensor", 0x39),
     _i2c("SSD1306 OLED", 0x3C),
     _i2c("INA219 / HTU21D", 0x40),
