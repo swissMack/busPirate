@@ -176,6 +176,9 @@ check("cable colours are the corrected ones",
 
 const scan = $("panel").querySelector('[data-action="scan"]');
 check("scan form has three inputs", scan.querySelectorAll("input,select").length === 3);
+check("power and pull-ups start unticked",
+  !scan.querySelector('[name="power"]').checked && !scan.querySelector('[name="pullups"]').checked);
+scan.querySelector('[name="power"]').checked = true;
 scan.querySelector("button").click();
 await settle(800);
 const scanText = scan.querySelector(".result").textContent;
@@ -198,6 +201,13 @@ await settle(600);
 const hex = reg.querySelector(".hexdump");
 check("register read renders a hexdump", !!hex, reg.querySelector(".result").textContent.slice(0, 80));
 check("hexdump has an offset column", hex && hex.textContent.startsWith("000000"), hex && hex.textContent.slice(0, 20));
+reg.querySelector('[name="show"]').value = "dec";
+reg.querySelector("button").click();
+await settle(600);
+const decTable = reg.querySelector(".result table");
+check("Show as decimal renders a table", !!decTable && decTable.textContent.includes("Decimal"),
+  reg.querySelector(".result").textContent.slice(0, 80));
+reg.querySelector('[name="show"]').value = "hex";
 
 // --- an error must be a sentence, not a traceback
 const write = $("panel").querySelector('[data-action="write"]');
