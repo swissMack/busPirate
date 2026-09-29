@@ -99,6 +99,7 @@ need:
    | `bmp280.py` | an I2C chip that shares its address (confirmed by an ID register), or needs calibration data |
    | `ds18x20.py` | 1-Wire: recognised by the family code, the ROM's first byte |
    | `max31855.py` | SPI: no addresses, so the user picks the chip from a list |
+   | `ad595.py` | analog: a voltage on the ADC lead, translated by `from_volts` |
 
 2. **Change the facts** from the datasheet: address or family code, the
    "measure" command, how long to wait, and the formula in `decode()`.
@@ -155,6 +156,7 @@ What each `Device` field is for:
 | `measure(...)` | all | **Read the sensors** / **Read a sensor**: make it measure, return a `Reading` |
 | `explain_read(address, data)` | I2C | the "What it means" box under a hand-made **Read bytes** |
 | `explain_register(i2c, address, register, data)` | I2C | the same under **Read a register**; may read calibration, never starts a measurement |
+| `from_volts(volts)` | analog | the **Translate as** choice on **Measure a voltage** |
 | `verified` | all | `True` once it has worked on real hardware |
 
 Use the bus methods every board has: `read`, `write` and `read_register` for

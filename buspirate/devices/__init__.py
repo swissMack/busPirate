@@ -10,7 +10,8 @@ Adding a chip — see ``docs/extending.md`` for the full recipe:
 
 1. Copy the closest existing module (``aht20.py`` for a simple I2C sensor,
    ``bmp280.py`` for one that needs an ID check or calibration,
-   ``ds18x20.py`` for 1-Wire, ``max31855.py`` for SPI).
+   ``ds18x20.py`` for 1-Wire, ``max31855.py`` for SPI, ``ad595.py`` for
+   an analog sensor read on the ADC lead).
 2. Change the addresses, commands and formula.
 3. Add it to ``_MODULES`` below, and a test with a known answer from the
    datasheet to ``tests/test_devices.py``.
@@ -30,7 +31,8 @@ from typing import Any, Callable, List, Optional, Tuple
 #: A translation as label/value pairs, e.g. ``[("Temperature", "29.07 °C")]``.
 Meaning = List[Tuple[str, str]]
 
-BUSES = ("i2c", "onewire", "spi")
+#: "analog" is not a bus: the chip puts out a voltage the ADC lead measures.
+BUSES = ("i2c", "onewire", "spi", "analog")
 
 
 @dataclass
@@ -61,6 +63,8 @@ class Device:
     ``explain_register(bus, address, register, data) -> Meaning``
         Translates a register read the user made by hand. May read
         calibration from the chip, but must never start a measurement.
+    ``from_volts(volts) -> Meaning``
+        Analog only. Translates a voltage measured on the ADC lead.
     """
 
     name: str
@@ -72,6 +76,7 @@ class Device:
     measure: Optional[Callable[..., Reading]] = None
     explain_read: Optional[Callable[[int, bytes], Meaning]] = None
     explain_register: Optional[Callable[[Any, int, int, bytes], Meaning]] = None
+    from_volts: Optional[Callable[[float], Meaning]] = None
     #: True once it has been checked on real hardware, not just the datasheet.
     verified: bool = False
 
@@ -80,9 +85,9 @@ class Device:
             raise ValueError(f"{self.name}: bus must be one of {BUSES}")
 
 
-from . import aht20, bmp280, ds18x20, max31855, names  # noqa: E402
+from . import ad595, aht20, bmp280, ds18x20, max31855, names  # noqa: E402
 
-_MODULES = (aht20, bmp280, ds18x20, max31855, names)
+_MODULES = (ad595, aht20, bmp280, ds18x20, max31855, names)
 
 CATALOG: List[Device] = [device for module in _MODULES for device in module.DEVICES]
 
@@ -178,4 +183,19 @@ def spi_sensor(name: str) -> Device:
     for device in spi_sensors():
         if device.name == name:
             return device
+    raise KeyError(name)
+
+
+# -- analog ------------------------------------------------------------------
+
+
+def analog_sensors() -> List[Device]:
+    """Sensors whose output voltage the app can translate."""
+    return [d for d in devices("analog") if d.from_volts is not None]
+
+
+def translate_volts(name: str, volts: float) -> Meaning:
+    for device in analog_sensors():
+        if device.name == name:
+            return device.from_volts(volts)
     raise KeyError(name)

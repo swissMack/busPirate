@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from ... import device as device_module
-from ..registry import Action, Panel, Param, Wire, keyvalue, live, pins, text
+from ... import devices
+from ..registry import Action, Panel, Param, Wire, keyvalue, live, pins, text, with_meaning
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
 
 
@@ -41,12 +42,28 @@ def _directions(ctx, aux, mosi, clk, miso, cs):
     return pins(ctx.bp.decode_pins(state))
 
 
-def _voltage(ctx):
+def _voltage(ctx, translate="none"):
     volts = ctx.bp.read_voltage()
-    return keyvalue(
-        [["ADC probe", f"{volts:.2f} V"]],
+    result = keyvalue(
+        [["ADC probe", f"{volts:.3f} V"]],
         caption="Measured on the ADC wire. The input tolerates up to 6 V.",
     )
+    if translate == "none":
+        return result
+    return with_meaning(
+        result, [("Sensor", translate)] + devices.translate_volts(translate, volts)
+    )
+
+
+_TRANSLATE = Param(
+    "translate",
+    "enum",
+    "Translate as",
+    default="none",
+    choices=[{"value": "none", "label": "Just the voltage"}]
+    + [{"value": d.name, "label": f"{d.name} — {d.summary}"} for d in devices.analog_sensors()],
+    help="If the ADC lead is on a sensor's output, the app can say what the voltage means.",
+)
 
 
 def _voltage_stream(ctx):
@@ -149,6 +166,7 @@ PANEL = Panel(
             label="Measure a voltage",
             recipe=True,
             requires=device_module.CAP_ADC,
+            params=[_TRANSLATE],
             handler=_voltage,
         ),
         Action(
