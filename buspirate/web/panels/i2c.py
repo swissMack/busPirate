@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ... import device as device_module
-from ... import sensors
+from ... import devices
 from ...exceptions import NackError
 from ...i2c import (
     AUX_HIGH,
@@ -33,25 +33,6 @@ from ..registry import (
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, PULLUP_RAIL_NOTE, colour
 
 # Addresses common enough to be worth naming in the scan results.
-WELL_KNOWN = {
-    0x0C: "AK8963 magnetometer",
-    0x1E: "HMC5883L magnetometer",
-    0x20: "PCF8574 / MCP23017 I/O expander",
-    0x27: "PCF8574 LCD backpack",
-    0x38: "AHT20 / AHT21 temperature + humidity",
-    0x39: "TSL2561 light sensor",
-    0x3C: "SSD1306 OLED",
-    0x40: "INA219 / HTU21D",
-    0x48: "ADS1115 / LM75 temperature",
-    0x50: "24Cxx EEPROM",
-    0x51: "24Cxx EEPROM",
-    0x53: "ADXL345 accelerometer",
-    0x57: "24Cxx EEPROM (or DS3231 NVRAM)",
-    0x5A: "MLX90614 / CCS811",
-    0x68: "DS1307 / DS3231 RTC, or MPU-6050",
-    0x76: "BMP280 / BME280",
-    0x77: "BMP280 / BME280 / BMP180",
-}
 
 SPEED_CHOICES = [
     {"value": 0, "label": "5 kHz"},
@@ -89,7 +70,7 @@ def _scan(ctx, power, pullups, speed):
         [
             {
                 "label": f"0x{address:02X}",
-                "sub": WELL_KNOWN.get(address, ""),
+                "sub": devices.i2c_label(address),
                 "detail": f"write 0x{address << 1:02X} / read 0x{(address << 1) | 1:02X}",
             }
             for address in found
@@ -107,7 +88,7 @@ def _read_register(ctx, address, register, count, show):
         caption=f"0x{address:02X} register 0x{register:02X}, {count} byte(s)",
         where="Register",
     )
-    return with_meaning(result, sensors.explain_register_read(ctx.mode, address, register, data))
+    return with_meaning(result, devices.explain_i2c_register(ctx.mode, address, register, data))
 
 
 def _write(ctx, address, data):
@@ -128,7 +109,7 @@ def _write(ctx, address, data):
 def _read(ctx, address, count, show):
     data = ctx.mode.read(address, count)
     result = show_as(data, show, caption=f"{count} byte(s) from 0x{address:02X}")
-    return with_meaning(result, sensors.explain_read(address, data))
+    return with_meaning(result, devices.explain_i2c_read(address, data))
 
 
 def _read_sensors(ctx):
@@ -142,14 +123,14 @@ def _read_sensors(ctx):
         )
     rows = []
     for address in found:
-        reading = sensors.read_sensor(ctx.mode, address)
+        reading = devices.read_i2c(ctx.mode, address)
         if reading is None:
             rows.append([f"0x{address:02X}", "not recognised", "",
                          "use Read bytes or Read a register"])
             continue
         rows.append([
             f"0x{address:02X}",
-            reading.chip,
+            reading.device,
             reading.raw.hex(" "),
             "; ".join(f"{k} {v}" for k, v in reading.meaning if k != "Status"),
         ])
@@ -266,8 +247,8 @@ PANEL = Panel(
             name="read_sensors",
             label="Read the sensors",
             help="One click: finds the chips on the bus, makes each one it "
-            "recognises measure, and shows the raw bytes with °C, %RH or hPa. "
-            "Knows the AHT20 and BMP280/BME280 so far.",
+            "recognises measure, and shows the raw bytes with what they mean. "
+            "Knows: " + ", ".join(d.name for d in devices.devices("i2c") if d.measure) + ".",
             params=[],
             handler=_read_sensors,
         ),

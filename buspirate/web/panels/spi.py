@@ -5,25 +5,16 @@ from __future__ import annotations
 import time
 
 from ... import device as device_module
+from ... import devices
 from ...spi import SPI
 from ...spiflash import SECTOR_SIZE, SPIFlash
-from ..registry import Action, Panel, Param, Wire, hexdump, keyvalue, live, text
+from ..registry import Action, Panel, Param, Wire, hexdump, keyvalue, live, text, with_meaning
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
 
 CMD_JEDEC_ID = 0x9F
 CMD_READ = 0x03
 
-JEDEC_MANUFACTURERS = {
-    0x01: "Spansion / Cypress",
-    0x1F: "Atmel / Adesto",
-    0x20: "Micron / ST",
-    0x37: "AMIC",
-    0x9D: "ISSI",
-    0xBF: "SST / Microchip",
-    0xC2: "Macronix",
-    0xC8: "GigaDevice",
-    0xEF: "Winbond",
-}
+JEDEC_MANUFACTURERS = devices.JEDEC_MANUFACTURERS
 
 SPEED_CHOICES = [
     {"value": 0, "label": "30 kHz"},
@@ -88,6 +79,15 @@ def _jedec_id(ctx, power, speed, spi_mode):
             ["Capacity", _capacity(jedec[2])],
         ],
         caption="JEDEC ID (command 0x9F)",
+    )
+
+
+def _read_sensor(ctx, chip, power, speed, spi_mode):
+    _setup(ctx, power, speed, spi_mode)
+    reading = devices.spi_sensor(chip).measure(ctx.mode)
+    return with_meaning(
+        hexdump(reading.raw, caption=f"{reading.device}, {len(reading.raw)} byte(s)"),
+        reading.meaning,
     )
 
 
@@ -224,6 +224,20 @@ PANEL = Panel(
             help="Sends 0x9F and decodes the manufacturer and capacity.",
             params=list(_SETUP),
             handler=_jedec_id,
+        ),
+        Action(
+            name="read_sensor",
+            label="Read a sensor",
+            recipe=True,
+            help="SPI has no addresses, so the app cannot find the chip: pick "
+            "it, and it shows the raw bytes with what they mean.",
+            params=[
+                Param("chip", "enum", "Chip",
+                      default=devices.spi_sensors()[0].name,
+                      choices=[{"value": d.name, "label": f"{d.name} — {d.summary}"}
+                               for d in devices.spi_sensors()]),
+            ] + list(_SETUP),
+            handler=_read_sensor,
         ),
         Action(
             name="flash_read",

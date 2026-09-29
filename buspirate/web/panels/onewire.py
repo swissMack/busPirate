@@ -1,30 +1,11 @@
-"""1-Wire: find devices on the bus and read DS18B20 temperatures."""
+"""1-Wire: find devices on the bus and read the ones the catalog knows."""
 
 from __future__ import annotations
 
 from ... import device as device_module
-
-import time
-
-from ...onewire import ROM_MATCH
+from ... import devices
 from ..registry import Action, Panel, Param, Wire, hexdump, table, text
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
-
-FAMILIES = {
-    0x01: "DS1990A iButton",
-    0x10: "DS18S20 thermometer",
-    0x22: "DS1822 thermometer",
-    0x26: "DS2438 battery monitor",
-    0x28: "DS18B20 thermometer",
-    0x29: "DS2408 I/O",
-    0x2D: "DS2431 EEPROM",
-    0x3B: "DS1825 thermometer",
-}
-
-CONVERT_T = 0x44
-READ_SCRATCHPAD = 0xBE
-THERMOMETERS = (0x10, 0x22, 0x28, 0x3B)
-
 
 def _search(ctx, power, pullups):
     ctx.mode.configure_peripherals(power=power, pullups=pullups)
@@ -39,33 +20,34 @@ def _search(ctx, power, pullups):
     return table(
         ["ROM address", "Family", "Device"],
         [
-            [rom.hex(":"), f"0x{rom[0]:02X}", FAMILIES.get(rom[0], "unlisted")]
+            [rom.hex(":"), f"0x{rom[0]:02X}", devices.onewire_label(rom[0]) or "unlisted"]
             for rom in roms
         ],
         caption=f"{len(roms)} device(s) on the bus",
     )
 
 
-def _temperatures(ctx, power, pullups):
+def _read_sensors(ctx, power, pullups):
     ctx.mode.configure_peripherals(power=power, pullups=pullups)
-    roms = [rom for rom in ctx.mode.search_rom() if rom[0] in THERMOMETERS]
-    if not roms:
-        return text("No thermometers found on the bus.", tone="warn")
-
+    roms = ctx.mode.search_rom()
+    known = [rom for rom in roms if devices.onewire_readable(rom[0])]
+    if not known:
+        found = f"{len(roms)} device(s) found, but none" if roms else "No devices found, so none"
+        return text(f"{found} the app can read yet. Find devices lists what is there.",
+                    tone="warn")
     rows = []
-    for index, rom in enumerate(roms):
-        ctx.progress(index, len(roms), f"converting {rom.hex(':')}")
-        ctx.mode.reset()
-        ctx.mode.write(bytes([ROM_MATCH]) + rom + bytes([CONVERT_T]))
-        time.sleep(0.8)  # a 12-bit conversion takes up to 750 ms
-        ctx.mode.reset()
-        ctx.mode.write(bytes([ROM_MATCH]) + rom + bytes([READ_SCRATCHPAD]))
-        scratchpad = ctx.mode.read(9)
-        raw = int.from_bytes(scratchpad[0:2], "little", signed=True)
-        celsius = raw / 16.0
-        rows.append([rom.hex(":"), f"{celsius:.2f}", f"{celsius * 9 / 5 + 32:.1f}"])
-    ctx.progress(len(roms), len(roms), "done")
-    return table(["ROM address", "°C", "°F"], rows, caption="DS18B20 family")
+    for index, rom in enumerate(known):
+        ctx.progress(index, len(known), f"measuring {rom.hex(':')}")
+        reading = devices.read_onewire(ctx.mode, rom)
+        rows.append([
+            reading.where,
+            reading.device,
+            reading.raw.hex(" "),
+            "; ".join(f"{k} {v}" for k, v in reading.meaning),
+        ])
+    ctx.progress(len(known), len(known), "done")
+    return table(["ROM address", "Chip", "Raw bytes", "What it means"], rows,
+                 caption=f"{len(known)} of {len(roms)} device(s) read")
 
 
 def _read_rom(ctx, power, pullups):
@@ -111,13 +93,15 @@ PANEL = Panel(
             handler=_search,
         ),
         Action(
-            name="temperatures",
-            label="Read temperatures",
+            name="read_sensors",
+            label="Read the sensors",
             recipe=True,
             long_running=True,
-            help="Finds every DS18B20-family sensor and reads each one.",
+            help="Finds every device the app knows how to read, makes each "
+            "measure, and shows its raw bytes with what they mean. Knows: "
+            + ", ".join(d.name for d in devices.devices("onewire") if d.measure) + ".",
             params=list(_BUS),
-            handler=_temperatures,
+            handler=_read_sensors,
         ),
         Action(
             name="read_rom",

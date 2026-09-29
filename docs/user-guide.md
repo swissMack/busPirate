@@ -35,7 +35,8 @@ yourself how the tool fits together.
 | Work out what an SPI flash chip is | Dashboard → SPI → **Identify the chip** | [SPI](spi.md) |
 | Dump an SPI flash to a file | Dashboard → SPI → **Dump flash to a file** | lands in `captures/` |
 | Watch a serial line | Dashboard → UART → **Set the line up**, then **Start listening** | [UART](uart.md) |
-| Read DS18B20 temperatures | Dashboard → 1-Wire → **Read temperatures** | needs a 4k7 pull-up |
+| Read DS18B20 temperatures | Dashboard → 1-Wire → **Read the sensors** | needs a 4k7 pull-up |
+| Read a sensor in real units | Dashboard → I2C → **Read the sensors** | knows the AHT20 and BMP280/BME280; see [Extending](extending.md#adding-a-device) to add more |
 | Watch two other devices talk | Dashboard → I2C or SPI → **Sniff the bus** | passive; nothing is driven |
 | Get the board's own `HiZ>` prompt | Dashboard → Terminal → **Open the board's terminal** | leaves binary mode; see [Dashboard](dashboard.md#the-boards-terminal) |
 | Write a file back to SPI flash | Dashboard → SPI → **Write a file to flash** | erases first, then verifies |
