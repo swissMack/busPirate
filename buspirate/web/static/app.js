@@ -555,7 +555,21 @@ function renderResult(result) {
         )
       ),
   }[result.render];
-  return el("div", {}, caption, body ? body() : el("pre", { text: JSON.stringify(result, null, 2) }));
+  // A read from a chip the app recognises carries its translation, shown
+  // under the raw bytes so both are on screen at once.
+  const meaning = result.meaning
+    ? el(
+        "div",
+        { class: "meaning" },
+        el("p", { class: "caption", text: "What it means" }),
+        el(
+          "table",
+          { class: "data" },
+          ...result.meaning.map(([k, v]) => el("tr", {}, el("th", { text: k }), el("td", { text: String(v) })))
+        )
+      )
+    : null;
+  return el("div", {}, caption, body ? body() : el("pre", { text: JSON.stringify(result, null, 2) }), meaning);
 }
 
 function hexBlock(bytes, start) {

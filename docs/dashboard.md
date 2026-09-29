@@ -170,6 +170,13 @@ unplug the probe from your target first.
 
 ### I2C
 **Scan the bus** probes 0x08–0x77 and names the chips it recognises.
+**Read the sensors** is one click to real units: it finds the chips on the
+bus, makes each one it knows measure, and lists the raw bytes beside what
+they mean (°C, %RH, hPa). It knows the AHT20 and the BMP280/BME280 so far;
+anything else is listed as not recognised. **Read bytes** and **Read a
+register** also add a "What it means" block under the hex when the address
+is one of those chips — an AHT20 reply, a BMP280 chip ID, calibration or
+measurement.
 **Read a register** writes the register number then reads, with a repeated
 start — the pattern nearly every sensor expects. It and **Read bytes** have a
 **Show as** choice: hex, each byte in decimal, or 16-bit words (signed or

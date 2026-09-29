@@ -194,6 +194,18 @@ const boardLitCount = () =>
 check("the LEDs on the board photo keep up with the status strip",
   boardLitCount() === 3, `${boardLitCount()} of 3 lit on the photo`);
 
+// --- Read the sensors: one click, raw bytes beside their translation
+const sensorsForm = $("panel").querySelector('[data-action="read_sensors"]');
+check("there is a one-click Read the sensors button", !!sensorsForm);
+sensorsForm.querySelector("button").click();
+await settle(800);
+const sensorsTable = sensorsForm.querySelector(".result table");
+check("Read the sensors lists raw bytes and what they mean",
+  !!sensorsTable && sensorsTable.textContent.includes("Raw bytes") && sensorsTable.textContent.includes("What it means"),
+  sensorsForm.querySelector(".result").textContent.slice(0, 120));
+check("chips it does not know are called not recognised, not guessed at",
+  sensorsTable && sensorsTable.textContent.includes("not recognised"));
+
 // --- hex rendering
 const reg = $("panel").querySelector('[data-action="read_register"]');
 reg.querySelector("button").click();

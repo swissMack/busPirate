@@ -257,6 +257,17 @@ def show_as(data: bytes, show: str, *, start: int = 0, caption: str = "",
     return table([where, "Hex", "Decimal"], rows, caption=caption)
 
 
+def with_meaning(result: dict, meaning: List[Any]) -> dict:
+    """Add a "What it means" key-value block under ``result``.
+
+    For reads from a chip the app recognises: the raw bytes stay on show,
+    and their translation (°C, %RH, hPa…) sits underneath.
+    """
+    if meaning:
+        result["meaning"] = [list(pair) for pair in meaning]
+    return result
+
+
 def table(columns: List[str], rows: List[List[Any]], *, caption: str = "") -> dict:
     return {"render": "table", "columns": columns, "rows": rows, "caption": caption}
 
