@@ -49,11 +49,26 @@ def _send_bytes(ctx, data):
     return text(f"Sent {len(data)} byte(s).", tone="good")
 
 
+def _set_up_if_needed(ctx) -> str:
+    """Listening before Set the line up leaves the firmware at 300 baud with
+    its transmit pin not driving: a loop or an unconnected RX then floats,
+    and the noise is forwarded as bytes. Set the defaults first."""
+    # Boards whose UART class has no such state (the Bit Pirate sets its
+    # line up through its own commands) have nothing to fix here.
+    if getattr(ctx.mode, "configured", True):
+        return ""
+    ctx.mode.set_baudrate(UART.BAUD_115200)
+    ctx.mode.configure()
+    return ("The line was not set up yet, so it is now 115200 baud, 8 data "
+            "bits, no parity, 1 stop bit, driven. ")
+
+
 def _listen(ctx, enable):
     if enable:
+        note = _set_up_if_needed(ctx)
         ctx.mode.start_receive()
         return text(
-            "Listening. Received bytes appear below — press Read to collect them.",
+            note + "Listening. Received bytes appear below — press Read to collect them.",
             tone="good",
         )
     ctx.mode.stop_receive()
@@ -72,6 +87,7 @@ def _read(ctx, max_bytes):
 
 
 def _monitor(ctx):
+    _set_up_if_needed(ctx)
     ctx.mode.start_receive()
     return live(
         "UART monitor",

@@ -602,3 +602,41 @@ def test_a_failed_exit_still_lets_the_mode_be_entered_again(bp, fake, monkeypatc
     # No resync here: in the dashboard that recovery can fail too, and the
     # device must not be left pointing at a mode that says it is closed.
     assert bp._mode is None
+
+
+def test_uart_stray_received_bytes_are_not_taken_for_replies(bp, fake):
+    # On a v4, listening on a floating line forwarded noise (0x18) that sat
+    # in front of every reply: "UART bulk write: got 0x18, want 0x01".
+    from buspirate.uart import UART
+
+    with bp.uart() as uart:
+        uart.configure()
+        uart.start_receive()
+        fake.uart_rx += b"\x18\x18\x18"
+        uart.write(b"Hi\r\n")
+        fake.uart_rx += b"\x18"
+        uart.set_baudrate(UART.BAUD_115200)
+        fake.uart_rx += b"\x18\x18"
+        uart.stop_receive()
+        # Nothing was lost: the stray bytes are there to be read, in order.
+        assert uart.read_available(4096) == b"\x18" * 6
+
+
+def test_listening_sets_the_line_up_first(bp, fake):
+    from buspirate.web.panels import uart as panel
+
+    with bp.uart() as uart:
+        class Ctx:
+            mode = uart
+
+        fake.written.clear()
+        result = panel._listen(Ctx(), True)
+        assert "was not set up" in result["text"]
+        # 115200 baud and a driven pin, before echo is switched on.
+        assert list(fake.written) == [0x6A, 0x90, 0x02]
+
+        fake.written.clear()
+        panel._listen(Ctx(), False)
+        result = panel._listen(Ctx(), True)
+        assert "was not set up" not in result["text"]
+        assert list(fake.written) == [0x03, 0x02]

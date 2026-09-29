@@ -47,9 +47,16 @@ Anything else goes through `set_manual_baudrate()` with a raw BRG divisor.
 | Mostly right, occasional wrong byte | baud rate close but not exact, or a noisy line |
 | Every byte doubled | echo is on at both ends |
 | Correct text, then nothing | the target stopped, or flow control it expects is missing |
+| A stream of the same junk byte (`18` on a v4) with nothing connected | the line was never set up: until **Set the line up** runs, the firmware is at 300 baud with its transmit pin not driving, so a loop or an unconnected RX floats and the noise is received. The dashboard now sets the line up itself when you start listening |
 
 Garbled characters are a speed problem, not a wiring problem: wiring faults
 give you silence, not nonsense.
+
+**A loopback test** (MOSI jumpered to MISO, no target) checks the Bus
+Pirate's own UART: start listening, send `Hi` with CR LF, then read — you get
+`48 69 0d 0a` back. Keep it short: while the firmware is transmitting it
+cannot forward what it receives, and its receive buffer holds only about four
+bytes until the write ends.
 
 ## Watching, and the bridge
 

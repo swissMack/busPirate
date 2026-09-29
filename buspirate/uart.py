@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .exceptions import ProtocolError
 from .mode import Mode
 
 CMD_ECHO_START = 0x02
@@ -11,6 +12,10 @@ CMD_BRIDGE = 0x0F
 SPEED_BASE = 0x60
 CONFIG_BASE = 0x80
 
+#: How many stray received bytes to set aside while waiting for the ack to
+#: "stop listening" before giving up on ever seeing it.
+MAX_STRAY_BEFORE_ACK = 4096
+
 
 class UART(Mode):
     """UART bridge. The Bus Pirate transmits on MOSI and receives on MISO."""
@@ -18,6 +23,29 @@ class UART(Mode):
     enter_command = 0x03
     banner_prefix = "ART"
     title = "UART"
+
+    def __init__(self, bp) -> None:
+        super().__init__(bp)
+        #: True once :meth:`configure` has run. Until then the firmware sits at
+        #: 300 baud with its transmit pin not driving the line.
+        self.configured = False
+        self._echoing = False
+        #: Received bytes that arrived while a command was being sent, kept
+        #: for :meth:`read_available` rather than mistaken for a reply.
+        self._received = bytearray()
+
+    def _set_aside_received(self) -> None:
+        """While echo is on, received bytes arrive unasked, and may be queued
+        ahead of the next command's reply. Move them out of the way first.
+
+        Seen on a v4: with the line floating, noise bytes (0x18) sat in front
+        of every ack, so each command read one of them as its reply.
+        """
+        if not self._echoing:
+            return
+        waiting = getattr(self.bp.serial, "in_waiting", 0)
+        if waiting:
+            self._received += self.bp.read(waiting)
 
     BAUD_300 = 0
     BAUD_1200 = 1
@@ -48,6 +76,7 @@ class UART(Mode):
         self._check_active()
         if baud not in self._BAUDS:
             raise ValueError("baud must be one of UART.BAUD_300..BAUD_115200")
+        self._set_aside_received()
         self.bp.command_expect_ack(SPEED_BASE | baud)
 
     def configure(
@@ -75,18 +104,22 @@ class UART(Mode):
             value |= 0x02
         if rx_idle_low:
             value |= 0x01
+        self._set_aside_received()
         self.bp.command_expect_ack(value)
+        self.configured = True
 
     def set_manual_baudrate(self, brg: int) -> None:
         """Set a non-standard rate via the raw BRG divisor (two bytes)."""
         self._check_active()
         if not 0 <= brg <= 0xFFFF:
             raise ValueError("BRG divisor must fit in 16 bits")
+        self._set_aside_received()
         self.bp.write(bytes([CMD_MANUAL_BAUD]) + brg.to_bytes(2, "big"))
         self._expect_ack("UART manual baud rate")
 
     def write(self, data: bytes) -> None:
         """Transmit any number of bytes, chunked into bulk writes."""
+        self._set_aside_received()
         self._write_bulk_chunks(data, "UART bulk write")
 
     def start_receive(self) -> None:
@@ -97,10 +130,27 @@ class UART(Mode):
         """
         self._check_active()
         self.bp.command_expect_ack(CMD_ECHO_START)
+        self._echoing = True
 
     def stop_receive(self) -> None:
+        """Stop the echo. Bytes still in flight are kept, not taken as the ack."""
         self._check_active()
-        self.bp.command_expect_ack(CMD_ECHO_STOP)
+        self._set_aside_received()
+        self.bp.write(bytes([CMD_ECHO_STOP]))
+        if self._echoing:
+            # Bytes received just before the firmware saw the command still
+            # come first; the ack is the first 0x01 after them.
+            for _ in range(MAX_STRAY_BEFORE_ACK):
+                byte = self.bp.read(1)
+                if byte == b"\x01":
+                    break
+                self._received += byte
+            else:
+                raise ProtocolError("stopping the UART echo: no ack after "
+                                    f"{MAX_STRAY_BEFORE_ACK} received bytes")
+        else:
+            self._expect_ack("stopping the UART echo")
+        self._echoing = False
 
     def start_bridge(self) -> None:
         """Start the transparent UART bridge.
@@ -116,4 +166,6 @@ class UART(Mode):
     def read_available(self, max_bytes: int = 256) -> bytes:
         """Drain whatever the echo has delivered so far. May return ``b""``."""
         self._check_active()
-        return self.bp.serial.read(max_bytes)
+        data = bytes(self._received) + self.bp.serial.read(max(0, max_bytes - len(self._received)))
+        self._received = bytearray(data[max_bytes:])
+        return data[:max_bytes]

@@ -149,9 +149,21 @@ class FakeSerial:
 
     def write(self, data: bytes) -> int:
         self.written += data
+        if self._echoing and self.uart_rx:
+            # As on a v4: bytes the UART received before the firmware read
+            # this command are already queued, ahead of its reply.
+            self._out += self.uart_rx
+            self.uart_rx.clear()
         self._in += data
         self._process()
         return len(data)
+
+    @property
+    def in_waiting(self) -> int:
+        if self._echoing and self.uart_rx:
+            self._out += self.uart_rx
+            self.uart_rx.clear()
+        return len(self._out)
 
     # A short, realistic burst for each streaming mode, replayed while the
     # stream runs so the dashboard has something to draw.
