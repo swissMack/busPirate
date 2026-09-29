@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List
+from typing import Optional, Iterable, List
 
 from . import device as device_module
 from .exceptions import (
@@ -79,6 +79,11 @@ class I2C(Mode):
     PULLUP_OFF = 0
     PULLUP_3V3 = 1
     PULLUP_5V = 2
+
+    def __init__(self, bp) -> None:
+        super().__init__(bp)
+        #: The last pull-up rail set in this mode, or None if never set here.
+        self.pullup_rail: Optional[int] = None
 
     # -- bus primitives ----------------------------------------------------
 
@@ -296,6 +301,7 @@ class I2C(Mode):
                 "first, or leave VPU driven by the target and set the rail to "
                 "off."
             )
+        self.pullup_rail = selection
 
     def extended_aux(self, command: int) -> int:
         """Drive or read AUX/CS directly. **BPv3 only.** Returns the reply byte.

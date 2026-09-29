@@ -1094,3 +1094,40 @@ def test_the_pin_card_says_nothing_happens_until_it_is_applied(client):
     assert "power" not in [p["name"] for p in card["params"]]
     assert card["button"] == "Apply to the board"
     assert "nothing changes" in card["help"].lower()
+
+
+# -- warnings for the two traps of 2026-09-29 ------------------------------
+
+
+def test_pullups_without_a_rail_are_flagged_on_a_v4(client):
+    connect(client)
+    status, body = run(client, "i2c", "scan", power=True, pullups=True, speed=2)
+    assert status == 200, body
+    caption = body["result"].get("caption") or body["result"].get("text")
+    if client.variant == "v3":
+        assert "⚠" not in caption  # a v3 has no rail to set
+        return
+    assert "only work when VPU has a voltage" in caption
+
+    run(client, "i2c", "pullup_voltage", selection=0)
+    _, body = run(client, "i2c", "configure", power=True, pullups=True, speed=2)
+    assert "the pull-up rail is Off" in body["result"]["text"]
+    assert body["result"]["tone"] == "warn"
+
+    run(client, "i2c", "pullup_voltage", selection=1)
+    _, body = run(client, "i2c", "configure", power=True, pullups=True, speed=2)
+    assert "⚠" not in body["result"]["text"]
+
+    _, body = run(client, "i2c", "configure", power=True, pullups=False, speed=2)
+    assert "⚠" not in body["result"]["text"]
+
+
+def test_measuring_with_the_supplies_off_says_so(client):
+    connect(client)
+    status, body = run(client, "pins", "voltage", translate="none")
+    assert status == 200, body
+    assert "The supplies are off" in body["result"]["caption"]
+
+    run(client, "pins", "supplies", on=True)
+    _, body = run(client, "pins", "voltage", translate="none")
+    assert "The supplies are off" not in body["result"]["caption"]

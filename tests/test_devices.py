@@ -419,6 +419,7 @@ def test_measure_a_voltage_translates_when_asked():
 
     class Ctx:
         bp = FakeBP()
+        profile = None  # no capabilities: no supplies note
 
     plain = panel._voltage(Ctx())
     assert plain["pairs"] == [["ADC probe", "0.370 V"]] and "meaning" not in plain

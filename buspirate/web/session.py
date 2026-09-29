@@ -408,6 +408,10 @@ class DeviceSession:
         )
         return dict(self.port_info or {"device": self.port}, attached=attached)
 
+    def supplies_on(self) -> bool:
+        """Public name for :meth:`_supplies_on`, for panels to read."""
+        return self._supplies_on()
+
     def _supplies_on(self) -> bool:
         """Whether the last thing we told the board was 'supplies on'.
 

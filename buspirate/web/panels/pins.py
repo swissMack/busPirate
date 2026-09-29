@@ -44,10 +44,14 @@ def _directions(ctx, aux, mosi, clk, miso, cs):
 
 def _voltage(ctx, translate="none"):
     volts = ctx.bp.read_voltage()
-    result = keyvalue(
-        [["ADC probe", f"{volts:.3f} V"]],
-        caption="Measured on the ADC wire. The input tolerates up to 6 V.",
-    )
+    caption = "Measured on the ADC wire. The input tolerates up to 6 V."
+    if (ctx.profile is not None and ctx.profile.has(device_module.CAP_SUPPLIES)
+            and not ctx.session.supplies_on()):
+        # Opening the terminal resets the board, which switches them off:
+        # on 2026-09-29 the ADC on +3.3V read 0 V for exactly this reason.
+        caption += (" The supplies are off, so the +3.3V and +5V leads are dead — "
+                    "switch them on above if you are measuring one of them.")
+    result = keyvalue([["ADC probe", f"{volts:.3f} V"]], caption=caption)
     if translate == "none":
         return result
     return with_meaning(
