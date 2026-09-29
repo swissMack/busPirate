@@ -1,6 +1,7 @@
 import pytest
 
 from buspirate import I2C, ModeError, NackError
+from buspirate.exceptions import ProtocolError
 from buspirate.i2c import address_byte
 from tests.conftest import make_device
 from tests.fake_serial import FakeSerial
@@ -580,3 +581,24 @@ def test_read_after_write_is_a_pointer_write_then_a_repeated_start_read(bp, fake
     )
     with pytest.raises(NackError, match="0x33"):
         i2c.read_after_write(0x33, b"\x00", 1)
+
+
+def test_a_failed_exit_still_lets_the_mode_be_entered_again(bp, fake, monkeypatch):
+    # On real hardware the reply to "leave this mode" can go missing. The
+    # mode then counted as closed while the device still pointed at it, so
+    # the dashboard failed with "already in OneWire; close it first" until
+    # it reconnected.
+    ow = bp.onewire()
+    real_read = bp.read
+
+    def lost_reply(count):
+        raise ProtocolError(f"expected {count} byte(s), got 0: b''")
+
+    monkeypatch.setattr(bp, "read", lost_reply)
+    with pytest.raises(ProtocolError):
+        ow.close()
+    monkeypatch.setattr(bp, "read", real_read)
+    ow.close()  # a second close, as the dashboard does, is a no-op
+    # No resync here: in the dashboard that recovery can fail too, and the
+    # device must not be left pointing at a mode that says it is closed.
+    assert bp._mode is None

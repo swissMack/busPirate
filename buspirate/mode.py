@@ -53,10 +53,16 @@ class Mode:
         if not self._active:
             return
         self._active = False
-        self.bp.write(bytes([CMD_EXIT]))
-        banner = self.bp.read(banner_length(BANNER_BITBANG))
-        match_banner(banner, BANNER_BITBANG, f"leaving {type(self).__name__}")
-        self.bp._mode_closed(self)
+        try:
+            self.bp.write(bytes([CMD_EXIT]))
+            banner = self.bp.read(banner_length(BANNER_BITBANG))
+            match_banner(banner, BANNER_BITBANG, f"leaving {type(self).__name__}")
+        finally:
+            # Even when the exit reply is lost, this mode is finished: it has
+            # already marked itself inactive, so a second close() would return
+            # early. Leaving the device still pointing at it made every later
+            # attempt to enter the same mode fail with "already in …".
+            self.bp._mode_closed(self)
 
     def __enter__(self) -> "Mode":
         return self
