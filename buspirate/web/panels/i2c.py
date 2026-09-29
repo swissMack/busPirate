@@ -15,7 +15,18 @@ from ...i2c import (
     SCAN_RANGE,
     stuck_bus_warning,
 )
-from ..registry import Action, Panel, Param, Wire, chips, hexdump, live, text
+from ..registry import (
+    SHOW_AS_CHOICES,
+    Action,
+    Panel,
+    Param,
+    Wire,
+    chips,
+    hexdump,
+    live,
+    show_as,
+    text,
+)
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, PULLUP_RAIL_NOTE, colour
 
 # Addresses common enough to be worth naming in the scan results.
@@ -83,12 +94,14 @@ def _scan(ctx, power, pullups, speed):
     )
 
 
-def _read_register(ctx, address, register, count):
+def _read_register(ctx, address, register, count, show):
     data = ctx.mode.read_register(address, register, count)
-    return hexdump(
+    return show_as(
         data,
+        show,
         start=register,
         caption=f"0x{address:02X} register 0x{register:02X}, {count} byte(s)",
+        where="Register",
     )
 
 
@@ -107,9 +120,9 @@ def _write(ctx, address, data):
     )
 
 
-def _read(ctx, address, count):
+def _read(ctx, address, count, show):
     data = ctx.mode.read(address, count)
-    return hexdump(data, caption=f"{count} byte(s) from 0x{address:02X}")
+    return show_as(data, show, caption=f"{count} byte(s) from 0x{address:02X}")
 
 
 def _eeprom_read(ctx, address, offset, length, address_bytes):
@@ -169,10 +182,12 @@ def _extended_aux(ctx, pin, level):
     return text(f"{name} set {level}.", tone="good")
 
 
+_SHOW_AS = Param("show", "enum", "Show as", default="hex", choices=SHOW_AS_CHOICES)
+
 _BUS_PARAMS = [
-    Param("power", "bool", "Power the target (3.3V + 5V)", default=True,
+    Param("power", "bool", "Power the target (3.3V + 5V)", default=False,
           requires=device_module.CAP_SUPPLIES),
-    Param("pullups", "bool", "Enable the on-board pull-ups", default=True),
+    Param("pullups", "bool", "Enable the on-board pull-ups", default=False),
     Param("speed", "enum", "Bus speed", default=2, choices=SPEED_CHOICES),
 ]
 
@@ -224,6 +239,7 @@ PANEL = Panel(
                 Param("address", "hex", "Device address (7-bit)", default=0x68),
                 Param("register", "hex", "Register", default=0x00),
                 Param("count", "int", "Bytes to read", default=8, minimum=1, maximum=4096),
+                _SHOW_AS,
             ],
             handler=_read_register,
         ),
@@ -234,6 +250,7 @@ PANEL = Panel(
             params=[
                 Param("address", "hex", "Device address (7-bit)", default=0x50),
                 Param("count", "int", "Bytes to read", default=16, minimum=1, maximum=4096),
+                _SHOW_AS,
             ],
             handler=_read,
         ),

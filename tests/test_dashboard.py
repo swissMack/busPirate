@@ -5,7 +5,7 @@ import pytest
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
 
 from buspirate.web.params import ParamError, coerce  # noqa: E402
-from buspirate.web.registry import Param, load_panels  # noqa: E402
+from buspirate.web.registry import Param, load_panels, show_as  # noqa: E402
 from buspirate.web.server import create_app  # noqa: E402
 
 
@@ -41,6 +41,16 @@ def test_every_panel_declares_usable_actions():
             assert callable(action.handler)
             names = [p.name for p in action.params]
             assert len(names) == len(set(names)), (panel.id, action.name)
+
+
+def test_power_and_pullups_start_unticked():
+    # A 3.3V-only target must never be powered or pulled up by default: the
+    # v4's pull-ups follow VPU, which can be on the 5V rail.
+    for panel in load_panels():
+        for action in panel.actions:
+            for param in action.params:
+                if param.name in ("power", "pullups"):
+                    assert param.default is False, (panel.id, action.name, param.name)
 
 
 def test_state_lists_panels_before_connecting(client):
@@ -210,6 +220,38 @@ def test_i2c_read_register_returns_a_hexdump(client):
     assert status == 200, body
     assert body["result"]["render"] == "hex"
     assert len(body["result"]["data"]) == 8
+
+
+def test_i2c_reads_can_be_shown_in_decimal(client):
+    connect(client)
+    status, body = run(client, "i2c", "read_register", address="0x50", register="0x10",
+                       count=4, show="dec")
+    assert status == 200, body
+    assert body["result"]["render"] == "table"
+    assert body["result"]["columns"] == ["Register", "Hex", "Decimal"]
+    assert [row[0] for row in body["result"]["rows"]] == ["0x10", "0x11", "0x12", "0x13"]
+
+    status, body = run(client, "i2c", "read", address="0x50", count=2, show="u16be")
+    assert status == 200, body
+    assert len(body["result"]["rows"]) == 1
+
+
+def test_show_as_decodes_bytes_and_words():
+    # A real AHT20 reply, and the start of a BMP280's calibration block.
+    aht20 = bytes.fromhex("0c 74 79 16 3c 0f 81")
+    rows = show_as(aht20, "dec")["rows"]
+    assert [row[2] for row in rows] == [12, 116, 121, 22, 60, 15, 129]
+    assert show_as(aht20, "hex")["render"] == "hex"
+
+    cal = bytes.fromhex("70 6b 43 67 18 fc")
+    assert [r[2] for r in show_as(cal, "u16le", start=0x88)["rows"]] == [27504, 26435, 64536]
+    assert [r[2] for r in show_as(cal, "s16le", start=0x88)["rows"]] == [27504, 26435, -1000]
+    assert [r[0] for r in show_as(cal, "s16le", start=0x88)["rows"]] == ["0x88", "0x8A", "0x8C"]
+    assert [r[2] for r in show_as(cal, "u16be")["rows"]] == [0x706B, 0x4367, 0x18FC]
+
+    odd = show_as(aht20, "u16be")
+    assert len(odd["rows"]) == 3
+    assert "0x81" in odd["caption"]
 
 
 def test_i2c_write_to_a_missing_device_is_a_plain_sentence(client):

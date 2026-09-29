@@ -217,6 +217,46 @@ def hexdump(data: bytes, *, start: int = 0, caption: str = "") -> dict:
     }
 
 
+#: Ways to show bytes read from a device, for a "Show as" enum parameter.
+#: Sensors disagree on byte order — the BMP280's calibration words are
+#: little-endian, most others big-endian — so both are offered.
+SHOW_AS_CHOICES = [
+    {"value": "hex", "label": "Hex"},
+    {"value": "dec", "label": "Decimal bytes"},
+    {"value": "u16be", "label": "16-bit words, big-endian"},
+    {"value": "u16le", "label": "16-bit words, little-endian"},
+    {"value": "s16be", "label": "Signed 16-bit, big-endian"},
+    {"value": "s16le", "label": "Signed 16-bit, little-endian"},
+]
+
+
+def show_as(data: bytes, show: str, *, start: int = 0, caption: str = "",
+            where: str = "Offset") -> dict:
+    """``data`` as a hexdump, or as a table of decimal values.
+
+    ``show`` is a ``SHOW_AS_CHOICES`` value. ``where`` heads the first
+    column — "Register" when ``start`` is the register the read began at.
+    """
+    data = bytes(data)
+    if show == "hex":
+        return hexdump(data, start=start, caption=caption)
+    if show == "dec":
+        rows = [[f"0x{start + i:02X}", f"{b:02x}", b] for i, b in enumerate(data)]
+        return table([where, "Hex", "Decimal"], rows, caption=caption)
+    order = "big" if show.endswith("be") else "little"
+    signed = show.startswith("s")
+    rows = []
+    for i in range(0, len(data) - 1, 2):
+        pair = data[i:i + 2]
+        value = int.from_bytes(pair, order, signed=signed)
+        rows.append([f"0x{start + i:02X}", pair.hex(" "), value])
+    if len(data) % 2:
+        caption = (caption + "; " if caption else "") + (
+            f"the last byte (0x{data[-1]:02x}) is left over — read an even count"
+        )
+    return table([where, "Hex", "Decimal"], rows, caption=caption)
+
+
 def table(columns: List[str], rows: List[List[Any]], *, caption: str = "") -> dict:
     return {"render": "table", "columns": columns, "rows": rows, "caption": caption}
 

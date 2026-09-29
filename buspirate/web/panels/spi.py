@@ -44,7 +44,7 @@ MODE_CHOICES = [
 ]
 
 _SETUP = [
-    Param("power", "bool", "Power the target (3.3V + 5V)", default=True,
+    Param("power", "bool", "Power the target (3.3V + 5V)", default=False,
           requires=device_module.CAP_SUPPLIES),
     Param("speed", "enum", "Clock", default=3, choices=SPEED_CHOICES),
     Param("spi_mode", "enum", "SPI mode", default=0, choices=MODE_CHOICES,

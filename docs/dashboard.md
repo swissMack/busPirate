@@ -171,7 +171,10 @@ unplug the probe from your target first.
 ### I2C
 **Scan the bus** probes 0x08–0x77 and names the chips it recognises.
 **Read a register** writes the register number then reads, with a repeated
-start — the pattern nearly every sensor expects. **Read a 24Cxx EEPROM**
+start — the pattern nearly every sensor expects. It and **Read bytes** have a
+**Show as** choice: hex, each byte in decimal, or 16-bit words (signed or
+not, either byte order) in decimal. Power and pull-ups start unticked, so
+nothing is driven until you ask for it. **Read a 24Cxx EEPROM**
 handles the memory-address width for you. On a v4, **Set the pull-up rail**
 connects VPU to 3.3V or 5V. See [I2C](i2c.md).
 
