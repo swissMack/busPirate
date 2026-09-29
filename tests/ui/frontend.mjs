@@ -628,5 +628,24 @@ await settle(900);
 $("panel").querySelector(".stream button").click();  // Stop
 await settle(1500);
 
+// --- connecting a v4 from a window opened with nothing connected
+// Reported on real hardware 2026-09-29: the I2C hook-up showed the v3 photo
+// (10 pins) for a v4 (12 pins), because connecting refreshed only the status
+// and the board stayed the default loaded before any board was attached.
+await serverSide("disconnect");
+await settle(6000);
+$("port-select").value = "simulated-v4";
+$("connect").click();
+await settle(900);
+[...$("nav").children].find((b) => b.textContent === "I2C").click();
+await settle(300);
+const v4Board = $("panel").querySelector(".card-img--board");
+check("connecting a v4 shows the v4 photo, not the v3 loaded before",
+  v4Board && v4Board.querySelector("image").getAttribute("href") === "/static/img/board-v4.jpg",
+  v4Board ? v4Board.querySelector("image").getAttribute("href") : "no board");
+check("and rings all twelve of its pins",
+  v4Board && v4Board.querySelectorAll("circle").length === 12,
+  v4Board ? `${v4Board.querySelectorAll("circle").length} rings` : "no board");
+
 console.log(failures.length ? `\n${failures.length} FAILED` : "\nall frontend checks passed");
 process.exit(failures.length ? 1 : 0);

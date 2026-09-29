@@ -79,6 +79,19 @@ async function loadState() {
   render();
 }
 
+function connectionChanged(was, now) {
+  return was.connected !== now.connected || was.port !== now.port
+    || was.description !== now.description;
+}
+
+/* Take the board-specific state (photo, cable, variant, panels) without
+   repainting the current panel, so an action's result stays on screen. */
+async function reloadBoard() {
+  applyState(await api("/api/state"));
+  renderVariant();
+  renderNav();
+}
+
 /* Everything /api/state describes except the traffic backlog, which is only
    replayed once, on first load. */
 function applyState(data) {
@@ -402,9 +415,16 @@ function actionBlock(panel, action) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ panel: panel.id, action: action.name, params }),
       });
+      const before = state.status;
       state.status = body.status;
       state.panels = body.panels;
       renderStatus();
+      // Connecting changes which board this is. The reply carries only the
+      // status, so without this the board photo, cable and variant stayed
+      // whatever was loaded before connecting — a v3 by default — and the
+      // poll below never noticed, because the status it compares against
+      // had already been updated here.
+      if (connectionChanged(before, body.status)) await reloadBoard();
       if (body.result && body.result.render === "stream" && body.result.input) {
         // A console stream (never anything sniffer-shaped — that is what
         // `input` picks out, not `kind`) gets the same rendering the panel
@@ -877,6 +897,9 @@ async function connectTo(port) {
     });
     state.status = body.status;
     state.panels = body.panels;
+    // The board just changed from "none" to whatever answered: take its
+    // photo, cable and variant too, not only the status.
+    await reloadBoard();
     render();
   } catch (exception) {
     error.hidden = false;
@@ -1294,8 +1317,7 @@ setInterval(async () => {
     const data = await api("/api/state");
     const was = state.status;
     const now = data.status;
-    if (was.connected !== now.connected || was.port !== now.port
-        || was.description !== now.description) {
+    if (connectionChanged(was, now)) {
       applyState(data);
       render();
     } else if (JSON.stringify(now) !== JSON.stringify(was)) {
