@@ -44,14 +44,35 @@ SPEED_CHOICES = [
 ]
 
 
+def _pullup_warning(ctx, pullups) -> str:
+    """On a v4 the pull-ups connect to VPU, and do nothing unless VPU has a
+    voltage — the trap behind a morning of phantom I2C addresses and a
+    silent DS18B20 on 2026-09-29. Say so when the rail is not known to be on.
+    """
+    if not pullups or ctx.profile is None:
+        return ""
+    if not ctx.profile.has(device_module.CAP_PULLUP_VOLTAGE):
+        return ""
+    rail = getattr(ctx.mode, "pullup_rail", None)
+    if rail in (I2C.PULLUP_3V3, I2C.PULLUP_5V):
+        return ""
+    if rail == I2C.PULLUP_OFF:
+        return (" ⚠ The pull-ups are on, but the pull-up rail is Off, so they have "
+                "nothing to pull up to. Set the pull-up rail to 3.3V below, or "
+                "wire VPU to your circuit's supply.")
+    return (" ⚠ On a v4 the pull-ups only work when VPU has a voltage: set the "
+            "pull-up rail to 3.3V below, or wire VPU to your circuit's supply.")
+
+
 def _configure(ctx, power, pullups, speed):
     ctx.mode.configure_peripherals(power=power, pullups=pullups)
     ctx.mode.set_speed(speed)
     rail = "on" if power else "off"
+    warning = _pullup_warning(ctx, pullups)
     return text(
         f"Bus set to {dict((c['value'], c['label']) for c in SPEED_CHOICES)[speed]}, "
-        f"power {rail}, pull-ups {'on' if pullups else 'off'}.",
-        tone="good",
+        f"power {rail}, pull-ups {'on' if pullups else 'off'}.{warning}",
+        tone="warn" if warning else "good",
     )
 
 
@@ -59,13 +80,14 @@ def _scan(ctx, power, pullups, speed):
     ctx.mode.configure_peripherals(power=power, pullups=pullups)
     ctx.mode.set_speed(speed)
     found = ctx.mode.scan()
+    warning = _pullup_warning(ctx, pullups)
     stuck = stuck_bus_warning(found, SCAN_RANGE)
     if stuck:
-        return text(stuck, tone="warn")
+        return text(stuck + warning, tone="warn")
     if not found:
         return text(
             "Nothing answered. The usual causes, in order: pull-ups are off, "
-            "the target has no power, or SDA and SCL are swapped.",
+            "the target has no power, or SDA and SCL are swapped." + warning,
             tone="warn",
         )
     return chips(
@@ -77,7 +99,7 @@ def _scan(ctx, power, pullups, speed):
             }
             for address in found
         ],
-        caption=f"{len(found)} device(s) acknowledged",
+        caption=f"{len(found)} device(s) acknowledged{warning}",
     )
 
 
