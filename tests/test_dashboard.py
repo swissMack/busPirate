@@ -297,7 +297,8 @@ def test_uart_sends_text(client):
     run(client, "uart", "configure", baud=10, framing=0, stop_bits=1, power=False)
     status, body = run(client, "uart", "send_text", message="AT", newline=True)
     assert status == 200, body
-    assert "Sent 4 byte(s)" in body["result"]["text"]
+    assert "Sent 4 byte(s)" in body["result"]["caption"]
+    assert body["result"]["rows"][0] == ["→ sent", "41 54 0d 0a", "AT.."]
 
 
 def test_onewire_search_names_the_family(client):

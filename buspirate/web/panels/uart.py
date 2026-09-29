@@ -6,7 +6,7 @@ import time
 
 from ... import device as device_module
 from ...uart import UART
-from ..registry import Action, Panel, Param, Wire, hexdump, live, text
+from ..registry import Action, Panel, Param, Wire, hexdump, live, table, text
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
 
 BAUD_CHOICES = [
@@ -65,16 +65,20 @@ def _send(ctx, payload):
     _listen_if_needed(ctx)
     ctx.mode.write(payload)
     sent = f"{note}Sent {len(payload)} byte(s)."
+    rows = [["→ sent", payload.hex(" "), _printable(payload)]]
     if getattr(ctx.mode, "listening", None) is None:
         # A board with no buffered receive (the Bit Pirate): nothing to show.
-        return text(sent, tone="good")
+        return table(["", "Hex", "Text"], rows, caption=sent)
     time.sleep(REPLY_WAIT)
     reply = ctx.mode.read_available(4096)
     if not reply:
-        return text(sent + f" Nothing came back within {REPLY_WAIT:.1f} s; "
-                    "Check for more replies collects anything slower.", tone="good")
-    return hexdump(reply, caption=f"{sent} Received back {len(reply)} byte(s): "
-                                  f"{_printable(reply)}")
+        return table(["", "Hex", "Text"], rows,
+                     caption=sent + f" Nothing came back within {REPLY_WAIT:.1f} s; "
+                     "Check for more replies collects anything slower.")
+    rows.append(["← received", reply.hex(" "), _printable(reply)])
+    same = " — the same as sent." if reply == payload else "."
+    return table(["", "Hex", "Text"], rows,
+                 caption=f"{sent} Received back {len(reply)} byte(s){same}")
 
 
 def _printable(data: bytes) -> str:

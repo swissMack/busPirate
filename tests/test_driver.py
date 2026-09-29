@@ -649,10 +649,10 @@ def test_sending_sets_the_line_up_first(bp, fake):
 
         fake.written.clear()
         result = panel._send_text(Ctx(), "Hi", True)
-        assert "was not set up" in result["text"]
+        assert "was not set up" in result["caption"]
         assert list(fake.written[:2]) == [0x6A, 0x90]
         fake.written.clear()
-        assert "was not set up" not in panel._send_bytes(Ctx(), b"\x41")["text"]
+        assert "was not set up" not in panel._send_bytes(Ctx(), b"\x41")["caption"]
 
 
 def test_sending_shows_the_reply(bp, fake, monkeypatch):
@@ -667,8 +667,20 @@ def test_sending_shows_the_reply(bp, fake, monkeypatch):
 
         fake.uart_loopback = True
         result = panel._send_text(Ctx(), "Hi", True)
-        assert result["render"] == "hex" and bytes(result["data"]) == b"Hi\r\n"
-        assert "Received back 4 byte(s): Hi.." in result["caption"]
+        # What was sent and what came back, each on its own line.
+        assert result["rows"] == [["→ sent", "48 69 0d 0a", "Hi.."],
+                                  ["← received", "48 69 0d 0a", "Hi.."]]
+        assert "the same as sent" in result["caption"]
+
+        fake.uart_loopback = False
+        fake.uart_rx += b"OK\r\n"  # a device answering differently
+        answered = panel._send_text(Ctx(), "AT", True)
+        assert answered["rows"][1] == ["← received", "4f 4b 0d 0a", "OK.."]
+        assert "the same as sent" not in answered["caption"]
+
+        silent = panel._send_text(Ctx(), "x", False)
+        assert [r[0] for r in silent["rows"]] == ["→ sent"]
+        assert "Nothing came back" in silent["caption"]
 
 
 def test_a_long_message_loops_back_complete(bp, fake, monkeypatch):
@@ -685,7 +697,8 @@ def test_a_long_message_loops_back_complete(bp, fake, monkeypatch):
         fake.uart_loopback = True
         message = "Hello, loopback test!"
         result = panel._send_text(Ctx(), message, True)
-        assert bytes(result["data"]) == message.encode() + b"\r\n"
+        want = (message.encode() + b"\r\n").hex(" ")
+        assert result["rows"][1][1] == want
         headers = [b for b in fake.written if 0x10 <= b <= 0x1F]
         assert headers and max(headers) <= 0x13  # never more than 4 at once
 
