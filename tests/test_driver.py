@@ -622,7 +622,9 @@ def test_uart_stray_received_bytes_are_not_taken_for_replies(bp, fake):
         assert uart.read_available(4096) == b"\x18" * 6
 
 
-def test_listening_sets_the_line_up_first(bp, fake):
+def test_sending_sets_the_line_up_and_listens(bp, fake):
+    # There is no "start listening" button any more: the line is set up
+    # (115200, driven) and listened to before the first send.
     from buspirate.web.panels import uart as panel
 
     with bp.uart() as uart:
@@ -630,16 +632,9 @@ def test_listening_sets_the_line_up_first(bp, fake):
             mode = uart
 
         fake.written.clear()
-        result = panel._listen(Ctx(), True)
-        assert "was not set up" in result["text"]
-        # 115200 baud and a driven pin, before echo is switched on.
-        assert list(fake.written) == [0x6A, 0x90, 0x02]
-
-        fake.written.clear()
-        panel._listen(Ctx(), False)
-        result = panel._listen(Ctx(), True)
-        assert "was not set up" not in result["text"]
-        assert list(fake.written) == [0x03, 0x02]
+        panel._send_text(Ctx(), "Hi", False)
+        assert list(fake.written[:3]) == [0x6A, 0x90, 0x02]
+        assert uart.listening
 
 
 def test_sending_sets_the_line_up_first(bp, fake):
@@ -660,7 +655,7 @@ def test_sending_sets_the_line_up_first(bp, fake):
         assert "was not set up" not in panel._send_bytes(Ctx(), b"\x41")["text"]
 
 
-def test_sending_while_listening_shows_the_reply(bp, fake, monkeypatch):
+def test_sending_shows_the_reply(bp, fake, monkeypatch):
     # On the v4 the loopback worked, but the reply only showed after a
     # separate Read what arrived, which nobody would know to press.
     from buspirate.web.panels import uart as panel
@@ -670,11 +665,36 @@ def test_sending_while_listening_shows_the_reply(bp, fake, monkeypatch):
         class Ctx:
             mode = uart
 
-        quiet = panel._send_text(Ctx(), "Hi", True)
-        assert "Not listening" in quiet["text"]
-
-        panel._listen(Ctx(), True)
-        fake.uart_rx += b"Hi\r\n"  # what the MOSI-MISO loop sends back
+        fake.uart_loopback = True
         result = panel._send_text(Ctx(), "Hi", True)
         assert result["render"] == "hex" and bytes(result["data"]) == b"Hi\r\n"
         assert "Received back 4 byte(s): Hi.." in result["caption"]
+
+
+def test_a_long_message_loops_back_complete(bp, fake, monkeypatch):
+    # On the v4, "Hello" + CR LF came back as just "H": the firmware keeps
+    # only about four received bytes while a write runs. Writing four at a
+    # time while listening keeps the whole message.
+    from buspirate.web.panels import uart as panel
+
+    monkeypatch.setattr(panel, "REPLY_WAIT", 0)
+    with bp.uart() as uart:
+        class Ctx:
+            mode = uart
+
+        fake.uart_loopback = True
+        message = "Hello, loopback test!"
+        result = panel._send_text(Ctx(), message, True)
+        assert bytes(result["data"]) == message.encode() + b"\r\n"
+        headers = [b for b in fake.written if 0x10 <= b <= 0x1F]
+        assert headers and max(headers) <= 0x13  # never more than 4 at once
+
+
+def test_the_uart_panel_has_no_listening_button():
+    from buspirate.web.panels import uart as panel
+
+    names = [a.name for a in panel.PANEL.actions]
+    assert "listen" not in names
+    assert names.index("send_text") < names.index("read") < names.index("monitor")
+    read = next(a for a in panel.PANEL.actions if a.name == "read")
+    assert read.label == "Check for more replies"

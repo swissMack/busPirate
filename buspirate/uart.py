@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from .exceptions import ProtocolError
 from .mode import Mode
 
@@ -15,6 +17,13 @@ CONFIG_BASE = 0x80
 #: How many stray received bytes to set aside while waiting for the ack to
 #: "stop listening" before giving up on ever seeing it.
 MAX_STRAY_BEFORE_ACK = 4096
+
+#: While a bulk write runs the firmware cannot forward what it receives, and
+#: the UART's receive buffer holds about four bytes: send at most this many
+#: at a time while listening, so a reply (or a loopback) is not lost.
+LISTENING_CHUNK = 4
+#: Worst-case bits per character (start, 9 data or 8 + parity, 2 stop).
+_BITS_PER_CHAR = 12
 
 
 class UART(Mode):
@@ -33,6 +42,9 @@ class UART(Mode):
         #: Received bytes that arrived while a command was being sent, kept
         #: for :meth:`read_available` rather than mistaken for a reply.
         self._received = bytearray()
+        #: The line rate, for pacing writes while listening. The firmware
+        #: starts at 300 baud.
+        self._baud_hz = self._BAUDS[self.BAUD_300]
 
     @property
     def listening(self) -> bool:
@@ -83,6 +95,7 @@ class UART(Mode):
             raise ValueError("baud must be one of UART.BAUD_300..BAUD_115200")
         self._set_aside_received()
         self.bp.command_expect_ack(SPEED_BASE | baud)
+        self._baud_hz = self._BAUDS[baud]
 
     def configure(
         self,
@@ -123,9 +136,39 @@ class UART(Mode):
         self._expect_ack("UART manual baud rate")
 
     def write(self, data: bytes) -> None:
-        """Transmit any number of bytes, chunked into bulk writes."""
+        """Transmit any number of bytes, chunked into bulk writes.
+
+        While listening, received bytes interleave with the acks, and the
+        firmware forwards nothing until a write ends; so write a few bytes at
+        a time, wait for them to go out, and set aside whatever came back.
+        """
         self._set_aside_received()
-        self._write_bulk_chunks(data, "UART bulk write")
+        if not self._echoing:
+            self._write_bulk_chunks(data, "UART bulk write")
+            return
+        self._check_active()
+        data = bytes(data)
+        for start in range(0, len(data), LISTENING_CHUNK):
+            chunk = data[start : start + LISTENING_CHUNK]
+            self.bp.write(bytes([self._bulk_header(len(chunk))]) + chunk)
+            self._acks_among_received(1 + len(chunk), "UART bulk write")
+            # Give the bytes time to go out and come back before the next
+            # write stops the firmware forwarding them.
+            time.sleep(len(chunk) * _BITS_PER_CHAR / self._baud_hz + 0.002)
+            self._set_aside_received()
+
+    def _acks_among_received(self, count: int, what: str) -> None:
+        """Read ``count`` acks (0x01), setting aside received bytes between them."""
+        seen = 0
+        for _ in range(count + MAX_STRAY_BEFORE_ACK):
+            byte = self.bp.read(1)
+            if byte == b"\x01":
+                seen += 1
+                if seen == count:
+                    return
+            else:
+                self._received += byte
+        raise ProtocolError(f"{what}: {seen} of {count} acks among the received bytes")
 
     def start_receive(self) -> None:
         """Begin echoing received bytes back over the USB link.
@@ -145,14 +188,7 @@ class UART(Mode):
         if self._echoing:
             # Bytes received just before the firmware saw the command still
             # come first; the ack is the first 0x01 after them.
-            for _ in range(MAX_STRAY_BEFORE_ACK):
-                byte = self.bp.read(1)
-                if byte == b"\x01":
-                    break
-                self._received += byte
-            else:
-                raise ProtocolError("stopping the UART echo: no ack after "
-                                    f"{MAX_STRAY_BEFORE_ACK} received bytes")
+            self._acks_among_received(1, "stopping the UART echo")
         else:
             self._expect_ack("stopping the UART echo")
         self._echoing = False

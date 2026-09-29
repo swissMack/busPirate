@@ -30,8 +30,12 @@ with bp.uart() as uart:
     uart.stop_receive()
 ```
 
-In the dashboard: **Set the line up**, then **Start listening**, then
-**Read what arrived**.
+In the dashboard: **Set the line up**, then **Send text** — what comes back
+within a moment shows up right under it. The dashboard listens the whole
+time it is in UART mode, and sets the line up itself if you send first.
+**Check for more replies** collects slower answers; **Watch the line** is a
+live view for a device that talks on its own, and while it runs nothing can
+be sent.
 
 ## Baud rates
 
@@ -47,16 +51,16 @@ Anything else goes through `set_manual_baudrate()` with a raw BRG divisor.
 | Mostly right, occasional wrong byte | baud rate close but not exact, or a noisy line |
 | Every byte doubled | echo is on at both ends |
 | Correct text, then nothing | the target stopped, or flow control it expects is missing |
-| A stream of the same junk byte (`18` on a v4) with nothing connected | the line was never set up: until **Set the line up** runs, the firmware is at 300 baud with its transmit pin not driving, so a loop or an unconnected RX floats and the noise is received. The dashboard now sets the line up itself when you start listening |
+| A stream of the same junk byte (`18` on a v4) with nothing connected | the line was never set up: until **Set the line up** runs, the firmware is at 300 baud with its transmit pin not driving, so a loop or an unconnected RX floats and the noise is received. The dashboard now sets the line up itself before it listens or sends |
 
 Garbled characters are a speed problem, not a wiring problem: wiring faults
 give you silence, not nonsense.
 
 **A loopback test** (MOSI jumpered to MISO, no target) checks the Bus
-Pirate's own UART: start listening, send `Hi` with CR LF, then read — you get
-`48 69 0d 0a` back. Keep it short: while the firmware is transmitting it
-cannot forward what it receives, and its receive buffer holds only about four
-bytes until the write ends.
+Pirate's own UART: send `Hi` with CR LF and `48 69 0d 0a` comes straight
+back. Any length works: while the firmware transmits it cannot forward what
+it receives, and its receive buffer holds only about four bytes, so the
+dashboard sends four bytes at a time and collects the echo in between.
 
 ## Watching, and the bridge
 

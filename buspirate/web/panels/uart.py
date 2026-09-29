@@ -34,8 +34,10 @@ def _configure(ctx, baud, framing, stop_bits, power):
     ctx.mode.configure_peripherals(power=power)
     ctx.mode.set_baudrate(baud)
     ctx.mode.configure(databits_parity=framing, stop_bits=stop_bits)
+    _listen_if_needed(ctx)
     label = dict((c["value"], c["label"]) for c in BAUD_CHOICES)[baud]
-    return text(f"UART set to {label} baud.", tone="good")
+    return text(f"UART set to {label} baud, and listening: what comes back after "
+                "you send shows up under Send.", tone="good")
 
 
 def _send_text(ctx, message, newline):
@@ -60,22 +62,30 @@ def _send(ctx, payload):
     acknowledge every byte while nothing reached the wire, so set it up.
     """
     note = _set_up_if_needed(ctx)
+    _listen_if_needed(ctx)
     ctx.mode.write(payload)
     sent = f"{note}Sent {len(payload)} byte(s)."
-    if not getattr(ctx.mode, "listening", False):
-        return text(sent + " Not listening, so replies are not collected: "
-                    "start listening to see them.", tone="good")
+    if getattr(ctx.mode, "listening", None) is None:
+        # A board with no buffered receive (the Bit Pirate): nothing to show.
+        return text(sent, tone="good")
     time.sleep(REPLY_WAIT)
     reply = ctx.mode.read_available(4096)
     if not reply:
         return text(sent + f" Nothing came back within {REPLY_WAIT:.1f} s; "
-                    "Read what arrived collects anything slower.", tone="good")
+                    "Check for more replies collects anything slower.", tone="good")
     return hexdump(reply, caption=f"{sent} Received back {len(reply)} byte(s): "
                                   f"{_printable(reply)}")
 
 
 def _printable(data: bytes) -> str:
     return "".join(chr(b) if 32 <= b < 127 else "." for b in data)
+
+
+def _listen_if_needed(ctx) -> None:
+    """Always listen in UART mode: there is no reason not to, and replies
+    only reach the dashboard while the firmware forwards them."""
+    if getattr(ctx.mode, "listening", True) is False:
+        ctx.mode.start_receive()
 
 
 def _set_up_if_needed(ctx) -> str:
@@ -92,31 +102,21 @@ def _set_up_if_needed(ctx) -> str:
             "bits, no parity, 1 stop bit, driven. ")
 
 
-def _listen(ctx, enable):
-    if enable:
-        note = _set_up_if_needed(ctx)
-        ctx.mode.start_receive()
-        return text(
-            note + "Listening. Received bytes appear below — press Read to collect them.",
-            tone="good",
-        )
-    ctx.mode.stop_receive()
-    return text("Stopped listening.")
-
-
 def _read(ctx, max_bytes):
+    _set_up_if_needed(ctx)
+    _listen_if_needed(ctx)
     data = ctx.mode.read_available(max_bytes)
     if not data:
         return text(
-            "Nothing received yet. If you expected traffic, check that MISO is "
-            "on the target's TX pin and that the baud rate matches."
+            "Nothing more has arrived. If you expected a reply, check that MISO "
+            "is on the target's TX pin and that the baud rate matches."
         )
     return hexdump(data, caption=f"{len(data)} byte(s) received — {_printable(data)}")
 
 
 def _monitor(ctx):
     _set_up_if_needed(ctx)
-    ctx.mode.start_receive()
+    ctx.mode.start_receive()  # again, harmlessly: the stream reads from here on
     return live(
         "UART monitor",
         decoder="text",
@@ -180,30 +180,6 @@ PANEL = Panel(
             handler=_configure,
         ),
         Action(
-            name="listen",
-            requires=device_module.CAP_UART_BUFFERED,
-            label="Start or stop listening",
-            help="While listening, the Bus Pirate forwards everything it hears.",
-            params=[Param("enable", "bool", "Listening", default=True)],
-            handler=_listen,
-        ),
-        Action(
-            name="read",
-            requires=device_module.CAP_UART_BUFFERED,
-            label="Read what arrived",
-            params=[Param("max_bytes", "int", "Up to", default=256, minimum=1, maximum=4096)],
-            handler=_read,
-        ),
-        Action(
-            name="monitor",
-            label="Watch the line",
-            recipe=True,
-            stream=True,
-            help="Live view of everything received. Better than Read for "
-            "watching boot messages go by.",
-            handler=_monitor,
-        ),
-        Action(
             name="send_text",
             label="Send text",
             params=[
@@ -217,6 +193,25 @@ PANEL = Panel(
             label="Send raw bytes",
             params=[Param("data", "bytes", "Bytes", default="41 54 0d 0a")],
             handler=_send_bytes,
+        ),
+        Action(
+            name="read",
+            requires=device_module.CAP_UART_BUFFERED,
+            label="Check for more replies",
+            help="Send already shows what comes back within a moment. This "
+            "collects anything slower, or anything the device sent on its own.",
+            params=[Param("max_bytes", "int", "Up to", default=256, minimum=1, maximum=4096)],
+            handler=_read,
+        ),
+        Action(
+            name="monitor",
+            label="Watch the line",
+            recipe=True,
+            stream=True,
+            help="A live view, for a device that talks on its own — boot "
+            "messages, a GPS. While it runs nothing can be sent: press Stop "
+            "first.",
+            handler=_monitor,
         ),
         Action(
             name="bridge",

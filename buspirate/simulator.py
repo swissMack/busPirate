@@ -128,6 +128,8 @@ class FakeSerial:
         self.written = bytearray()  # everything the driver sent, for asserts
         self.pins = 0x00  # last pin state written
         self.uart_rx = bytearray()  # queue bytes here to simulate a talker
+        #: True to jumper MOSI to MISO: everything sent is received back.
+        self.uart_loopback = False
         #: Set True to simulate a target already driving the VPU pin, which
         #: makes a v4 refuse to connect its own pull-up rail.
         self.vextern_powered = False
@@ -557,6 +559,10 @@ class FakeSerial:
             if len(self._in) < 1 + count:
                 return 0
             self._out += b"\x01" + b"\x01" * count
+            if self.uart_loopback:
+                # Like the hardware, the echo only reaches USB after the
+                # write — and the receive buffer keeps about four bytes.
+                self.uart_rx += bytes(self._in[1 : 1 + count][:4])
             return 1 + count
         raise AssertionError(f"unexpected UART command 0x{cmd:02X}")
 
