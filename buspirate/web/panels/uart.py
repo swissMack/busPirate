@@ -40,13 +40,17 @@ def _send_text(ctx, message, newline):
     payload = message.encode("utf-8", "replace")
     if newline:
         payload += b"\r\n"
+    # Without a setup the transmit pin is not driving: the firmware would
+    # acknowledge every byte while nothing reached the wire.
+    note = _set_up_if_needed(ctx)
     ctx.mode.write(payload)
-    return text(f"Sent {len(payload)} byte(s).", tone="good")
+    return text(f"{note}Sent {len(payload)} byte(s).", tone="good")
 
 
 def _send_bytes(ctx, data):
+    note = _set_up_if_needed(ctx)
     ctx.mode.write(data)
-    return text(f"Sent {len(data)} byte(s).", tone="good")
+    return text(f"{note}Sent {len(data)} byte(s).", tone="good")
 
 
 def _set_up_if_needed(ctx) -> str:

@@ -640,3 +640,21 @@ def test_listening_sets_the_line_up_first(bp, fake):
         result = panel._listen(Ctx(), True)
         assert "was not set up" not in result["text"]
         assert list(fake.written) == [0x03, 0x02]
+
+
+def test_sending_sets_the_line_up_first(bp, fake):
+    # After Watch the line stops, UART mode is entered afresh; a send then
+    # went out at 300 baud from a pin that was not driving, yet every byte
+    # was acknowledged.
+    from buspirate.web.panels import uart as panel
+
+    with bp.uart() as uart:
+        class Ctx:
+            mode = uart
+
+        fake.written.clear()
+        result = panel._send_text(Ctx(), "Hi", True)
+        assert "was not set up" in result["text"]
+        assert list(fake.written[:2]) == [0x6A, 0x90]
+        fake.written.clear()
+        assert "was not set up" not in panel._send_bytes(Ctx(), b"\x41")["text"]
