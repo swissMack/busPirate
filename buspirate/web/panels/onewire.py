@@ -75,8 +75,8 @@ def _read_rom(ctx, power, pullups):
 
 
 _BUS = [
-    Param("power", "bool", "Power the target (3.3V + 5V)", default=True),
-    Param("pullups", "bool", "Enable the on-board pull-ups", default=True),
+    Param("power", "bool", "Power the target (3.3V + 5V)", default=False),
+    Param("pullups", "bool", "Enable the on-board pull-ups", default=False),
 ]
 
 PANEL = Panel(
