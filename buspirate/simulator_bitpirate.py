@@ -66,6 +66,14 @@ PULLUP_MESSAGES = {
     ("UART", False): "UART: Pull-ups disabled on RX.",
 }
 
+# Shells/SysInfoShell.h actions; the last, Exit, is the menu's default.
+SYSTEM_ACTIONS = (
+    "  📊 System summary", "  📟 Hardware info", "  📦 Memory",
+    "  📺 Screen", "  🧩 Partitions", "  📁 LittleFS", "  🧰 NVS",
+    "  🌐 Network", "  🐞 Debug", " 🔄 Reboot", " 🔌 Bootloader",
+    " 🚪 Exit",
+)
+
 Question = Tuple[str, str, Callable[[str], None]]
 
 
@@ -96,6 +104,8 @@ class FakeBitPirateSerial:
         self.written = bytearray()
         #: Every command line the firmware ran, in order.
         self.commands: List[str] = []
+        #: Each item picked in the system shell, by its number from 1.
+        self.system_choices: List[int] = []
         self.mode = "HIZ"
         self.configured: set = set()
         self.pullups = False
@@ -189,6 +199,9 @@ class FakeBitPirateSerial:
         if self._state == "mode_number":
             self._mode_number_key(char)
             return
+        if self._state == "system_menu":
+            self._system_key(char)
+            return
         # The command line.
         if char in "\r\n":
             self._println()
@@ -262,6 +275,8 @@ class FakeBitPirateSerial:
             self._mode_change(rest)
         elif root in ("help", "h", "?"):
             self._help()
+        elif root in ("system", "sys"):
+            self._system_menu()
         elif root in ("P", "p"):
             enable = root == "P"
             message = PULLUP_MESSAGES.get((self.mode, enable))
@@ -339,6 +354,68 @@ class FakeBitPirateSerial:
         elif char.isdigit():
             self._answer += char
             self._emit(char)
+
+    # Shells/SysInfoShell.cpp run(): the menu comes round again after every
+    # action but Exit, read by UserInputManager readValidatedChoiceIndex
+    # (digits only, echoed; an empty or invalid answer takes the default).
+    def _system_menu(self) -> None:
+        self._println("\n=== System Shell ===")
+        self._println("Select action:")
+        exit_index = len(SYSTEM_ACTIONS)
+        for number, action in enumerate(SYSTEM_ACTIONS, start=1):
+            mark = "* " if number == exit_index else "  "
+            self._println(f"  [{number}] {mark}{action}")
+        self._emit(f"Enter index (default {exit_index}): ")
+        self._answer = ""
+        self._state = "system_menu"
+
+    def _system_key(self, char: str) -> None:
+        if char.isdigit():
+            self._answer += char
+            self._emit(char)
+            return
+        if char not in "\r\n":
+            return
+        self._println()
+        number, self._answer = self._answer, ""
+        exit_index = len(SYSTEM_ACTIONS)
+        if not number:
+            choice = exit_index
+        elif 1 <= int(number) <= exit_index:
+            choice = int(number)
+        else:
+            self._println("\u274c Invalid choice. Using default.")
+            choice = exit_index
+        self.system_choices.append(choice)
+        if choice == exit_index:
+            self._println("Exiting System Shell...\n")
+            self._state = "prompt"
+            self._prompt()
+            return
+        if choice == 1:
+            self._system_summary()
+        self._system_menu()
+
+    def _system_summary(self) -> None:
+        # Shells/SysInfoShell.cpp cmdSummary.
+        for line in (
+            "\n=== System Summary ===",
+            "Model         : ESP32-S3",
+            "Uptime        : 42 s",
+            "Temperature   : 38.5 \u00b0C",
+            "Screen        : 0 % bright",
+            "Reset reason  : Power-On (1)",
+            "Stack total   : 8 KB",
+            "Heap total    : 320 KB",
+            "PSRAM total   : 8189 KB",
+            "Flash total   : 16384 KB",
+            "Firmware      : version 1.7",
+            "Build date    : Aug  6 2025 14:43:09",
+            "Infrared      : IRremote",
+            "IDF version   : v5.4",
+            "Arduino core  : 3.2.0",
+        ):
+            self._println(line)
 
     def _help(self) -> None:
         # An abbreviation of Shells/HelpShell.cpp: the real list is far longer.

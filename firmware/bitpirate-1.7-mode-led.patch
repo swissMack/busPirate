@@ -1,0 +1,116 @@
+diff --git a/platformio.ini b/platformio.ini
+index dcd4ede..a82713c 100644
+--- a/platformio.ini
++++ b/platformio.ini
+@@ -34,7 +34,7 @@ build_flags =
+   -D CONFIG_CRC16_ENABLED=1 ; 1Wire EEPROM OneWireNg
+   ; -D ENABLE_FASTLED_PROTOCOL_SWITCHES ; Linux users can uncomment this line
+ lib_deps =
+-  fastled/FastLED@^3.3.3
++  fastled/FastLED@3.10.3 ; pinned: newer releases do not build with this source
+   bblanchon/ArduinoJson@^7.3.0
+   paulstoffregen/OneWire@^2.3.8
+   hideakitai/ESP32SPISlave@^0.6.8
+@@ -690,7 +690,7 @@ build_flags =
+   -D DEVICE_S3DEVKIT
+ 
+   ; --- Pin in use ---
+-  -DPROTECTED_PINS="\"3, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 45, 46\""
++  -DPROTECTED_PINS="\"3, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 45, 46, 48\""
+ 
+   ; --- Builtin LED ---
+   -DLED_PIN=48
+diff --git a/src/Shells/HelpShell.cpp b/src/Shells/HelpShell.cpp
+index e4a82fb..fe86229 100644
+--- a/src/Shells/HelpShell.cpp
++++ b/src/Shells/HelpShell.cpp
+@@ -115,6 +115,11 @@ void HelpShell::cmdGeneral() {
+         "P                    - Enable pull-up",
+         "p                    - Disable pull-up",
+         "",
++#if defined(DEVICE_S3DEVKIT) && defined(LED_PIN) && LED_TYPE_RGB
++        "Board LED: off HIZ, blue I2C, green SPI,",
++        "  yellow UART/HDUART, cyan 1WIRE, white other",
++        "",
++#endif
+         "Tip: use 'mode' (or 'm')."
+     };
+ 
+diff --git a/src/States/GlobalState.h b/src/States/GlobalState.h
+index 8e52e1c..7433498 100644
+--- a/src/States/GlobalState.h
++++ b/src/States/GlobalState.h
+@@ -6,13 +6,14 @@
+ #include <sstream>
+ #include "Enums/InfraredProtocolEnum.h"
+ #include "Enums/ModeEnum.h"
++#include "Status/ModeLed.h"
+ #include "Enums/TerminalTypeEnum.h"
+ #include <array>
+ 
+ class GlobalState {
+ private:
+     // Version
+-    static constexpr const char* version = "1.7";
++    static constexpr const char* version = "1.7-led";
+ 
+     //Pin in use
+     std::vector<uint8_t> protectedPins;
+@@ -238,7 +239,7 @@ public:
+ 
+     // Current Mode
+     ModeEnum getCurrentMode() const { return currentMode; }
+-    void setCurrentMode(ModeEnum mode) { currentMode = mode; }
++    void setCurrentMode(ModeEnum mode) { currentMode = mode; showModeLed(mode); }
+ 
+     // Serial Terminal Baud
+     unsigned long getSerialTerminalBaudRate() const { return serialTerminalBaudRate; }
+diff --git a/src/Status/ModeLed.cpp b/src/Status/ModeLed.cpp
+new file mode 100644
+index 0000000..431fa88
+--- /dev/null
++++ b/src/Status/ModeLed.cpp
+@@ -0,0 +1,30 @@
++#include "Status/ModeLed.h"
++
++#include <Arduino.h>
++
++#if defined(DEVICE_S3DEVKIT) && defined(LED_PIN) && LED_TYPE_RGB
++
++// Low on purpose: a WS2812 at full power is blinding on the desk.
++static constexpr uint8_t LEVEL = 24;
++
++void showModeLed(ModeEnum mode) {
++    uint8_t r = 0, g = 0, b = 0;
++    switch (mode) {
++        case ModeEnum::HIZ:
++        case ModeEnum::None:    break;                              // off
++        case ModeEnum::I2C:     b = LEVEL; break;                   // blue
++        case ModeEnum::SPI:     g = LEVEL; break;                   // green
++        case ModeEnum::UART:
++        case ModeEnum::HDUART:  r = LEVEL; g = LEVEL; break;        // yellow
++        case ModeEnum::OneWire: g = LEVEL; b = LEVEL; break;        // cyan
++        default:                r = g = b = LEVEL / 3; break;       // dim white
++    }
++    // The core's own RMT driver, not FastLED: LED mode owns FastLED.
++    rgbLedWrite(LED_PIN, r, g, b);
++}
++
++#else
++
++void showModeLed(ModeEnum) {}
++
++#endif
+diff --git a/src/Status/ModeLed.h b/src/Status/ModeLed.h
+new file mode 100644
+index 0000000..3fa94e8
+--- /dev/null
++++ b/src/Status/ModeLed.h
+@@ -0,0 +1,7 @@
++#pragma once
++
++#include "Enums/ModeEnum.h"
++
++// Shows the current mode on the board's built-in RGB LED (S3 DevKit only).
++// HIZ is dark: every pin released. Does nothing on boards without one.
++void showModeLed(ModeEnum mode);

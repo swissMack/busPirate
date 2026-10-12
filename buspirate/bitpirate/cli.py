@@ -10,7 +10,10 @@ line editor (src/Managers/CommandLineManager.cpp) shape everything here:
 * ``\\r`` and ``\\n`` are each Enter, so a line is sent with ``\\r`` alone —
   ``\\r\\n`` would be a second Enter, answering whatever came next;
 * a command that needs more asks for it as ``Label [default]: ``, and an
-  empty answer takes the default (src/Managers/UserInputManager.cpp).
+  empty answer takes the default (src/Managers/UserInputManager.cpp);
+* a menu lists its items as ``  [N] <label>`` and asks
+  ``Enter index (default N): `` (UserInputManager readValidatedChoiceIndex);
+  again an empty answer takes the default.
 """
 
 from __future__ import annotations
@@ -31,6 +34,8 @@ MAX_QUESTIONS = 16
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _PROMPT = re.compile(r"^([A-Z0-9]*)> $")
 _QUESTION = re.compile(r"^(.*?) \[([^\]]*)\]: $")
+_MENU_ASK = re.compile(r"^Enter index \(default (\d+)\): $")
+_MENU_ITEM = re.compile(r"^\s*\[(\d+)\] (.*)$")
 _SCAN_HIT = re.compile(r"^Found device at 0x([0-9A-Fa-f]+)")
 _HEX_BYTE = re.compile(r"^[0-9A-Fa-f]{2}$")
 
@@ -70,6 +75,21 @@ def parse_scan(lines: List[str]) -> List[int]:
         if hit:
             found.append(int(hit.group(1), 16))
     return found
+
+
+def menu_index(lines: List[str], label: str) -> Optional[str]:
+    """The number of the menu item whose label contains ``label``, if any.
+
+    ``lines`` ends with the menu's question; its items are the
+    ``  [N] <label>`` lines straight above it.
+    """
+    for line in reversed(lines[:-1]):
+        item = _MENU_ITEM.match(line)
+        if not item:
+            break
+        if label in item.group(2):
+            return item.group(1)
+    return None
 
 
 def parse_hex_after(lines: List[str], marker: str) -> bytes:
@@ -128,11 +148,15 @@ class CliTransport:
         line: str,
         answers: Optional[Dict[str, str]] = None,
         timeout: Optional[float] = None,
+        picks: Optional[List[str]] = None,
     ) -> Reply:
         """Run one command line and return its output.
 
         Questions are answered from ``answers`` by their label; any other
-        question gets an empty answer, which takes its default.
+        question gets an empty answer, which takes its default. Menus are
+        answered from ``picks`` in order, each choosing the item whose label
+        contains it. A menu with no pick left, or no item matching, gets an
+        empty answer too: a number is only ever sent for an item seen by name.
         """
         if len(line) >= MAX_LINE:
             raise ValueError(
@@ -141,7 +165,9 @@ class CliTransport:
             )
         self.link.flush_input()
         self.link.write((line + "\r").encode("ascii"))
-        raw, questions = self._read_reply(answers or {}, timeout or self.timeout)
+        raw, questions = self._read_reply(
+            answers or {}, timeout or self.timeout, list(picks or [])
+        )
         lines = screen_lines(raw)
         self.mode = _PROMPT.match(lines.pop()).group(1)
         if lines and lines[0].endswith(line):
@@ -189,8 +215,11 @@ class CliTransport:
 
     # -- reading -----------------------------------------------------------
 
-    def _read_reply(self, answers: Dict[str, str], timeout: float):
-        """Read until the prompt, answering questions on the way."""
+    def _read_reply(
+        self, answers: Dict[str, str], timeout: float, picks: Optional[List[str]] = None
+    ):
+        """Read until the prompt, answering questions and menus on the way."""
+        picks = picks if picks is not None else []
         buffer = bytearray()
         questions: List[str] = []
         answered_line = -1
@@ -211,14 +240,21 @@ class CliTransport:
             if len(lines) > 1 and _PROMPT.match(last):
                 return buffer.decode("utf-8", "replace"), questions
             question = _QUESTION.match(last)
-            if question and len(lines) - 1 > answered_line:
-                label = question.group(1)
+            menu = _MENU_ASK.match(last)
+            if (question or menu) and len(lines) - 1 > answered_line:
+                if question:
+                    label = question.group(1)
+                    answer = answers.get(label, "")
+                else:
+                    label = "Enter index"
+                    wanted = picks.pop(0) if picks else None
+                    answer = (menu_index(lines, wanted) if wanted else None) or ""
                 questions.append(label)
                 if len(questions) > MAX_QUESTIONS:
                     raise CliPromptError(
                         f"the Bit Pirate kept asking questions; the last was {last!r}"
                     )
-                self.link.write((answers.get(label, "") + "\r").encode("ascii"))
+                self.link.write((answer + "\r").encode("ascii"))
                 answered_line = len(lines) - 1
                 deadline = time.monotonic() + timeout
                 continue

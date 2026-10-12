@@ -19,6 +19,8 @@ from .exceptions import ConnectionError
 # and the ESP32-S3's own USB port, which is where the ESP32 Bit Pirate talks.
 KNOWN_ADAPTERS = {
     (0x303A, 0x1001): "Espressif ESP32-S3 USB (ESP32 Bit Pirate)",
+    # What an ESP32-S3-DevKitC-1 N16R8 on firmware v1.7 reported (2026-10-12).
+    (0x303A, 0x1002): "Espressif ESP32-S3 USB (ESP32 Bit Pirate)",
     (0x0403, 0x6001): "FTDI FT232R (Bus Pirate v3)",
     (0x0403, 0x6015): "FTDI FT231X",
     (0x04D8, 0xFB00): "Microchip CDC (Bus Pirate v4)",

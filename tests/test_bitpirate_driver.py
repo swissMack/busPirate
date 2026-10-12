@@ -36,9 +36,12 @@ def bp(fake):
 
 def test_a_board_at_its_prompt_connects_with_one_enter(fake):
     device = make(fake).open()
-    assert fake.written == b"\r"
+    # One Enter reaches the prompt. With no banner mid-session, the version
+    # comes from the system shell: pick its summary, then take the default.
+    assert fake.written == b"\rsystem\r1\r\r"
     assert device.profile.variant == "bitpirate"
-    assert device.profile.firmware is None  # no banner mid-session
+    assert device.profile.firmware == "1.7"
+    assert device.cli.mode == "HIZ"
 
 
 def test_a_freshly_booted_board_is_started_and_its_version_read():
@@ -46,6 +49,28 @@ def test_a_freshly_booted_board_is_started_and_its_version_read():
     device = make(fake).open()
     assert device.profile.firmware == "1.7"
     assert device.profile.describe() == "ESP32 Bit Pirate, firmware 1.7"
+    assert "system" not in fake.commands  # the banner was enough
+
+
+def test_the_system_shell_is_left_by_its_default_and_nothing_else(fake):
+    make(fake).open()
+    # 1 is the summary, 12 is Exit (taken as the default); Reboot (10) and
+    # Bootloader (11) are never chosen.
+    assert fake.system_choices == [1, 12]
+
+
+def test_a_board_without_the_system_shell_still_connects():
+    class NoSystem(FakeBitPirateSerial):
+        def _run(self, line):
+            if line.strip() == "system":
+                self.commands.append("system")
+                self._println("Type 'help' or 'mode'")
+                return
+            super()._run(line)
+
+    device = make(NoSystem()).open()
+    assert device.profile.firmware is None
+    assert device.cli.mode == "HIZ"
 
 
 def test_connecting_never_sends_the_bus_pirate_knock(fake):

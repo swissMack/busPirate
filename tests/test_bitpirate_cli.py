@@ -11,6 +11,7 @@ import pytest
 from buspirate.bitpirate.cli import (
     CliTransport,
     CliTimeout,
+    menu_index,
     parse_hex_after,
     parse_scan,
     screen_lines,
@@ -144,6 +145,42 @@ def test_questions_are_answered_from_the_table_or_take_their_default():
     assert cli.link.serial.written == b"config\r\r\r400000\r"
     assert "I2C configured." in reply.lines
     assert reply.questions == ["SDA GPIO", "SCL GPIO", "Frequency"]
+
+
+MENU = (
+    b"\r\n=== Shell ===\r\nSelect action:\r\n"
+    b"  [1]    \xf0\x9f\x93\x8a System summary\r\n"
+    b"  [2]   \xf0\x9f\x94\x84 Reboot\r\n"
+    b"  [3] * \xf0\x9f\x9a\xaa Exit\r\n"
+    b"Enter index (default 3): "
+)
+
+
+def test_a_menu_item_is_found_by_its_label():
+    lines = screen_lines(MENU.decode("utf-8"))
+    assert menu_index(lines, "System summary") == "1"
+    assert menu_index(lines, "Exit") == "3"
+    assert menu_index(lines, "Nonexistent") is None
+
+
+def test_menus_are_answered_by_label_then_left_by_their_default():
+    cli = transport(
+        [
+            [b"\rHIZ> system\x1b[K" + MENU],
+            [b"1\r\n\r\n=== Summary ===\r\nFirmware : version 1.7" + MENU],
+            [b"\r\nExiting...\n\r\nHIZ> "],
+        ]
+    )
+    reply = cli.command("system", picks=["System summary"])
+    assert cli.link.serial.written == b"system\r1\r\r"
+    assert "Firmware : version 1.7" in reply.lines
+    assert reply.mode == "HIZ"
+
+
+def test_a_pick_that_matches_no_item_sends_no_number():
+    cli = transport([[b"\rHIZ> system\x1b[K" + MENU], [b"\r\nHIZ> "]])
+    cli.command("system", picks=["Factory reset"])
+    assert cli.link.serial.written == b"system\r\r"
 
 
 def test_a_reply_that_never_reaches_a_prompt_times_out_with_what_it_had():
