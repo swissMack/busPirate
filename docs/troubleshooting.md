@@ -235,13 +235,16 @@ report here if they are wrong:
 
 ### ESP32 Bit Pirate (ESP32-S3-DevKitC-1, firmware 1.7)
 
-Nothing here has met a real board yet. The driver follows the firmware's
-source, so check these first, in this order:
+First met a real board on 2026-10-12 (an N16R8 DevKitC-1 clone with ports
+marked USB OTG and USB TTL). Everything not ticked still rests on the
+firmware's source alone, so check these in this order:
 
-- [ ] The USB ID the port reports (Espressif `303A:`, PID not yet known) and
-      that auto-detect picks it
-- [ ] Opening the port does not reset the board; a fresh boot's "Press any
-      key" is answered and the banner's version is read
+- [x] The USB ID the port reports — `303A:1002`, product name "ESP32 Bit
+      Pirate" — and that auto-detect picks it
+- [x] Connecting mid-session reaches `HIZ> ` and reads the version from the
+      `system` shell's summary, leaving it by its default (Exit)
+- [ ] A fresh boot's "Press any key" is answered and the banner's version is
+      read
 - [ ] `m i2c` the first time: the config questions are answered and the
       prompt comes back as `I2C> `
 - [ ] `scan` with nothing on the bus, and with one device

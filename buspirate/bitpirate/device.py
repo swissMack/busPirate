@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
+from dataclasses import replace
 from typing import Dict, Optional
 
 from ..base import SerialLink, TrafficHook
@@ -12,6 +14,8 @@ from ..exceptions import BusPirateError, ModeError
 from .cli import CliTimeout, CliTransport
 
 log = logging.getLogger(__name__)
+
+_RE_SUMMARY_FIRMWARE = re.compile(r"^Firmware\s*:\s*version\s+(\d[\w.\-]*)")
 
 
 class BitPirate(SerialLink):
@@ -67,10 +71,35 @@ class BitPirate(SerialLink):
             raise ModeError(
                 f"{self.port} never showed a Bit Pirate prompt. If the board "
                 "has just been plugged in, give it a few seconds and connect "
-                "again; on a DevKit use the port marked USB, not UART."
+                "again; on a DevKit use the port marked USB or USB OTG, not "
+                "UART or USB TTL."
             ) from exc
         self.profile = parse_bitpirate_banner(banner)
+        if self.profile.firmware is None:
+            firmware = self._firmware_from_system()
+            if firmware:
+                self.profile = replace(self.profile, firmware=firmware)
         return self
+
+    def _firmware_from_system(self) -> Optional[str]:
+        """The version from ``system``'s summary, for a board met past its banner.
+
+        The banner is printed once, on the first key after boot; a board
+        something else has already woken only shows it again after a reset.
+        The system shell's summary has it too, as ``Firmware : version 1.7``
+        (Shells/SysInfoShell.cpp cmdSummary). Its menu is left by its default,
+        Exit — its Reboot and Bootloader items are never chosen.
+        """
+        try:
+            reply = self.cli.command("system", picks=["System summary"])
+        except BusPirateError:
+            log.debug("could not read the firmware version from 'system'", exc_info=True)
+            return None
+        for line in reply.lines:
+            found = _RE_SUMMARY_FIRMWARE.match(line)
+            if found:
+                return found.group(1)
+        return None
 
     def close(self) -> None:
         """Release every pin (``m hiz``) and close the port."""

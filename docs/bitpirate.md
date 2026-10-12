@@ -12,10 +12,12 @@ really do.
 ## Connecting
 
 1. Flash it with the [web flasher](https://geo-tp.github.io/ESP32-Bit-Pirate/webflasher/),
-   choosing the **s3-devkit** build.
-2. Plug in the DevKit's port marked **USB**, not the one marked **UART**. The
-   firmware talks over the ESP32-S3's own USB, and the UART port only carries
-   boot messages.
+   choosing the **s3-devkit** build (**s3-devkit-n16-r8** for a board with
+   16 MB flash and 8 MB PSRAM).
+2. Plug in the DevKit's port marked **USB** (on some boards **USB OTG**), not
+   the one marked **UART** (or **USB TTL**). The firmware talks over the
+   ESP32-S3's own USB, and the UART port only carries boot messages. Flashing
+   works on either port.
 3. Connect as usual. The port shows as *Espressif ESP32 USB (ESP32 Bit
    Pirate)*.
 
@@ -25,6 +27,68 @@ moment and connect again.
 
 To try it without hardware, pick **simulated-bitpirate** from the port list,
 or run `buspirate dashboard --demo --variant bitpirate`.
+
+## The board LED (mode colours)
+
+With the [mode-LED firmware](#installing-the-mode-led-firmware) (version `1.7-led`), the
+DevKit's RGB LED shows which mode the board is in:
+
+| LED | Mode | What it means |
+|-----|------|---------------|
+| off | HiZ | Every pin released; safe to rewire |
+| blue | I2C | SDA 6 / SCL 7 are driven |
+| green | SPI | CS 10 / CLK 12 / MISO 11 / MOSI 13 are driven |
+| yellow | UART or HDUART | RX 17 / TX 18 are in use |
+| cyan | 1-Wire | The 1-Wire pin is in use |
+| dim white | any other mode | Pins in use; see the mode's own help |
+
+The Bit Pirate has no switchable power supply, so there is no V-reg colour:
+its 3V3 pin is live whenever the board has USB power. Stock firmware leaves
+the LED dark after a short Wi-Fi flash at boot (white while trying, then green
+when connected, blue when no network is saved, red when it fails).
+
+### Installing the mode-LED firmware
+
+The LED colours come from a small patch to geo-tp's v1.7 firmware, kept in
+this repo as `firmware/bitpirate-1.7-mode-led.patch`. It changes nothing the
+dashboard relies on; the board reports its version as `1.7-led`. It also
+adds pin 48 (the LED) to the protected pins, and puts the colour key in the
+board's own `help`.
+
+The patch also pins FastLED to 3.10.3: geo-tp's config asks for `^3.3.3`,
+and every FastLED released since no longer builds with this source.
+
+Build it with [PlatformIO](https://platformio.org), then merge the parts
+into one image:
+
+```sh
+git clone --branch v1.7 https://github.com/geo-tp/ESP32-Bit-Pirate.git
+cd ESP32-Bit-Pirate
+git apply /path/to/busPirate/firmware/bitpirate-1.7-mode-led.patch
+pio run -e s3-devkit-n16-r8          # or s3-devkit for an 8 MB board
+B=.pio/build/s3-devkit-n16-r8
+python3 -m esptool --chip esp32s3 merge_bin -o $B/firmware.factory.bin \
+  --flash_mode dio --flash_freq 80m --flash_size 16MB \
+  0x0 $B/bootloader.bin 0x8000 $B/partitions.bin \
+  0xe000 ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin \
+  0x10000 $B/firmware.bin
+```
+
+Flash it without moving the cable: in the board's terminal, type `system`,
+pick **Bootloader** and answer `y`. The board restarts into Espressif's
+flashing mode, and a new `/dev/cu.usbmodem…` port appears:
+
+```sh
+python3 -m esptool --chip esp32s3 --port /dev/cu.usbmodemXXXX \
+  --before no_reset --after hard_reset write_flash 0x0 $B/firmware.factory.bin
+```
+
+On the USB TTL (CH340) port, use the default reset and `--baud 460800`:
+921600 fails there.
+
+To go back to stock, flash the release `.bin` from
+[geo-tp's releases](https://github.com/geo-tp/ESP32-Bit-Pirate/releases/tag/v1.7)
+at `0x0` the same way.
 
 ## How it differs from a Bus Pirate
 

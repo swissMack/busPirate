@@ -8,14 +8,16 @@ from buspirate.simulator import FakeSerial, fake_factory
 from buspirate.simulator_bitpirate import FakeBitPirateSerial
 
 
-def test_an_espressif_port_is_a_bit_pirate_and_hears_nothing_but_enter():
+def test_an_espressif_port_is_a_bit_pirate_and_hears_only_its_command_line():
     fake = FakeBitPirateSerial()
     device = open_device(
-        "/dev/cu.usbmodem1101", usb_id="303A:1001", serial_factory=fake_factory(fake),
+        "/dev/cu.usbmodem1101", usb_id="303A:1002", serial_factory=fake_factory(fake),
         bitpirate_options={"connect_timeout": 0.2},
     )
     assert isinstance(device, BitPirate)
-    assert fake.written == b"\r"
+    # Enter to reach the prompt, then the system shell for the version:
+    # never the Bus Pirate's nulls or reset byte.
+    assert fake.written == b"\rsystem\r1\r\r"
 
 
 def test_a_bus_pirate_port_is_opened_exactly_as_before():

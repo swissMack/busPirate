@@ -192,6 +192,12 @@ a Bit Pirate is connected.
    *ESP32 Bit Pirate*, with the firmware version if it saw the board start.
 4. Pick I2C, SPI or UART and press the big button.
 
+**The board LED.** On the [mode-LED firmware](bitpirate.md#installing-the-mode-led-firmware) the
+DevKit's RGB LED shows the mode: **off** HiZ (pins released, safe to rewire),
+**blue** I2C, **green** SPI, **yellow** UART, **cyan** 1-Wire, **dim white**
+anything else. There is no power-supply colour: the 3V3 pin is always live.
+[The board LED](bitpirate.md#the-board-led-mode-colours) has the details.
+
 A board plugged in a moment ago spends about three seconds choosing its
 terminal before it listens. If connecting fails straight after plugging in,
 wait and connect again.
