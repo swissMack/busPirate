@@ -17,6 +17,8 @@ const state = {
   ledNote: "",
   /** What the last HiZ click said, shown under the button until you move on. */
   hizNote: "",
+  /** "releasing" or "released" for a moment after a HiZ click, else null. */
+  hizFlash: null,
   variant: null,
   variantDetected: null,
   variantSource: "default",
@@ -288,9 +290,12 @@ function hizBox() {
   const note = el("p", { class: "nav__hiz-note", role: "status", text: state.hizNote || "" });
   const button = el("button", { class: "btn nav__hiz-btn" });
   button.addEventListener("click", async () => {
-    button.disabled = true;
-    button.textContent = "Releasing…";
+    if (state.hizFlash) return;
+    const started = Date.now();
+    state.hizFlash = "releasing";
     state.hizNote = "";
+    paintHiz(button);
+    let ok = true;
     try {
       const body = await api("/api/run", {
         method: "POST",
@@ -301,21 +306,40 @@ function hizBox() {
       state.panels = body.panels;
     } catch (error) {
       state.hizNote = error.message;
+      ok = false;
     }
+    // A simulator answers in milliseconds: hold "Releasing…" long enough to
+    // be seen, then confirm with "Released ✓" before settling on HiZ.
+    await sleep(HIZ_RELEASING_MS - (Date.now() - started));
+    state.hizFlash = ok ? "released" : null;
     render();
+    if (!ok) return;
+    await sleep(HIZ_RELEASED_MS);
+    state.hizFlash = null;
+    paintHiz();
   });
   const box = el("div", { class: "nav__hiz" }, button, note);
   paintHiz(button);
   return box;
 }
 
+const HIZ_RELEASING_MS = 600;
+const HIZ_RELEASED_MS = 1500;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+
 /* Called on every status update (an action, the live feed), so the button
    follows the board on whatever page is open. */
 function paintHiz(button = $("nav").querySelector(".nav__hiz-btn")) {
-  if (!button || button.disabled) return;
+  if (!button) return;
   const live = state.status.live || [];
-  button.textContent = live.length ? "Live" : "HiZ";
-  button.classList.toggle("nav__hiz-btn--live", live.length > 0);
+  const flash = state.hizFlash;
+  button.disabled = flash === "releasing";
+  button.classList.toggle("nav__hiz-btn--busy", flash === "releasing");
+  button.classList.toggle("nav__hiz-btn--released", flash === "released");
+  button.classList.toggle("nav__hiz-btn--live", !flash && live.length > 0);
+  if (flash === "releasing") button.textContent = "Releasing…";
+  else if (flash === "released") button.textContent = "Released ✓";
+  else button.textContent = live.length ? "Live" : "HiZ";
   button.title = live.length
     ? `Live: ${live.join(", ")}. Click to release everything.`
     : "In HiZ: every pin released, supplies and pull-ups off.";

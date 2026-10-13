@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "buspirate"
-version = "0.5.2"
+version = "0.5.3"
 description = "Driver and dashboard for the Bus Pirate v3/v4 and the ESP32 Bit Pirate"
 readme = "README.md"
 requires-python = ">=3.8"
