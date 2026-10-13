@@ -68,9 +68,14 @@ def _run_server(server) -> None:
         pass
 
 
+def bound_port(server) -> int:
+    """The port a started server is listening on — the one the OS picked, for 0."""
+    return server.servers[0].sockets[0].getsockname()[1]
+
+
 def start_server(
     host: str = "127.0.0.1",
-    port: int = 8765,
+    port: int = 0,
     use_fake: Optional[bool] = None,
     fake_variant: str = "v3",
 ) -> Tuple[object, threading.Thread]:
@@ -78,6 +83,10 @@ def start_server(
 
     Opening a window before the server answers shows an error page, so this
     does not return until it is up — or says why it never came.
+
+    ``port=0``, the default, lets the OS pick a free port: nobody types the
+    window's address, so it has no reason to claim 8765 and collide with a
+    ``buspirate dashboard`` left running there. Read it with :func:`bound_port`.
     """
     try:
         is_loopback = ipaddress.ip_address(host).is_loopback
@@ -100,6 +109,11 @@ def start_server(
         if server.started:
             return server, thread
         if not thread.is_alive():
+            if not port:
+                raise BusPirateError(
+                    "the dashboard could not start: no free local port was "
+                    "available."
+                )
             raise BusPirateError(
                 f"the dashboard could not start on port {port}. Something else "
                 "is probably using it — a 'buspirate dashboard' left running is "
@@ -133,7 +147,7 @@ def stop_server(server, thread: threading.Thread) -> str:
 
 def run_window(
     host: str = "127.0.0.1",
-    port: int = 8765,
+    port: int = 0,
     use_fake: Optional[bool] = None,
     fake_variant: str = "v3",
 ) -> str:
@@ -157,7 +171,7 @@ def run_window(
         # stop_server is left alone — a bug there must not disappear here.
         webview.create_window(
             "Bus Pirate",
-            f"http://{host}:{port}/",
+            f"http://{host}:{bound_port(server)}/",
             width=1200,
             height=820,
             # pywebview disables selection by default; without this nothing

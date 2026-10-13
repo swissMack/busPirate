@@ -73,7 +73,11 @@ It needs one extra package on top of `[web]`:
 pip install -e '.[app]'
 ```
 
-Takes `--demo`, `--variant` and `--port-number`, the same as `dashboard`.
+Takes `--demo`, `--variant` and `--port-number`, the same as `dashboard`,
+except that the window picks **any free port** unless you pass
+`--port-number`. Nobody types its address, so it never needs 8765, and a
+`buspirate dashboard` left running there cannot stop it opening. Two
+windows can run side by side; only one at a time can hold a real board.
 There is no `--host` or `--no-browser`: the window always binds loopback,
 and there is no browser step to skip. Closing the window shuts down
 cleanly — any running stream is stopped, the board is disconnected, and the

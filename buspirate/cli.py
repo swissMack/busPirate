@@ -81,7 +81,14 @@ def build_parser() -> argparse.ArgumentParser:
     dash.add_argument("--no-browser", action="store_true", help="do not open a browser")
 
     appcmd = sub.add_parser("app", help="open the dashboard in its own window")
-    appcmd.add_argument("--port-number", type=int, default=8765, dest="http_port")
+    appcmd.add_argument(
+        "--port-number",
+        type=int,
+        default=0,
+        dest="http_port",
+        help="default: any free port, so a dashboard already running on 8765 "
+        "does not stop the window opening",
+    )
     appcmd.add_argument(
         "--demo",
         action="store_true",
