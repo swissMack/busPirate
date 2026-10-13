@@ -93,6 +93,7 @@ def _frequency(ctx):
 
 def _pwm(ctx, frequency, duty_cycle):
     ctx.bp.pwm(frequency, duty_cycle / 100.0)
+    ctx.session.pwm_running = True
     return text(
         f"PWM running on AUX at {frequency} Hz, {duty_cycle:.0f}% duty. "
         "It keeps running until you stop it, even after leaving this mode.",
@@ -102,6 +103,7 @@ def _pwm(ctx, frequency, duty_cycle):
 
 def _pwm_clear(ctx):
     ctx.bp.pwm_clear()
+    ctx.session.pwm_running = False
     return text("PWM stopped.")
 
 

@@ -63,7 +63,10 @@ body {
 /* HiZ sits apart from the page tabs, at the foot of the column, so it is in
    the same place on every page. */
 .nav__hiz { margin-top: auto; padding: 12px 16px 4px; border-top: 1px solid var(--line); }
-.nav__hiz-btn { width: 100%; font-weight: 600; }
+.nav__hiz .nav__hiz-btn { width: 100%; font-weight: 600; color: var(--muted); }
+/* Live: something holds the target. Loud on purpose; HiZ is the quiet state. */
+.nav__hiz .nav__hiz-btn--live { background: var(--warn); border-color: var(--warn); color: #17191f; }
+.nav__hiz .nav__hiz-btn--live:hover { border-color: var(--text); }
 .nav__hiz-note { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 .nav__hiz-note:empty { display: none; }
 .pane { overflow-y: auto; overflow-x: hidden; padding: 20px 24px 28px; min-height: 0; min-width: 0; }
@@ -181,7 +184,7 @@ table.data td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line);
   /* The tabs scroll sideways; HiZ stays pinned at the right edge. */
   .nav__hiz { margin: 0 0 0 auto; padding: 4px 12px; border-top: 0; display: flex; align-items: center;
     position: sticky; right: 0; background: var(--bg-raised); border-left: 1px solid var(--line); }
-  .nav__hiz-btn { width: auto; }
+  .nav__hiz .nav__hiz-btn { width: auto; }
   .nav__hiz-note { display: none; }
   .pane { padding: 16px; }
 }

@@ -218,6 +218,14 @@ def test_hiz_stops_a_running_sniffer_and_stays_connected(client):
     assert status(client)["connected"] is True
 
 
+def test_a_running_sniffer_is_live(client):
+    run(client, "i2c", "sniff", power=False, pullups=False, speed=2)
+    wait_for_events(client, at_least=1)
+    assert "I2C sniffer running" in status(client)["live"]
+    run(client, "connection", "hiz")
+    assert status(client)["live"] == []
+
+
 def test_the_bridge_action_asks_before_it_runs(client):
     panels = {p["id"]: p for p in client.get("/api/state").json()["panels"]}
     bridge = next(a for a in panels["uart"]["actions"] if a["name"] == "bridge")

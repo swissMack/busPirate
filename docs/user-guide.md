@@ -44,7 +44,7 @@ yourself how the tool fits together.
 | Erase a flash chip | Dashboard → SPI → **Erase one sector** / **the whole chip** | not reversible |
 | Talk to something odd | Dashboard → Raw wire | [Raw wire](rawwire.md) |
 | Switch the supplies on or off | Dashboard → Pins & power → the **supplies switch** | one click, both supplies |
-| Let go of the target, now | **HiZ**, at the foot of the left column | every pin an input, supplies and pull-ups off, still connected |
+| Let go of the target, now | **HiZ**, at the foot of the left column | every pin an input, supplies and pull-ups off, still connected. It reads **Live**, highlighted, while anything holds the target |
 | Measure a voltage | Dashboard → Pins & power → **Measure a voltage** | [Pins & power](pins-and-power.md) |
 | Drive pins by hand | Dashboard → Pins & power | |
 | Watch a voltage over time | Dashboard → Pins & power → **Watch a voltage** | continuous ADC |
