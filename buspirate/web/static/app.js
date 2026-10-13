@@ -712,8 +712,11 @@ let activeStream = null;
 function streamPane(result) {
   // A console shows the board's replies as text in one <pre>, the way a
   // serial terminal would; a sniffer shows decoded tokens.
+  // The console is also where you type: the board's echo lands in `screen`
+  // and the cursor sits after it, the way a terminal window works.
+  const screen = result.input ? el("span", { class: "stream__screen" }) : null;
   const events = result.input
-    ? el("pre", { class: "stream__console" })
+    ? el("pre", { class: "stream__console" }, screen, el("span", { class: "stream__cursor" }))
     : el("div", { class: "stream__events" });
   const counter = el("span", { class: "muted", text: "waiting for traffic…" });
   const stop = el("button", { class: "btn btn--primary", text: "Stop" });
@@ -736,8 +739,8 @@ function streamPane(result) {
     result.warning ? el("p", { class: "msg msg--warn", text: result.warning }) : null,
     el("div", { class: "stream__bar" }, stop, counter),
     el("p", { class: "caption", text: result.legend || "" }),
-    events,
-    inputRow
+    // The field sits inside the console, unseen: it only catches the keys.
+    inputRow ? el("div", { class: "stream__term" }, events, inputRow) : events
   );
 
   stop.addEventListener("click", async () => {
@@ -753,7 +756,10 @@ function streamPane(result) {
     }
   });
 
-  activeStream = { events, counter, stop, inputRow, console: !!result.input };
+  activeStream = { events, screen, counter, stop, inputRow, console: !!result.input };
+  // Ready to type the moment it opens: no first keys lost to a field that
+  // never had focus.
+  if (inputRow) setTimeout(() => inputRow.querySelector("input").focus(), 0);
   return pane;
 }
 
@@ -773,7 +779,7 @@ function streamPane(result) {
 function consoleInput() {
   const field = el("input", {
     class: "stream__input",
-    placeholder: "Click here and type — each key goes straight to the board",
+    // Hidden inside the console; the console's cursor shows where keys go.
     // The field is the whole interaction surface of the terminal, and a
     // placeholder is not an accessible name.
     "aria-label": "Keys for the board's terminal",
@@ -860,14 +866,14 @@ function consoleInput() {
 
 function pushStreamEvents(message) {
   if (!activeStream) return;
-  const { events, counter } = activeStream;
+  const { events, screen, counter } = activeStream;
   if (activeStream.console) {
     // A backspace from the board takes back the character before it — the
     // firmware answers one with BS, space, BS — but never a line break.
     // A carriage return on its own (the decoder turns CR LF into a newline)
     // goes back to the start of the line: the ESP32 Bit Pirate redraws its
     // whole line that way on every key, so what follows replaces the line.
-    let text = events.textContent;
+    let text = screen.textContent;
     for (const event of message.events) {
       for (const ch of event.text) {
         if (ch === "\r") text = text.slice(0, text.lastIndexOf("\n") + 1);
@@ -877,7 +883,7 @@ function pushStreamEvents(message) {
     }
     // Keep the transcript bounded, trimming whole lines from the top.
     if (text.length > 200000) text = text.slice(text.indexOf("\n", text.length - 150000) + 1);
-    events.textContent = text;
+    screen.textContent = text;
     counter.textContent = "";
     events.scrollTop = events.scrollHeight;
     return;

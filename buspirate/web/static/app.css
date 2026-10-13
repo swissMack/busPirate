@@ -285,13 +285,25 @@ svg .led--flash { fill: var(--led-on); stroke: #eaffe4; stroke-width: 1.5; opaci
 .tok--ack { color: var(--good); border: 0; background: none; padding: 1px 2px; }
 .tok--nack { color: var(--warn); border: 0; background: none; padding: 1px 2px; }
 .tok--value { color: var(--accent); }
+/* The board's terminal: green on black in both themes, like the real thing.
+   You type straight into it; the field that catches the keys is hidden. */
+.stream__term { position: relative; }
 .stream__console {
-  max-height: 360px; overflow-y: auto; background: var(--bg-sunken);
-  border-radius: 7px; padding: 9px 11px; margin: 0; font-family: var(--mono);
-  font-size: 12.5px; white-space: pre-wrap; tab-size: 8; user-select: text;
+  height: 360px; overflow-y: auto; background: #000; color: #33ff66;
+  border: 1px solid #1d3a24; border-radius: 7px; padding: 9px 11px; margin: 0;
+  font-family: var(--mono); font-size: 13px; white-space: pre-wrap; tab-size: 8;
+  user-select: text; cursor: text;
 }
-.stream__inputrow { display: flex; gap: 8px; margin-top: 9px; }
-.stream__input { flex: 1 1 auto; min-width: 0; font-family: var(--mono); }
+.stream__term:focus-within .stream__console { border-color: #33ff66; }
+.stream__console::selection, .stream__console ::selection { background: #33ff66; color: #000; }
+/* A hollow block while the window is elsewhere; solid and blinking while
+   keys go to the board. */
+.stream__cursor { display: inline-block; width: .6em; height: 1.15em; vertical-align: text-bottom;
+  box-shadow: inset 0 0 0 1px #33ff66; }
+.stream__term:focus-within .stream__cursor { background: #33ff66; animation: term-blink 1s steps(1) infinite; }
+@keyframes term-blink { 50% { background: transparent; } }
+.stream__inputrow { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+.stream__input { font-family: var(--mono); }
 
 .card-img--board { max-width: 840px; display: block; margin-bottom: 4px; }
 /* The viewBox is ~1090 units wide but the card renders at ~760px, so the

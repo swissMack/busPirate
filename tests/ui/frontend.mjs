@@ -389,6 +389,11 @@ const termPane = $("panel").querySelector(".stream");
 check("opening the terminal starts a live pane", termPane !== null);
 check("the terminal pane offers an input line",
   termPane && termPane.querySelector(".stream__input") !== null);
+check("the terminal is ready to type into the moment it opens",
+  termPane && window.document.activeElement === termPane.querySelector(".stream__input"));
+check("you type into the console itself: the field is inside it, and it shows a cursor",
+  termPane && termPane.querySelector(".stream__term .stream__input") !== null
+    && termPane.querySelector(".stream__console .stream__cursor") !== null);
 check("Stop is the first control in the pane — nothing else on this panel",
   termPane && termPane.querySelector("button").textContent === "Stop");
 
@@ -674,6 +679,8 @@ check("the Bit Pirate's line redraw shows as one clean line",
 check("mode on its own shows the numbered menu",
   consoleText().includes("Select mode:") && consoleText().trimEnd().endsWith("Mode Number >"),
   JSON.stringify(consoleText().slice(-80)));
+check("the console scrolls to its end, where the cursor is",
+  $("panel").querySelector(".stream__console").lastElementChild.classList.contains("stream__cursor"));
 typeKeys(bitLine, "2");
 enter(bitLine);
 await settle(900);

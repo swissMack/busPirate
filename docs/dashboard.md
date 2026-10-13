@@ -268,7 +268,9 @@ whichever panel sent them. The board also has its own **text terminal**,
 the `HiZ>` prompt with `?`, `i`, `v`, `m`, `W`, `~` — the same console you'd
 get talking to it over `screen` or a serial monitor. That is a **console**,
 not a log: you type commands and read the board's own replies. The
-**Terminal** panel's **Open the board's terminal** gets you there.
+**Terminal** panel's **Open the board's terminal** gets you there. It opens
+green on black, ready to type into: every key goes straight to the board, and
+what you type appears at the cursor through the board's own echo.
 
 The board can only be in one personality at a time, so opening the terminal
 **leaves binary mode**, and that **resets the board — a v3 and a v4 alike**:

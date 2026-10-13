@@ -147,6 +147,11 @@ class ConsoleDecoder(Decoder):
                 if len(self._escape) == 2 and b != 0x5B:
                     self._escape = b""
                 elif len(self._escape) > 2 and 0x40 <= b <= 0x7E:
+                    # Cursor left is how the ESP32 Bit Pirate rubs out a
+                    # character (ESC[D, space, ESC[D): pass it on as a
+                    # backspace, which the pane applies.
+                    if self._escape == b"\x1b[D":
+                        out.append("\b")
                     self._escape = b""
                 elif len(self._escape) > 16:
                     self._escape = b""

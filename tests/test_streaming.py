@@ -94,6 +94,14 @@ def test_console_decoder_keeps_a_bare_carriage_return_for_the_pane():
     assert text == "\rHIZ> m\rHIZ> mo\nOK"
 
 
+def test_console_decoder_turns_cursor_left_into_a_backspace():
+    # A real Bit Pirate (firmware 1.7) rubs out a key with ESC[D, space,
+    # ESC[D — measured 2026-10-13. Dropped, Backspace left a space behind.
+    decoder = make_decoder("console")
+    text = "".join(e["text"] for e in decoder.feed(b"hel\x1b[D \x1b[D"))
+    assert text == "hel\b \b"
+
+
 def test_console_decoder_holds_a_trailing_cr_until_it_knows_what_follows():
     decoder = make_decoder("console")
     first = "".join(e["text"] for e in decoder.feed(b"line\r"))
@@ -104,7 +112,7 @@ def test_console_decoder_holds_a_trailing_cr_until_it_knows_what_follows():
 def test_console_decoder_drops_escape_sequences_even_split_across_reads():
     decoder = make_decoder("console")
     text = "".join(
-        e["text"] for chunk in (b"ab\x1b", b"[", b"K", b"c\x1b[D\x1b[2Jd") for e in decoder.feed(chunk)
+        e["text"] for chunk in (b"ab\x1b", b"[", b"K", b"c\x1b[C\x1b[2Jd") for e in decoder.feed(chunk)
     )
     assert text == "abcd"
 
