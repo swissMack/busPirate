@@ -209,6 +209,15 @@ def test_disconnecting_stops_a_running_sniffer(client):
     assert status(client)["connected"] is False
 
 
+def test_hiz_stops_a_running_sniffer_and_stays_connected(client):
+    run(client, "i2c", "sniff", power=False, pullups=False, speed=2)
+    wait_for_events(client, at_least=1)
+    code, body = run(client, "connection", "hiz")
+    assert code == 200, body
+    assert status(client)["stream"] is None
+    assert status(client)["connected"] is True
+
+
 def test_the_bridge_action_asks_before_it_runs(client):
     panels = {p["id"]: p for p in client.get("/api/state").json()["panels"]}
     bridge = next(a for a in panels["uart"]["actions"] if a["name"] == "bridge")

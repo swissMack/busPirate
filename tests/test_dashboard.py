@@ -202,6 +202,66 @@ def test_open_terminal_is_not_hidden(client):
     assert action["hidden"] is False
 
 
+# -- HiZ: release everything, stay connected --------------------------------
+
+
+def hiz_action(body):
+    panels = {p["id"]: p for p in body["panels"]}
+    return next(a for a in panels["connection"]["actions"] if a["name"] == "hiz")
+
+
+def test_hiz_is_an_action_the_sidebar_draws_not_the_form(client):
+    action = hiz_action(connect(client))
+    assert action["label"] == "HiZ"
+    assert action["hidden"] is True
+    assert action["allow_while_streaming"] is True
+
+
+def test_hiz_releases_every_pin_and_stays_connected(client):
+    connect(client)
+    run(client, "pins", "supplies", on=True)
+    run(client, "pins", "set_pins", pullups=True, aux=True,
+        mosi=True, clk=True, miso=True, cs=True)
+    fake = client.app.state.session.bp.serial
+    fake.directions = 0x00  # as if a script had made every pin an output
+    status, body = run(client, "connection", "hiz")
+    assert status == 200, body
+    assert "HiZ" in body["result"]["text"]
+    assert fake.pins == 0x00  # supplies, pull-ups and every pin off
+    assert fake.directions == 0x1F  # and every pin an input
+    state = client.get("/api/state").json()["status"]
+    assert state["connected"] is True
+    assert state["mode"] is None
+    assert state["supplies"] is False
+
+
+def test_hiz_leaves_a_protocol_mode(client):
+    connect(client)
+    run(client, "i2c", "scan", power=True, pullups=True, speed=2)
+    status, body = run(client, "connection", "hiz")
+    assert status == 200, body
+    state = client.get("/api/state").json()["status"]
+    assert state["mode"] is None
+    assert state["supplies"] is False
+
+
+def test_hiz_stops_pwm(client):
+    connect(client)
+    if "pwm" not in client.get("/api/state").json()["status"]["capabilities"]:
+        pytest.skip("no PWM on this board")
+    run(client, "pins", "pwm", frequency=1000, duty_cycle=50)
+    fake = client.app.state.session.bp.serial
+    assert fake.pwm_running
+    run(client, "connection", "hiz")
+    assert not fake.pwm_running
+
+
+def test_hiz_before_connecting_explains_itself(client):
+    status, body = run(client, "connection", "hiz")
+    assert status == 400
+    assert "not connected" in body["error"]
+
+
 # -- the panels do what they say ------------------------------------------
 
 

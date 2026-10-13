@@ -44,6 +44,7 @@ yourself how the tool fits together.
 | Erase a flash chip | Dashboard → SPI → **Erase one sector** / **the whole chip** | not reversible |
 | Talk to something odd | Dashboard → Raw wire | [Raw wire](rawwire.md) |
 | Switch the supplies on or off | Dashboard → Pins & power → the **supplies switch** | one click, both supplies |
+| Let go of the target, now | **HiZ**, at the foot of the left column | every pin an input, supplies and pull-ups off, still connected |
 | Measure a voltage | Dashboard → Pins & power → **Measure a voltage** | [Pins & power](pins-and-power.md) |
 | Drive pins by hand | Dashboard → Pins & power | |
 | Watch a voltage over time | Dashboard → Pins & power → **Watch a voltage** | continuous ADC |
@@ -225,7 +226,7 @@ No hardware? Pick `simulated-bitpirate` from the port list, or run
 | Send text or bytes down a serial line | UART → **Send text** / **Send raw bytes** | |
 | Get the board's own `HIZ>` prompt | Terminal → **Open the board's terminal** | nothing resets; `help` lists commands |
 | Check what is connected | Connection → **What is this device?** | |
-| Leave it safe | Connection → **Disconnect** | puts it back in HiZ, every pin released |
+| Leave it safe | **HiZ** in the left column, or Connection → **Disconnect** | both put it back in HiZ; Disconnect also releases the port |
 | Anything else | its own prompt | see [What only its own prompt can do](#what-only-its-own-prompt-can-do) |
 
 **Not in the dashboard for this board:**

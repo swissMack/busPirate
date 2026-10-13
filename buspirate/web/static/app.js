@@ -15,6 +15,8 @@ const state = {
   boardCaveat: "",
   boardPinNotes: {},
   ledNote: "",
+  /** What the last HiZ click said, shown under the button until you move on. */
+  hizNote: "",
   variant: null,
   variantDetected: null,
   variantSource: "default",
@@ -259,6 +261,7 @@ function renderNav() {
         onclick: () => {
           state.current = panel.id;
           state.guide.open = false;
+          state.hizNote = "";
           localStorage.setItem("bp.panel", panel.id);
           render();
         },
@@ -268,8 +271,40 @@ function renderNav() {
       text: "Guide",
       "aria-current": state.guide.open ? "true" : "false",
       onclick: () => openGuide(panelDoc() || "user-guide"),
-    })
+    }),
+    // replaceChildren() would print a null as the text "null".
+    ...(state.status.connected ? [hizBox()] : [])
   );
+}
+
+/* HiZ: one click, from any page, to let go of the target — every pin an
+   input, supplies and pull-ups off, anything running stopped — while staying
+   connected. Never disabled while something streams: that is when it is
+   most wanted. */
+function hizBox() {
+  const note = el("p", { class: "nav__hiz-note", role: "status", text: state.hizNote || "" });
+  const button = el("button", {
+    class: "btn nav__hiz-btn",
+    text: "HiZ",
+    title: "Release everything: every pin an input, supplies and pull-ups off. Stays connected.",
+  });
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const body = await api("/api/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ panel: "connection", action: "hiz", params: {} }),
+      });
+      state.status = body.status;
+      state.panels = body.panels;
+      state.hizNote = "Released — supplies and pull-ups off.";
+    } catch (error) {
+      state.hizNote = error.message;
+    }
+    render();
+  });
+  return el("div", { class: "nav__hiz" }, button, note);
 }
 
 function panelDoc() {

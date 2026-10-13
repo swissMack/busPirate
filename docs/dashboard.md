@@ -137,6 +137,9 @@ triggers a macOS privacy consent prompt.
 │   UART     │  │ ☑Power ☑Pull-ups [100kHz]  │ │
 │   1-Wire   │  │ 0x50 EEPROM   0x68 RTC     │ │
 │   Pins     │  └────────────────────────────┘ │
+│   Guide    │                                 │
+│ ────────── │                                 │
+│ [  HiZ   ] │                                 │
 ├────────────┴─────────────────────────────────┤
 │ 11:39:13 -> 02   <- 01   -> 10 a0   <- 01 00 │
 └──────────────────────────────────────────────┘
@@ -152,6 +155,12 @@ triggers a macOS privacy consent prompt.
   translate in your head.
 - **Guide** — the whole user guide is in the sidebar, and every panel links to
   its own page.
+- **HiZ** — at the foot of the left column on every page, once a board is
+  connected. One click lets go of the target: it stops anything running,
+  leaves the protocol mode, makes every pin an input and switches the supplies
+  and pull-ups off, then stays connected. On a Bit Pirate it is `m hiz`. It
+  works while a stream runs, which is when you want it most. **Disconnect**
+  does all that and releases the port as well.
 - **Traffic log** — every byte in both directions, live. `->` is what the Mac
   sent, `<-` what the Bus Pirate replied. This is the fastest way to tell a
   wiring fault from a protocol one.
@@ -230,7 +239,7 @@ what it means — an AD595 thermocouple amplifier's 0.37 V as 36.9 °C. See
 Sniffers, the UART monitor and the voltage monitor **take the port over** and
 stream until you press **Stop**. While one runs, every other action is
 refused with a message saying so — a serial port cannot be shared. Connect
-and Disconnect still work, and both stop the stream first.
+HiZ and Disconnect still work, and all three stop the stream first.
 
 Events are decoded as they arrive and batched to ten updates a second, so a
 busy bus cannot bury the browser. The counter shows the true total.

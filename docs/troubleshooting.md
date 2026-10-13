@@ -232,6 +232,12 @@ report here if they are wrong:
       (firmware v6.1+), and its `read` sub-command (`0x03`) replies with the
       pin state, 0 or 1. Taken from the firmware source; on a v4 the same
       command hangs the board — see [Bus Pirate v4](bus-pirate-v4.md)
+- [ ] The **HiZ** button, on the v3, the v4 and the Bit Pirate: after driving
+      pins from Pins & power and after an I2C scan with the supplies on, every
+      pin should measure floating, the supplies 0 V and VREG dark, with the
+      board still connected. The release follows the v3 firmware's own
+      `binReset()` (directions to input, then states off) and is checked on
+      the simulator only. Also check PWM on AUX stops.
 
 ### ESP32 Bit Pirate (ESP32-S3-DevKitC-1, firmware 1.7)
 

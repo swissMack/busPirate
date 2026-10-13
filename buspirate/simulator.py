@@ -127,6 +127,11 @@ class FakeSerial:
         self.state = "term"
         self.written = bytearray()  # everything the driver sent, for asserts
         self.pins = 0x00  # last pin state written
+        #: Last pin directions written, low five bits: 1 = input. A board
+        #: starts in binary mode with every pin an input.
+        self.directions = 0x1F
+        #: Whether PWM is running on AUX: it survives leaving a mode.
+        self.pwm_running = False
         self.uart_rx = bytearray()  # queue bytes here to simulate a talker
         #: True to jumper MOSI to MISO: everything sent is received back.
         self.uart_loopback = False
@@ -336,9 +341,11 @@ class FakeSerial:
             if len(self._in) < 6:
                 return 0
             self._out += b"\x01"
+            self.pwm_running = True
             return 6
         elif cmd == 0x13:
             self._out += b"\x01"
+            self.pwm_running = False
         elif cmd == 0x14:  # voltage probe
             self._out += int(self.voltage_counts).to_bytes(2, "big")
         elif cmd == 0x15:  # continuous voltage
@@ -346,6 +353,7 @@ class FakeSerial:
         elif cmd == 0x16:  # frequency
             self._out += int(self.frequency).to_bytes(4, "big")
         elif 0x40 <= cmd <= 0x5F:  # pin directions
+            self.directions = cmd & 0x1F
             self._out += bytes([self.pins])
         elif 0x80 <= cmd <= 0xFF:  # pin states
             self.pins = cmd & 0x7F
