@@ -52,4 +52,6 @@ __all__ = [
     "resolve",
 ]
 
-__version__ = "0.2.0"
+# The one place the version lives: pyproject.toml reads it from here, the
+# app build reads it from here, and the dashboard shows it in its top bar.
+__version__ = "0.5.6"

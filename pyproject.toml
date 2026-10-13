@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "buspirate"
-version = "0.5.5"
+dynamic = ["version"]
 description = "Driver and dashboard for the Bus Pirate v3/v4 and the ESP32 Bit Pirate"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -20,6 +20,9 @@ buspirate = "buspirate.cli:main"
 
 [tool.setuptools]
 packages = ["buspirate", "buspirate.bitpirate", "buspirate.devices", "buspirate.web", "buspirate.web.panels"]
+
+[tool.setuptools.dynamic]
+version = {attr = "buspirate.__version__"}
 
 [tool.setuptools.package-data]
 "buspirate.web" = ["static/*"]

@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .. import __version__
 from ..exceptions import BusPirateError
 from . import docs as docs_module
 from .params import ParamError, coerce_all
@@ -113,6 +114,7 @@ def create_app(
             if signal in SIGNAL_NOTES and signal not in cable_signals
         }
         return {
+            "version": __version__,
             "status": session.status(),
             "panels": _panels_json(),
             "traffic": list(session.traffic),

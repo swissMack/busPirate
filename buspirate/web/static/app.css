@@ -40,6 +40,7 @@ body {
 }
 .brand { font-family: var(--mono); letter-spacing: -0.4px; }
 .brand b { color: var(--accent); }
+.brand__version { color: var(--muted); font-size: 11px; letter-spacing: 0; }
 .spacer { flex: 1; }
 .status { display: flex; align-items: center; gap: 8px; font-size: 13px;
   font-family: var(--mono); padding-right: 2px; text-align: right; }

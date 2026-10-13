@@ -99,6 +99,7 @@ async function reloadBoard() {
 /* Everything /api/state describes except the traffic backlog, which is only
    replayed once, on first load. */
 function applyState(data) {
+  $("app-version").textContent = data.version ? `v${data.version}` : "";
   state.status = data.status;
   state.panels = data.panels;
   state.cable = data.cable || [];

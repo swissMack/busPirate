@@ -1236,3 +1236,25 @@ def test_measuring_with_the_supplies_off_says_so(client):
     run(client, "pins", "supplies", on=True)
     _, body = run(client, "pins", "voltage", translate="none")
     assert "The supplies are off" not in body["result"]["caption"]
+
+
+def test_the_state_carries_the_app_version_for_the_top_bar():
+    import buspirate
+
+    app = create_app(use_fake=True)
+    with fastapi_testclient.TestClient(app) as c:
+        assert c.get("/api/state").json()["version"] == buspirate.__version__
+
+
+def test_the_version_lives_in_one_place():
+    # pyproject.toml and bin/build-dmg.sh both read buspirate.__version__; a
+    # second copy is how the code said 0.2.0 while the app was 0.5.5.
+    import os
+    import re
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "pyproject.toml")) as f:
+        pyproject = f.read()
+    assert 'dynamic = ["version"]' in pyproject
+    assert re.search(r"^version\s*=\s*\"", pyproject, re.M) is None
+    assert 'attr = "buspirate.__version__"' in pyproject

@@ -28,10 +28,11 @@ BUILD_VENV="$REPO/build/dmg-venv"
 DIST="$REPO/dist"
 APP="$DIST/BusPirate.app"
 
-# The version is pyproject.toml's, never a second copy to keep in step.
-VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' pyproject.toml | head -1)"
+# The version is buspirate/__init__.py's, never a second copy to keep in step
+# (pyproject.toml reads it from there too).
+VERSION="$(sed -n 's/^__version__ *= *"\(.*\)"/\1/p' buspirate/__init__.py | head -1)"
 if [ -z "$VERSION" ]; then
-  echo "could not read version from pyproject.toml" >&2
+  echo "could not read __version__ from buspirate/__init__.py" >&2
   exit 1
 fi
 DMG="$DIST/BusPirate-$VERSION-arm64.dmg"

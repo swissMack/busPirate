@@ -292,6 +292,7 @@ check("the switch can turn the supplies on", saysOn() && vregLit(), switchButton
 // highlighted, while something holds the target; "HiZ" once released.
 const hizButton = () => $("nav").querySelector(".nav__hiz-btn");
 const isLive = () => hizButton().classList.contains("nav__hiz-btn--live");
+check("the top bar shows the app version", /^v\d+\.\d+\.\d+$/.test($("app-version").textContent), $("app-version").textContent);
 check("the HiZ button is in the left column once connected", !!hizButton());
 check("HiZ sits straight under the Connection tab",
   hizButton().closest(".nav__hiz").previousElementSibling?.textContent === "Connection",
