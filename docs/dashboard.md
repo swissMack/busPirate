@@ -132,14 +132,13 @@ triggers a macOS privacy consent prompt.
 │ busPirate   [recipes…]    ● SIMULATED v3 · i2c│
 ├────────────┬─────────────────────────────────┤
 │ Connection │  I2C                            │
-│ ▸ I2C      │  Wiring: CLK→SCL  MOSI→SDA …    │
-│   SPI      │  ┌ Scan the bus ──────────────┐ │
-│   UART     │  │ ☑Power ☑Pull-ups [100kHz]  │ │
-│   1-Wire   │  │ 0x50 EEPROM   0x68 RTC     │ │
-│   Pins     │  └────────────────────────────┘ │
+│  [ HiZ  ]  │  Wiring: CLK→SCL  MOSI→SDA …    │
+│ ▸ I2C      │  ┌ Scan the bus ──────────────┐ │
+│   SPI      │  │ ☑Power ☑Pull-ups [100kHz]  │ │
+│   UART     │  │ 0x50 EEPROM   0x68 RTC     │ │
+│   1-Wire   │  └────────────────────────────┘ │
+│   Pins     │                                 │
 │   Guide    │                                 │
-│ ────────── │                                 │
-│ [  HiZ   ] │                                 │
 ├────────────┴─────────────────────────────────┤
 │ 11:39:13 -> 02   <- 01   -> 10 a0   <- 01 00 │
 └──────────────────────────────────────────────┘
@@ -155,7 +154,7 @@ triggers a macOS privacy consent prompt.
   translate in your head.
 - **Guide** — the whole user guide is in the sidebar, and every panel links to
   its own page.
-- **HiZ** — at the foot of the left column on every page, once a board is
+- **HiZ** — under **Connection** in the left column on every page, once a board is
   connected. One click lets go of the target: it stops anything running,
   leaves the protocol mode, makes every pin an input and switches the supplies
   and pull-ups off, then stays connected. On a Bit Pirate it is `m hiz`. It

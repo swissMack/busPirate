@@ -257,7 +257,7 @@ function renderUsb(usb) {
 function renderNav() {
   const nav = $("nav");
   nav.replaceChildren(
-    ...state.panels.map((panel) =>
+    ...state.panels.flatMap((panel) => [
       el("button", {
         text: panel.title,
         "aria-current": panel.id === state.current ? "true" : "false",
@@ -268,15 +268,16 @@ function renderNav() {
           localStorage.setItem("bp.panel", panel.id);
           render();
         },
-      })
-    ),
+      }),
+      // HiZ sits straight under Connection, where connecting happens.
+      // replaceChildren() would print a null as the text "null".
+      ...(panel.id === "connection" && state.status.connected ? [hizBox()] : []),
+    ]),
     el("button", {
       text: "Guide",
       "aria-current": state.guide.open ? "true" : "false",
       onclick: () => openGuide(panelDoc() || "user-guide"),
-    }),
-    // replaceChildren() would print a null as the text "null".
-    ...(state.status.connected ? [hizBox()] : [])
+    })
   );
 }
 

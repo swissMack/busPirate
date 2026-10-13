@@ -287,13 +287,15 @@ if (!saysOn()) {
 }
 check("the switch can turn the supplies on", saysOn() && vregLit(), switchButton().textContent);
 
-// HiZ, at the foot of the left column on every page: one click lets go of
+// HiZ, under Connection in the left column on every page: one click lets go of
 // the target and stays connected. The button is also the indicator: "Live",
 // highlighted, while something holds the target; "HiZ" once released.
 const hizButton = () => $("nav").querySelector(".nav__hiz-btn");
 const isLive = () => hizButton().classList.contains("nav__hiz-btn--live");
 check("the HiZ button is in the left column once connected", !!hizButton());
-check("HiZ is the last thing in the column", $("nav").lastElementChild.contains(hizButton()));
+check("HiZ sits straight under the Connection tab",
+  hizButton().closest(".nav__hiz").previousElementSibling?.textContent === "Connection",
+  hizButton().closest(".nav__hiz").previousElementSibling?.textContent);
 check("with the supplies on, the button reads Live and is highlighted",
   hizButton().textContent === "Live" && isLive(), hizButton().textContent);
 check("its tooltip says what is live", /supplies on/.test(hizButton().title), hizButton().title);
