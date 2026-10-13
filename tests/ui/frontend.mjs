@@ -299,7 +299,14 @@ check("with the supplies on, the button reads Live and is highlighted",
 check("its tooltip says what is live", /supplies on/.test(hizButton().title), hizButton().title);
 hizButton().click();
 check("the click shows at once", hizButton().textContent === "Releasing…", hizButton().textContent);
+await settle(300);
+check("Releasing… is held long enough to be seen, even on a fast board",
+  hizButton().textContent === "Releasing…", hizButton().textContent);
 await settle(600);
+check("then it confirms, filled green",
+  hizButton().textContent === "Released ✓" && hizButton().classList.contains("nav__hiz-btn--released"),
+  hizButton().textContent);
+await settle(1600);
 check("HiZ switches the supplies off, and the switch and VREG follow", saysOff() && !vregLit(),
   switchButton().textContent);
 check("released, the button reads HiZ and is not highlighted",

@@ -17,6 +17,7 @@
   :root:not([data-theme="dark"]) {
     --bg: #f4f5f8; --bg-raised: #ffffff; --bg-sunken: #eceef3;
     --line: #d7dae3; --text: #1b1f28; --muted: #626a7d; --accent: #b3740a;
+    --good: #1f8a54;
   }
 }
 * { box-sizing: border-box; }
@@ -63,7 +64,11 @@ body {
 /* HiZ sits apart from the page tabs, at the foot of the column, so it is in
    the same place on every page. */
 .nav__hiz { margin-top: auto; padding: 12px 16px 4px; border-top: 1px solid var(--line); }
-.nav__hiz .nav__hiz-btn { width: 100%; font-weight: 600; color: var(--muted); }
+/* HiZ, at rest: a calm green outline — the target is safe. */
+.nav__hiz .nav__hiz-btn { width: 100%; font-weight: 600; color: var(--good); border-color: var(--good); }
+/* The two moments after a click, held long enough to be seen. */
+.nav__hiz .nav__hiz-btn--busy { color: var(--muted); border-color: var(--line); }
+.nav__hiz .nav__hiz-btn--released { background: var(--good); border-color: var(--good); color: var(--bg-raised); }
 /* Live: something holds the target. Loud on purpose; HiZ is the quiet state. */
 .nav__hiz .nav__hiz-btn--live { background: var(--warn); border-color: var(--warn); color: #17191f; }
 .nav__hiz .nav__hiz-btn--live:hover { border-color: var(--text); }
