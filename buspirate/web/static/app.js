@@ -131,6 +131,7 @@ function render() {
 }
 
 function renderStatus() {
+  paintHiz();
   const box = $("status");
   const s = state.status;
   box.className =
@@ -279,17 +280,17 @@ function renderNav() {
 
 /* HiZ: one click, from any page, to let go of the target — every pin an
    input, supplies and pull-ups off, anything running stopped — while staying
-   connected. Never disabled while something streams: that is when it is
-   most wanted. */
+   connected. The button is also the indicator: it reads "HiZ" while nothing
+   holds the target, and "Live", highlighted, while something does (the
+   server's status.live says what; the tooltip repeats it). Never disabled
+   while something streams: that is when it is most wanted. */
 function hizBox() {
   const note = el("p", { class: "nav__hiz-note", role: "status", text: state.hizNote || "" });
-  const button = el("button", {
-    class: "btn nav__hiz-btn",
-    text: "HiZ",
-    title: "Release everything: every pin an input, supplies and pull-ups off. Stays connected.",
-  });
+  const button = el("button", { class: "btn nav__hiz-btn" });
   button.addEventListener("click", async () => {
     button.disabled = true;
+    button.textContent = "Releasing…";
+    state.hizNote = "";
     try {
       const body = await api("/api/run", {
         method: "POST",
@@ -298,13 +299,26 @@ function hizBox() {
       });
       state.status = body.status;
       state.panels = body.panels;
-      state.hizNote = "Released — supplies and pull-ups off.";
     } catch (error) {
       state.hizNote = error.message;
     }
     render();
   });
-  return el("div", { class: "nav__hiz" }, button, note);
+  const box = el("div", { class: "nav__hiz" }, button, note);
+  paintHiz(button);
+  return box;
+}
+
+/* Called on every status update (an action, the live feed), so the button
+   follows the board on whatever page is open. */
+function paintHiz(button = $("nav").querySelector(".nav__hiz-btn")) {
+  if (!button || button.disabled) return;
+  const live = state.status.live || [];
+  button.textContent = live.length ? "Live" : "HiZ";
+  button.classList.toggle("nav__hiz-btn--live", live.length > 0);
+  button.title = live.length
+    ? `Live: ${live.join(", ")}. Click to release everything.`
+    : "In HiZ: every pin released, supplies and pull-ups off.";
 }
 
 function panelDoc() {

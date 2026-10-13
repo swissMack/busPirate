@@ -208,6 +208,15 @@ def test_hiz_puts_it_in_hiz_and_stays_connected(client):
     assert fake.mode == "I2C"
 
 
+def test_live_follows_its_mode(client):
+    connect(client)
+    assert client.get("/api/state").json()["status"]["live"] == []
+    run(client, "i2c", "scan", pullups=True, speed=2)
+    assert client.get("/api/state").json()["status"]["live"] == ["I2C mode", "pull-ups on"]
+    run(client, "connection", "hiz")
+    assert client.get("/api/state").json()["status"]["live"] == []
+
+
 def test_disconnect_leaves_it_in_hiz(client):
     connect(client)
     run(client, "i2c", "scan", pullups=True, speed=2)

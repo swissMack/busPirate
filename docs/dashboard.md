@@ -161,6 +161,12 @@ triggers a macOS privacy consent prompt.
   and pull-ups off, then stays connected. On a Bit Pirate it is `m hiz`. It
   works while a stream runs, which is when you want it most. **Disconnect**
   does all that and releases the port as well.
+  The button is also the indicator. It reads **HiZ**, quietly, while nothing
+  holds the target, and **Live**, highlighted, while something does: a
+  protocol mode, a stream (the terminal included), the supplies, the
+  pull-ups, pins driven from Pins & power, or PWM. Hover over it to see
+  which. Like the LEDs, it is worked out from what the dashboard did, not
+  read back from the board.
 - **Traffic log** — every byte in both directions, live. `->` is what the Mac
   sent, `<-` what the Bus Pirate replied. This is the fastest way to tell a
   wiring fault from a protocol one.

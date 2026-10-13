@@ -224,6 +224,8 @@ class DeviceSession:
             "miso": False,
             "cs": False,
         }
+        #: PWM on AUX survives a mode change, so it has to be remembered.
+        self.pwm_running = False
         #: Manual override of the variant the UI presents. None = follow
         #: whatever the banner said.
         self.display_variant: Optional[str] = None
@@ -369,6 +371,7 @@ class DeviceSession:
         # Whatever we drove the pins to is no longer true of the board, and
         # keeping it would light VREG on the next connect.
         self.last_pins = dict.fromkeys(self.last_pins, False)
+        self.pwm_running = False
         # An override set while inspecting one board must not follow you onto
         # the next one you plug in.
         self.display_variant = None
@@ -403,6 +406,37 @@ class DeviceSession:
             # A Bit Pirate has no bitbang: its own HiZ mode releases the pins.
             self.bp.cli.command("m hiz")
         self.last_pins = dict.fromkeys(self.last_pins, False)
+        self.pwm_running = False
+
+    def live(self) -> List[str]:
+        """What is holding the target, in words; empty means it is in HiZ.
+
+        Built from what this session drove, like the LEDs: a stream, a
+        protocol mode (its pins are configured, whatever the supplies),
+        the supplies, the pull-ups, pins driven from the Pins panel, PWM.
+        The board's own terminal is a stream, so it counts as live too.
+        """
+        reasons = []
+        if self.stream is not None:
+            reasons.append(f"{self.stream.kind} running")
+        if self.mode_name is not None:
+            titles = {p.mode: p.title for p in self.panels if p.mode}
+            reasons.append(f"{titles.get(self.mode_name, self.mode_name)} mode")
+        if self._supplies_on():
+            reasons.append("supplies on")
+        if self._mode is not None:
+            pullups = self._mode.peripherals.get("pullups")
+        else:
+            pullups = self.last_pins.get("pullups")
+        if pullups:
+            reasons.append("pull-ups on")
+        if self._mode is None and any(
+            self.last_pins.get(pin) for pin in ("aux", "mosi", "clk", "miso", "cs")
+        ):
+            reasons.append("pins driven")
+        if self.pwm_running:
+            reasons.append("PWM on AUX")
+        return reasons
 
     def _describe_port(self, device: str) -> Dict[str, Any]:
         """What USB discovery can tell us about one device path."""
@@ -524,6 +558,8 @@ class DeviceSession:
             # None while the board's own terminal is open: its commands can
             # switch the supplies out of this session's sight.
             "supplies": None if isinstance(self.stream, TerminalState) else self._supplies_on(),
+            # Empty means in HiZ: the sidebar button reads HiZ, else Live.
+            "live": self.live(),
             "variant": profile.variant,
             "firmware": profile.firmware,
             "bootloader": profile.bootloader,

@@ -288,21 +288,29 @@ if (!saysOn()) {
 check("the switch can turn the supplies on", saysOn() && vregLit(), switchButton().textContent);
 
 // HiZ, at the foot of the left column on every page: one click lets go of
-// the target and stays connected.
+// the target and stays connected. The button is also the indicator: "Live",
+// highlighted, while something holds the target; "HiZ" once released.
 const hizButton = () => $("nav").querySelector(".nav__hiz-btn");
-check("the HiZ button is in the left column once connected", hizButton()?.textContent === "HiZ");
+const isLive = () => hizButton().classList.contains("nav__hiz-btn--live");
+check("the HiZ button is in the left column once connected", !!hizButton());
 check("HiZ is the last thing in the column", $("nav").lastElementChild.contains(hizButton()));
+check("with the supplies on, the button reads Live and is highlighted",
+  hizButton().textContent === "Live" && isLive(), hizButton().textContent);
+check("its tooltip says what is live", /supplies on/.test(hizButton().title), hizButton().title);
 hizButton().click();
+check("the click shows at once", hizButton().textContent === "Releasing…", hizButton().textContent);
 await settle(600);
 check("HiZ switches the supplies off, and the switch and VREG follow", saysOff() && !vregLit(),
   switchButton().textContent);
+check("released, the button reads HiZ and is not highlighted",
+  hizButton().textContent === "HiZ" && !isLive(), hizButton().textContent);
 check("HiZ stays connected", !$("panel").hidden && /SIMULATED/.test($("status-text").textContent),
   $("status-text").textContent);
-check("HiZ says what it did", /Released/.test($("nav").querySelector(".nav__hiz-note").textContent),
-  $("nav").querySelector(".nav__hiz-note").textContent);
 switchButton().click();
 await settle(600);
 check("the supplies come back on after HiZ", saysOn() && vregLit(), switchButton().textContent);
+check("and the button goes back to Live without a page change",
+  hizButton().textContent === "Live" && isLive(), hizButton().textContent);
 
 const setPins = $("panel").querySelector('[data-action="set_pins"]');
 check("the pin card has no supplies box — the switch owns them",

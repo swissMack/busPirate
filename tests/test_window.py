@@ -231,3 +231,86 @@ def test_the_window_lets_you_select_and_copy_text(monkeypatch):
     monkeypatch.setitem(sys.modules, "webview", _FakeWebview)
     window.run_window(port=_free_port(), use_fake=True)
     assert calls.get("text_select") is True
+
+
+# -- the app picks a free port of its own -----------------------------------
+#
+# Nobody types the window's address, so it has no reason to claim 8765. A
+# 'buspirate dashboard' left running there used to stop the app opening.
+
+
+def _post(url, payload):
+    import json
+    import urllib.request
+
+    request = urllib.request.Request(
+        url, data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.load(response)
+
+
+def _connect_simulated(base):
+    body = _post(base + "api/run", {
+        "panel": "connection", "action": "connect", "params": {"port": ""},
+    })
+    return body["status"]["description"]
+
+
+@pytest.mark.parametrize("variant", ["v3", "v4", "bitpirate"])
+def test_the_app_opens_while_8765_is_taken(monkeypatch, variant):
+    calls = {}
+
+    class _FakeWebview:
+        @staticmethod
+        def create_window(title, url, **kwargs):
+            calls["url"] = url
+
+        @staticmethod
+        def start():
+            # The window is "open": the dashboard behind it must answer.
+            calls["description"] = _connect_simulated(calls["url"])
+
+    monkeypatch.setitem(sys.modules, "webview", _FakeWebview)
+    with socket.socket() as taken:
+        try:
+            taken.bind(("127.0.0.1", 8765))
+            taken.listen(1)
+        except OSError:
+            pass  # something already holds it, which is the point
+        assert window.run_window(use_fake=True, fake_variant=variant) == ""
+    assert ":8765/" not in calls["url"]
+    expected = {"v3": "v3", "v4": "v4", "bitpirate": "Bit Pirate"}[variant]
+    assert expected in calls["description"], calls["description"]
+
+
+def test_two_apps_each_run_a_simulated_bit_pirate():
+    first, first_thread = window.start_server(use_fake=True, fake_variant="bitpirate")
+    second, second_thread = window.start_server(use_fake=True, fake_variant="bitpirate")
+    try:
+        ports = {window.bound_port(first), window.bound_port(second)}
+        assert len(ports) == 2 and 8765 not in ports
+        for port in ports:
+            description = _connect_simulated(f"http://127.0.0.1:{port}/")
+            assert "Bit Pirate" in description
+    finally:
+        for server, thread in ((first, first_thread), (second, second_thread)):
+            assert window.stop_server(server, thread) == ""
+
+
+def test_an_explicit_port_is_still_honoured():
+    port = _free_port()
+    server, thread = window.start_server(port=port, use_fake=True)
+    try:
+        assert window.bound_port(server) == port
+    finally:
+        window.stop_server(server, thread)
+
+
+def test_only_the_app_gives_up_8765_by_default():
+    from buspirate.cli import build_parser
+
+    parser = build_parser()
+    assert parser.parse_args(["app"]).http_port == 0
+    assert parser.parse_args(["dashboard"]).http_port == 8765

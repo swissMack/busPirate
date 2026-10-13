@@ -256,6 +256,51 @@ def test_hiz_stops_pwm(client):
     assert not fake.pwm_running
 
 
+def live(client):
+    return client.get("/api/state").json()["status"]["live"]
+
+
+def test_a_fresh_connection_is_in_hiz(client):
+    connect(client)
+    assert live(client) == []
+
+
+def test_each_live_thing_is_named_and_hiz_clears_them_all(client):
+    connect(client)
+    run(client, "pins", "supplies", on=True)
+    assert live(client) == ["supplies on"]
+    run(client, "pins", "set_pins", pullups=True, aux=False,
+        mosi=False, clk=False, miso=False, cs=True)
+    assert live(client) == ["supplies on", "pull-ups on", "pins driven"]
+    run(client, "connection", "hiz")
+    assert live(client) == []
+
+
+def test_a_protocol_mode_is_live(client):
+    connect(client)
+    run(client, "i2c", "scan", power=False, pullups=False, speed=2)
+    assert live(client) == ["I2C mode"]
+    run(client, "connection", "hiz")
+    assert live(client) == []
+
+
+def test_pwm_is_live_until_stopped(client):
+    connect(client)
+    if "pwm" not in client.get("/api/state").json()["status"]["capabilities"]:
+        pytest.skip("no PWM on this board")
+    run(client, "pins", "pwm", frequency=1000, duty_cycle=50)
+    assert live(client) == ["PWM on AUX"]
+    run(client, "pins", "pwm_clear")
+    assert live(client) == []
+    run(client, "pins", "pwm", frequency=1000, duty_cycle=50)
+    run(client, "connection", "hiz")
+    assert live(client) == []
+
+
+def test_nothing_is_live_before_connecting(client):
+    assert "live" not in client.get("/api/state").json()["status"]
+
+
 def test_hiz_before_connecting_explains_itself(client):
     status, body = run(client, "connection", "hiz")
     assert status == 400
