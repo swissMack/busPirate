@@ -20,6 +20,11 @@ def _disconnect(ctx):
     return text("Disconnected. The Bus Pirate is back in its terminal.")
 
 
+def _hiz(ctx):
+    ctx.session.hiz_blocking()
+    return text("HiZ: every pin released, supplies and pull-ups off. Still connected.")
+
+
 def _identify(ctx):
     profile = ctx.bp.profile
     return keyvalue(
@@ -117,6 +122,16 @@ PANEL = Panel(
             allow_while_streaming=True,
             help="Stops anything that is running, resets the Bus Pirate to "
             "its terminal, and releases the port.",
+        ),
+        Action(
+            name="hiz",
+            label="HiZ",
+            handler=_hiz,
+            allow_while_streaming=True,
+            # The left-hand column draws it, on every page, not this form.
+            hidden=True,
+            help="Stops anything that is running and lets go of the target: "
+            "every pin an input, supplies and pull-ups off. Stays connected.",
         ),
         Action(
             name="identify",

@@ -71,6 +71,7 @@ const options = [...$("port-select").options].map((o) => o.textContent);
 check("port picker offers the simulated device", options.some((o) => o.includes("simulated-v3")), options.join("|"));
 check("welcome offers a simulated board", !!$("connect-simulated"));
 check("nav lists every panel plus the guide", $("nav").children.length === 9, `${$("nav").children.length}`);
+check("no HiZ button until a board is connected", $("nav").querySelector(".nav__hiz-btn") === null);
 
 // --- connect
 $("connect").click();
@@ -285,6 +286,23 @@ if (!saysOn()) {
   await settle(600);
 }
 check("the switch can turn the supplies on", saysOn() && vregLit(), switchButton().textContent);
+
+// HiZ, at the foot of the left column on every page: one click lets go of
+// the target and stays connected.
+const hizButton = () => $("nav").querySelector(".nav__hiz-btn");
+check("the HiZ button is in the left column once connected", hizButton()?.textContent === "HiZ");
+check("HiZ is the last thing in the column", $("nav").lastElementChild.contains(hizButton()));
+hizButton().click();
+await settle(600);
+check("HiZ switches the supplies off, and the switch and VREG follow", saysOff() && !vregLit(),
+  switchButton().textContent);
+check("HiZ stays connected", !$("panel").hidden && /SIMULATED/.test($("status-text").textContent),
+  $("status-text").textContent);
+check("HiZ says what it did", /Released/.test($("nav").querySelector(".nav__hiz-note").textContent),
+  $("nav").querySelector(".nav__hiz-note").textContent);
+switchButton().click();
+await settle(600);
+check("the supplies come back on after HiZ", saysOn() && vregLit(), switchButton().textContent);
 
 const setPins = $("panel").querySelector('[data-action="set_pins"]');
 check("the pin card has no supplies box — the switch owns them",

@@ -192,6 +192,22 @@ def test_the_terminal_opens_without_a_reset_and_closes_in_sync(client):
     assert status == 200, body
 
 
+def test_hiz_puts_it_in_hiz_and_stays_connected(client):
+    connect(client)
+    run(client, "i2c", "scan", pullups=True, speed=2)
+    fake = client.app.state.session.bp.serial
+    status, body = run(client, "connection", "hiz")
+    assert status == 200, body
+    assert fake.mode == "HIZ"
+    state = client.get("/api/state").json()["status"]
+    assert state["connected"] is True
+    assert state["mode"] is None
+    # The session must not think it is still in I2C: the next scan re-enters.
+    status, body = run(client, "i2c", "scan", pullups=True, speed=2)
+    assert status == 200, body
+    assert fake.mode == "I2C"
+
+
 def test_disconnect_leaves_it_in_hiz(client):
     connect(client)
     run(client, "i2c", "scan", pullups=True, speed=2)

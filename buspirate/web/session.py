@@ -17,6 +17,7 @@ import time
 from collections import deque
 from typing import Any, Dict, List, Optional, Set
 
+from .. import device as device_module
 from ..connect import open_device
 from ..exceptions import BusPirateError, ConnectionError, ModeError
 from ..ports import discover, resolve
@@ -371,6 +372,37 @@ class DeviceSession:
         # An override set while inspecting one board must not follow you onto
         # the next one you plug in.
         self.display_variant = None
+
+    def hiz_blocking(self) -> None:
+        """Let go of the target: every pin an input, supplies and pull-ups off.
+
+        Disconnect without closing the port. Stops a stream on the same
+        terms as :meth:`disconnect_blocking`, leaves the protocol mode, and
+        then releases the pins the way the firmware's own ``binReset()``
+        does — directions first, then states — because leaving a mode
+        resets them but a bare bitbang ``0x00`` does not, and the Pins
+        panel works in bitbang. PWM survives a mode change, so it is
+        stopped too.
+        """
+        if self.bp is None:
+            raise BusPirateError("not connected — pick a port and connect first")
+        if self.stream is not None:
+            outcome = self.stop_stream_blocking()
+            if not outcome.get("stopped") and self.stream is not None:
+                raise BusPirateError(
+                    outcome.get("reason", "a stream still holds the port")
+                )
+        self.ensure_mode(None)
+        capabilities = self.bp.profile.capabilities
+        if device_module.CAP_BITBANG_PINS in capabilities:
+            self.bp.set_pin_directions()
+            self.bp.set_pins()
+            if device_module.CAP_PWM in capabilities:
+                self.bp.pwm_clear()
+        else:
+            # A Bit Pirate has no bitbang: its own HiZ mode releases the pins.
+            self.bp.cli.command("m hiz")
+        self.last_pins = dict.fromkeys(self.last_pins, False)
 
     def _describe_port(self, device: str) -> Dict[str, Any]:
         """What USB discovery can tell us about one device path."""
