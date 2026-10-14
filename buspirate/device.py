@@ -36,6 +36,11 @@ CAP_UART_BUFFERED = "uart_buffered_receive"
 CAP_UART_BRIDGE = "uart_bridge"
 CAP_SPI_FLASH_PROGRAM = "spi_flash_program"
 
+# The Bus Pirate 6's programmable supply: set volts and a current limit, and
+# read back what the target draws.
+CAP_PSU_PROGRAMMABLE = "psu_programmable"
+CAP_PSU_READOUT = "psu_current_readout"
+
 BUS_PIRATE_ONLY = frozenset(
     {
         CAP_BITBANG_PINS,
@@ -55,6 +60,8 @@ _CAPABILITY_HOME = {
     CAP_SELF_TEST: "Bus Pirate v3 (and v2go)",
     CAP_PULLUP_VOLTAGE: "Bus Pirate v4",
     CAP_EXTENDED_AUX: "Bus Pirate v3 with firmware v6.1 or newer",
+    CAP_PSU_PROGRAMMABLE: "Bus Pirate 6",
+    CAP_PSU_READOUT: "Bus Pirate 6",
     **{capability: "Bus Pirate v3 and v4" for capability in BUS_PIRATE_ONLY},
 }
 
@@ -78,7 +85,7 @@ SPI_SPEEDS = {
 class DeviceProfile:
     """What this particular Bus Pirate can do."""
 
-    variant: str = "unknown"  # "v3", "v4", "bitpirate" or "unknown"
+    variant: str = "unknown"  # "v3", "v4", "bitpirate", "bp6" or "unknown"
     firmware: Optional[str] = None
     bootloader: Optional[str] = None
     devid: Optional[str] = None
@@ -101,11 +108,16 @@ class DeviceProfile:
         )
 
     def describe(self) -> str:
-        parts = {
-            "v3": "Bus Pirate v3",
-            "v4": "Bus Pirate v4",
-            "bitpirate": "ESP32 Bit Pirate",
-        }.get(self.variant, "unidentified Bus Pirate")
+        if self.variant == "bp6":
+            parts = (
+                "Bus Pirate 5 (untested)" if (self.devid or "").startswith("hw 5.") else "Bus Pirate 6"
+            )
+        else:
+            parts = {
+                "v3": "Bus Pirate v3",
+                "v4": "Bus Pirate v4",
+                "bitpirate": "ESP32 Bit Pirate",
+            }.get(self.variant, "unidentified Bus Pirate")
         if self.firmware:
             parts += f", firmware {self.firmware}"
         return parts
@@ -140,6 +152,14 @@ def capabilities_for(variant: str) -> FrozenSet[str]:
         # extras, and no supplies to switch. What it can do is I2C, SPI and
         # UART through its own commands — see buspirate.bitpirate.
         return frozenset()
+    if variant == "bp6":
+        # BPIO2: I2C, SPI (any mode, page writes fit in 512 bytes), UART with
+        # its async receive, 1-Wire, and the programmable supply. No bitbang,
+        # raw-wire, sniffers or bridge — see buspirate.bp6.
+        return frozenset(
+            {CAP_SUPPLIES, CAP_ONEWIRE, CAP_SPI_MODES, CAP_UART_BUFFERED,
+             CAP_SPI_FLASH_PROGRAM, CAP_PSU_PROGRAMMABLE, CAP_PSU_READOUT}
+        )
     if variant == "v4":
         # The wiki notes binary self-tests are v2go/v3 hardware only.
         # No extended AUX: the firmware reads its sub-command from the PIC's
@@ -239,4 +259,35 @@ def parse_bitpirate_banner(text: str) -> DeviceProfile:
         firmware=found.group(1) if found else None,
         capabilities=capabilities_for("bitpirate"),
         banner=text.strip(),
+    )
+
+
+def _bp6_firmware(date: str, git_hash: str) -> Optional[str]:
+    """``Oct 12 2026 09:05:15`` to ``2026-10-12``; CI builds say hash ``unknown``."""
+    import datetime
+
+    if not date:
+        return None
+    try:
+        shown = datetime.datetime.strptime(date, "%b %d %Y %H:%M:%S").strftime("%Y-%m-%d")
+    except ValueError:
+        shown = date
+    if git_hash and git_hash != "unknown":
+        shown += f" ({git_hash})"
+    return shown
+
+
+def parse_bp6_status(status) -> DeviceProfile:
+    """A Bus Pirate 6 profile from a BPIO2 StatusResponse (or None)."""
+    if status is None:
+        return DeviceProfile(variant="bp6", capabilities=capabilities_for("bp6"))
+    major, minor = status.hardware
+    return DeviceProfile(
+        variant="bp6",
+        firmware=_bp6_firmware(status.firmware_date, status.firmware_hash),
+        devid=f"hw {major}.{minor}",
+        capabilities=capabilities_for("bp6"),
+        banner=(f"Bus Pirate hardware {major}.{minor}, firmware built "
+                f"{status.firmware_date}, BPIO2 {status.flatbuffers_version[0]}."
+                f"{status.flatbuffers_version[1]}"),
     )
