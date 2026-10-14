@@ -139,9 +139,15 @@ function renderStatus() {
   const s = state.status;
   box.className =
     "status " + (s.connected ? (s.simulated ? "status--sim" : "status--on") : "status--off");
+  // A Bus Pirate 6 measures its own supply; the others report none.
+  const power = s.connected && s.power
+    ? ` · ${(s.power.mv / 1000).toFixed(2)} V / ${s.power.ma} mA` +
+      (s.power.tripped ? " · CURRENT LIMIT TRIPPED" : "")
+    : "";
   $("status-text").textContent = s.connected
     ? `${s.simulated ? "SIMULATED " : ""}${s.description}` +
-      (s.stream ? ` · ${s.stream.kind} running` : s.mode ? " · " + s.mode : "")
+      (s.stream ? ` · ${s.stream.kind} running` : s.mode ? " · " + s.mode : "") +
+      power
     : "Not connected";
   renderUsb(s.usb || { attached: false });
   renderLeds(s.leds || {});
@@ -158,7 +164,12 @@ function ledMeans(name) {
   return (state.ledRules[name] || {}).means || "";
 }
 
-const VARIANT_LABELS = { v3: "Bus Pirate v3", v4: "Bus Pirate v4", bitpirate: "ESP32 Bit Pirate" };
+const VARIANT_LABELS = {
+  v3: "Bus Pirate v3",
+  v4: "Bus Pirate v4",
+  bitpirate: "ESP32 Bit Pirate",
+  bp6: "Bus Pirate 6",
+};
 
 function renderVariant() {
   const select = $("variant");
@@ -937,6 +948,7 @@ function addLogLine(event) {
       {},
       el("span", { class: "muted", text: event.at + "  " }),
       el("span", { class: event.direction, text: (event.direction === "tx" ? "->" : "<-") + "  " }),
+      event.summary ? el("span", { class: "summary", text: event.summary + "  " }) : null,
       event.hex
     )
   );

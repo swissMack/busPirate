@@ -176,6 +176,7 @@ table.data td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line);
   font-size: 12px; padding: 6px 14px; background: var(--bg-sunken); }
 .log.collapsed .log__lines { display: none; }
 .log__lines div { white-space: pre; }
+.log__lines .summary { color: var(--text); }
 .log .tx { color: var(--accent); }
 .log .rx { color: var(--good); }
 .muted { color: var(--muted); }

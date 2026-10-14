@@ -100,6 +100,8 @@ def create_app(
 
     @app.get("/api/state")
     async def state() -> Dict[str, Any]:
+        if session.wants_power_refresh():
+            await session.call(session.refresh_power_blocking)
         variant = session.effective_variant()
         board = BOARDS[variant]
         # Signals the probe cable already carries a note for elsewhere (the

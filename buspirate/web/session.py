@@ -46,13 +46,14 @@ STREAM_STOP_TIMEOUT_SECONDS = 15.0
 #: Port names that mean "a simulated board", offered in every port list so
 #: the dashboard can be tried without hardware, whatever it was launched with.
 SIMULATED_PREFIX = "simulated-"
-SIMULATED_VARIANTS = ("v3", "v4", "bitpirate")
+SIMULATED_VARIANTS = ("v3", "v4", "bitpirate", "bp6")
 
 #: How each simulated board is named in the port list.
 SIMULATED_NAMES = {
     "v3": "simulated Bus Pirate v3",
     "v4": "simulated Bus Pirate v4",
     "bitpirate": "simulated ESP32 Bit Pirate",
+    "bp6": "simulated Bus Pirate 6",
 }
 
 
@@ -229,6 +230,12 @@ class DeviceSession:
         #: Manual override of the variant the UI presents. None = follow
         #: whatever the banner said.
         self.display_variant: Optional[str] = None
+        #: The board speaks BPIO2 (a Bus Pirate 6): summarise its frames in
+        #: the traffic log. Set before connecting, so the status request sent
+        #: while opening is summarised too.
+        self._bpio2_traffic = False
+        #: When the Bus Pirate 6's supply was last read, for the status poll.
+        self._power_read_at = 0.0
 
     @property
     def lock(self) -> asyncio.Lock:
@@ -272,6 +279,10 @@ class DeviceSession:
             "direction": direction,
             "hex": bytes(data).hex(" "),
         }
+        if self._bpio2_traffic and not isinstance(self.stream, TerminalState):
+            from ..bp6.protocol import describe_frame
+
+            entry["summary"] = describe_frame(direction, data)
         self.traffic.append(entry)
         self.emit(entry)
 
@@ -291,6 +302,18 @@ class DeviceSession:
     def _open_device(self, port: str):
         """Open the board on ``port`` with the driver it needs."""
         variant = simulated_variant(port)
+        if variant == "bp6":
+            from ..bp6 import BusPirate6
+            from ..simulator_bp6 import FakeBp6
+
+            fake = FakeBp6()
+            return BusPirate6(
+                FakeBp6.BINARY,
+                terminal_port=FakeBp6.TERMINAL,
+                serial_factory=fake.factory(),
+                on_traffic=self._on_traffic,
+                connect_timeout=0.2,
+            ).open()
         if variant == "bitpirate":
             from ..bitpirate import BitPirate
             from ..simulator import fake_factory
@@ -340,7 +363,15 @@ class DeviceSession:
         self.disconnect_blocking()
         resolved = self._resolve(port)
         self.port_info = self._describe_port(resolved)
-        self.bp = self._open_device(resolved)
+        self._bpio2_traffic = (
+            simulated_variant(resolved) == "bp6"
+            or (self.port_info or {}).get("usb_id") == "1209:7331"
+        )
+        try:
+            self.bp = self._open_device(resolved)
+        except BaseException:
+            self._bpio2_traffic = False
+            raise
         self.port = resolved
         self.mode_name = None
         self._mode = None
@@ -366,6 +397,7 @@ class DeviceSession:
         self.bp = None
         self.port = None
         self.port_info = None
+        self._bpio2_traffic = False
         self.mode_name = None
         self._mode = None
         # Whatever we drove the pins to is no longer true of the board, and
@@ -402,6 +434,8 @@ class DeviceSession:
             self.bp.set_pins()
             if device_module.CAP_PWM in capabilities:
                 self.bp.pwm_clear()
+        elif hasattr(self.bp, "hiz"):
+            self.bp.hiz()  # a Bus Pirate 6: one BPIO2 request releases everything
         else:
             # A Bit Pirate has no bitbang: its own HiZ mode releases the pins.
             self.bp.cli.command("m hiz")
@@ -424,11 +458,7 @@ class DeviceSession:
             reasons.append(f"{titles.get(self.mode_name, self.mode_name)} mode")
         if self._supplies_on():
             reasons.append("supplies on")
-        if self._mode is not None:
-            pullups = self._mode.peripherals.get("pullups")
-        else:
-            pullups = self.last_pins.get("pullups")
-        if pullups:
+        if self._pullups_on():
             reasons.append("pull-ups on")
         if self._mode is None and any(
             self.last_pins.get(pin) for pin in ("aux", "mosi", "clk", "miso", "cs")
@@ -486,9 +516,48 @@ class DeviceSession:
         last is the one to believe, and entering a mode resets the board's
         peripheral bits, so an active mode wins.
         """
+        status = getattr(self.bp, "last_status", None)
+        if status is not None:
+            return bool(status.psu_enabled)  # a Bus Pirate 6 says, so ask it
         if self._mode is not None:
             return bool(self._mode.peripherals.get("power"))
         return bool(self.last_pins.get("power"))
+
+    def _pullups_on(self) -> bool:
+        status = getattr(self.bp, "last_status", None)
+        if status is not None:
+            return bool(status.pullups)
+        if self._mode is not None:
+            return bool(self._mode.peripherals.get("pullups"))
+        return bool(self.last_pins.get("pullups"))
+
+    def _power(self) -> Optional[Dict[str, Any]]:
+        """The Bus Pirate 6's supply as last read, or None for other boards."""
+        status = getattr(self.bp, "last_status", None)
+        if status is None or isinstance(self.stream, TerminalState):
+            return None
+        return {"on": status.psu_enabled, "set_mv": self.bp.psu_mv, "set_ma": self.bp.psu_ma,
+                "mv": status.psu_mv, "ma": status.psu_ma, "tripped": status.psu_tripped,
+                "pullups": status.pullups}
+
+    POWER_REFRESH_SECONDS = 0.8
+
+    def wants_power_refresh(self) -> bool:
+        return (
+            self.bp is not None and self.bp.is_open and self.stream is None
+            and getattr(self.bp, "last_status", None) is not None
+            and time.monotonic() - self._power_read_at >= self.POWER_REFRESH_SECONDS
+        )
+
+    def refresh_power_blocking(self) -> None:
+        """Re-read a Bus Pirate 6's supply for the status bar, at most ~1/s."""
+        if not self.wants_power_refresh():
+            return
+        self._power_read_at = time.monotonic()
+        try:
+            self.bp.status()
+        except (BusPirateError, OSError):
+            pass  # the next poll tries again; a dead port shows as USB detached
 
     def leds(self) -> Dict[str, Optional[bool]]:
         """What the indicator LEDs should be showing, for the shown variant.
@@ -558,6 +627,8 @@ class DeviceSession:
             # None while the board's own terminal is open: its commands can
             # switch the supplies out of this session's sight.
             "supplies": None if isinstance(self.stream, TerminalState) else self._supplies_on(),
+            "pullups": self._pullups_on(),
+            "power": self._power(),
             # Empty means in HiZ: the sidebar button reads HiZ, else Live.
             "live": self.live(),
             "variant": profile.variant,
@@ -783,6 +854,7 @@ class DeviceSession:
         self.bp = None
         self.port = None
         self.port_info = None
+        self._bpio2_traffic = False
         self.display_variant = None
         self.mode_name = None
         self._mode = None
@@ -878,11 +950,14 @@ class DeviceSession:
                 "the board was sent out of binary mode but its terminal "
                 f"could not be opened: {exc}"
             ) from exc
-        caption = (
-            "The Bit Pirate's own command line. Type a command; 'help' lists them."
-            if self.bp.profile.variant == "bitpirate"
-            else "The Bus Pirate's own terminal. Type a command; '?' lists them."
-        )
+        variant = self.bp.profile.variant
+        if variant == "bitpirate":
+            caption = "The Bit Pirate's own command line. Type a command; 'help' lists them."
+        elif variant == "bp6":
+            caption = ("The Bus Pirate 6's own terminal. Type a command; '?' lists them. "
+                       "If it asks 'VT100 compatible color mode?', answer n.")
+        else:
+            caption = "The Bus Pirate's own terminal. Type a command; '?' lists them."
         return live("Board terminal", decoder="console", caption=caption, input=True)
 
     def send_terminal_keys(self, keys: str) -> None:

@@ -100,7 +100,7 @@ def test_hardware_launch_still_offers_every_simulator(hardware_client):
     ports = hardware_client.get("/api/ports").json()["ports"]
     simulated = {p["device"]: p for p in ports if p.get("simulated")}
     assert set(simulated) == {
-        "simulated-v3", "simulated-v4", "simulated-bitpirate"
+        "simulated-v3", "simulated-v4", "simulated-bitpirate", "simulated-bp6"
     }
     # Offered, but never what "detect automatically" picks.
     assert not any(p["likely"] for p in simulated.values())
