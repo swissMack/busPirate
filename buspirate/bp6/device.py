@@ -43,6 +43,8 @@ class BusPirate6(SerialLink):
         reply_timeout: float = 1.0,
         connect_timeout: float = 0.6,
         bpio2_settle: float = 3.5,
+        first_reply_timeout: float = 5.0,
+        drain_seconds: float = 3.0,
     ) -> None:
         super().__init__(port, baudrate, timeout, serial_factory, on_traffic)
         self.terminal_port = terminal_port
@@ -52,6 +54,12 @@ class BusPirate6(SerialLink):
         #: about 2.8 s to answer, and requests sent sooner were lost and, at
         #: least twice, left its terminal silent until a replug.
         self.bpio2_settle = bpio2_settle
+        #: The first reply after the port opens has taken ~2.8 s on the real
+        #: board. Wait for it rather than asking again: every extra request is
+        #: another reply that must be read before the port may close.
+        self.first_reply_timeout = first_reply_timeout
+        #: How long to keep reading after a failed connect, before closing.
+        self.drain_seconds = drain_seconds
         self.profile = parse_bp6_status(None)
         self.link: Optional[BpioLink] = None
         self.last_status: Optional[Status] = None
@@ -86,14 +94,17 @@ class BusPirate6(SerialLink):
         self.link = BpioLink(self.serial, self._notify, self.reply_timeout)
         tries = self.STATUS_TRIES if terminal_ok else 1
         status = None
-        for attempt in range(tries):
+        for _ in range(tries):
             try:
-                first = attempt == 0 and prepared != "selected"
-                status = self._status(self.connect_timeout if first else None)
+                status = self._status(self.first_reply_timeout)
                 break
             except ProtocolError:
                 continue
         if status is None:
+            # A reply may still be on its way; closing on it hangs the board.
+            self.link.drain(self.drain_seconds)
+            self.serial.close()
+            self.serial = None
             raise ModeError(
                 "the Bus Pirate 6 did not answer on its BPIO2 port. Unplug it, "
                 "plug it back in, and connect again"
@@ -153,6 +164,11 @@ class BusPirate6(SerialLink):
         except (BusPirateError, OSError):
             log.debug("could not leave the Bus Pirate 6 in HiZ; closing anyway", exc_info=True)
         finally:
+            try:
+                if self.link is not None and self.link.serial is self.serial:
+                    self.link.drain(0.2)  # nothing may be left on its way
+            except OSError:
+                pass
             self.serial.close()
             self.serial = None
 

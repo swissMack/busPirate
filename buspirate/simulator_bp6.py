@@ -80,12 +80,46 @@ class _Port:
         self.is_open = False
 
 
+class _BinaryPort(_Port):
+    """The BPIO2 port, with replies that can arrive late.
+
+    The real firmware's send_packet() waits, with no timeout, for room in the
+    USB buffer. A reply still on its way when the host closes the port never
+    finds room, and the board's main loop — terminal included — hangs until
+    it is replugged (firmware built 2026-10-12, src/binmode/bpio.c).
+    """
+
+    def __init__(self, owner) -> None:
+        super().__init__(owner._on_binary)
+        self.owner = owner
+        self.pending = []  # (due, bytes) not yet sent by the board
+
+    def send(self, data: bytes, delay: float = 0.0) -> None:
+        if delay > 0 or self.pending:
+            due = max([time.monotonic() + delay] + [d for d, _ in self.pending])
+            self.pending.append((due, data))
+        else:
+            self.out += data
+
+    def read(self, count: int) -> bytes:
+        now = time.monotonic()
+        while self.pending and self.pending[0][0] <= now:
+            self.out += self.pending.pop(0)[1]
+        return super().read(count)
+
+    def close(self) -> None:
+        if self.pending:
+            self.owner.terminal_wedged = True  # a reply with nowhere to go
+            self.pending.clear()
+        super().close()
+
+
 class FakeBp6:
     TERMINAL = "/dev/cu.usbmodem6buspirate1"
     BINARY = "/dev/cu.usbmodem6buspirate3"
 
     def __init__(self, bpio_active: bool = True, color_prompt: bool = False, load_ma: int = 12,
-                 bpio_settle: float = 0.2) -> None:
+                 bpio_settle: float = 0.2, first_reply_delay: float = 0.0) -> None:
         self.bpio_active = bpio_active
         self.color_prompt = color_prompt
         self.load_ma = load_ma
@@ -117,7 +151,10 @@ class FakeBp6:
         #: about 2.8 s). Requests before then are lost and wedge the terminal.
         self.bpio_settle = bpio_settle
         self._bpio_ready_at = 0.0
-        self.binary = _Port(self._on_binary)
+        #: How late the first reply after the binary port is opened arrives.
+        self.first_reply_delay = first_reply_delay
+        self._delay_next_reply = 0.0
+        self.binary = _BinaryPort(self)
         self.terminal = _Port(self._on_terminal)
 
     def factory(self, terminal_port: str = TERMINAL, binary_port: str = BINARY):
@@ -126,13 +163,14 @@ class FakeBp6:
                 self.terminal.is_open = True
                 return self.terminal
             self.binary.is_open = True
+            self._delay_next_reply = self.first_reply_delay
             return self.binary
         return make
 
     # -- the target ----------------------------------------------------------
 
     def uart_receive(self, data: bytes) -> None:
-        self.binary.out += frame(self._data_response(bytes(data), is_async=True))
+        self.binary.send(frame(self._data_response(bytes(data), is_async=True)))
 
     # -- BPIO2 ---------------------------------------------------------------
 
@@ -175,12 +213,16 @@ class FakeBp6:
                     fault = self.data_faults.pop(0)
                     if fault is None:
                         continue  # the board says nothing
-                    self.binary.out += frame(self._data_response(b"", error=fault))
+                    self._reply(frame(self._data_response(b"", error=fault)))
                     continue
                 reply = self._data(request)
             else:
                 raise AssertionError("a RequestPacket with no contents was sent")
-            self.binary.out += frame(reply)
+            self._reply(frame(reply))
+
+    def _reply(self, data: bytes) -> None:
+        delay, self._delay_next_reply = self._delay_next_reply, 0.0
+        self.binary.send(data, delay)
 
     def _status_response(self) -> bytes:
         b = flatbuffers.Builder(512)

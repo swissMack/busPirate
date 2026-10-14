@@ -93,6 +93,24 @@ class BpioLink:
         self.async_rx.clear()
         return data
 
+    def drain(self, seconds: float) -> None:
+        """Keep reading for ``seconds``, keeping only what the target sent.
+
+        The firmware waits forever for room to send a reply, so a reply still
+        on its way when the port closes hangs the whole board. Draining
+        before closing gives a late reply somewhere to go.
+        """
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            chunk = self.serial.read(256)
+            if not chunk:
+                time.sleep(0.01)
+                continue
+            for raw in self._reader.feed(chunk):
+                response = self._parse(raw)
+                if response is not None and response.is_async:
+                    self.async_rx += response.data
+
     def _clear_stale(self, quiet: bool) -> None:
         """Drop replies nobody is waiting for; keep what the target sent."""
         waiting = getattr(self.serial, "in_waiting", 0) or 0

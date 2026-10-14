@@ -11,6 +11,8 @@ def make(fake, **kw):
     kw.setdefault("reply_timeout", 0.2)
     kw.setdefault("connect_timeout", 0.1)
     kw.setdefault("bpio2_settle", 0.25)
+    kw.setdefault("first_reply_timeout", 0.4)
+    kw.setdefault("drain_seconds", 0.1)
     return BusPirate6(FakeBp6.BINARY, terminal_port=FakeBp6.TERMINAL,
                       serial_factory=fake.factory(), **kw)
 
@@ -36,7 +38,8 @@ def test_connect_switches_bpio2_on_through_the_terminal_when_it_is_off():
 def test_connect_fails_clearly_without_a_terminal_port():
     fake = FakeBp6(bpio_active=False)
     with pytest.raises(ModeError, match="BPIO2"):
-        BusPirate6(FakeBp6.BINARY, serial_factory=fake.factory(), connect_timeout=0.05).open()
+        BusPirate6(FakeBp6.BINARY, serial_factory=fake.factory(), connect_timeout=0.05,
+                   first_reply_timeout=0.1, drain_seconds=0.05).open()
 
 
 def test_power_on_off_and_limits():
@@ -134,7 +137,8 @@ def test_a_silent_terminal_says_to_replug():
     fake.terminal_wedged = True
     with pytest.raises(ModeError, match="[Uu]nplug"):
         BusPirate6(FakeBp6.BINARY, terminal_port=FakeBp6.TERMINAL, serial_factory=fake.factory(),
-                   connect_timeout=0.05, reply_timeout=0.05).open()
+                   connect_timeout=0.05, reply_timeout=0.05, first_reply_timeout=0.1,
+                   drain_seconds=0.05).open()
 
 
 def test_nothing_reaches_the_binary_port_before_bpio2_is_selected():
@@ -173,3 +177,19 @@ def test_a_terminal_held_elsewhere_still_connects_when_bpio2_is_on():
     bp = BusPirate6(FakeBp6.BINARY, terminal_port=FakeBp6.TERMINAL, serial_factory=busy_terminal,
                     connect_timeout=0.1, reply_timeout=0.2).open()
     assert bp.last_status.mode == "HiZ"
+
+
+def test_a_slow_first_reply_is_waited_for_not_sent_again():
+    fake = FakeBp6(first_reply_delay=0.5)
+    make(fake, first_reply_timeout=1.0).open()
+    assert fake.requests == ["status"]
+    assert not fake.terminal_wedged
+
+
+def test_a_failed_connect_reads_the_late_reply_before_closing():
+    # Closing the port on a reply still coming hangs the real board.
+    fake = FakeBp6(first_reply_delay=0.6)
+    with pytest.raises(ModeError):
+        make(fake, first_reply_timeout=0.2, drain_seconds=1.0).open()
+    assert not fake.terminal_wedged
+    assert not fake.binary.is_open
