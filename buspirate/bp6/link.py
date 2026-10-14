@@ -26,16 +26,24 @@ class BpioLink:
         self._frames: Deque[bytes] = deque()
         self.async_rx = bytearray()
 
-    def request(self, payload: bytes, timeout: Optional[float] = None) -> Response:
+    def request(self, payload: bytes, timeout: Optional[float] = None,
+                quiet: bool = False) -> Response:
+        """Send ``payload`` and return its reply.
+
+        ``quiet`` keeps the exchange out of the traffic hooks — for the
+        dashboard's background status poll, which would otherwise fill the
+        traffic log with two lines a second.
+        """
         raw = frame(payload)
         self.serial.write(raw)
         flush = getattr(self.serial, "flush", None)
         if flush is not None:
             flush()
-        self._notify("tx", raw)
+        if not quiet:
+            self._notify("tx", raw)
         deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
         while True:
-            response = self._next(deadline)
+            response = self._next(deadline, quiet)
             if response is None:
                 raise ProtocolError(
                     "the Bus Pirate 6 did not answer on its BPIO2 port. Is BPIO2 "
@@ -59,7 +67,7 @@ class BpioLink:
         self.async_rx.clear()
         return data
 
-    def _next(self, deadline: float) -> Optional[Response]:
+    def _next(self, deadline: float, quiet: bool = False) -> Optional[Response]:
         while True:
             if self._frames:
                 return parse_response(cobs_decode(self._frames.popleft()[:-1]))
@@ -70,5 +78,6 @@ class BpioLink:
                 time.sleep(0.002)
                 continue
             for raw in self._reader.feed(chunk):
-                self._notify("rx", raw)
+                if not quiet:
+                    self._notify("rx", raw)
                 self._frames.append(raw)

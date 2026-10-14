@@ -264,6 +264,19 @@ svg .led--flash { fill: var(--led-on); stroke: #eaffe4; stroke-width: 1.5; opaci
 .guide__body blockquote { border-left: 3px solid var(--accent); margin: 10px 0;
   padding-left: 12px; color: var(--muted); }
 .guide__body a { color: var(--accent); }
+.guide__body img { max-width: 100%; height: auto; border-radius: 4px; }
+.guide__search { flex: 1; min-width: 12rem; }
+.guide__results { display: grid; gap: 6px; margin: 0 0 12px; }
+.guide__result { display: block; padding: 6px 10px; border-radius: 6px;
+  background: var(--bg-raised); color: var(--text); text-decoration: none; }
+.guide__banner { padding: 8px 12px; border-left: 3px solid var(--good);
+  background: var(--bg-raised); color: var(--muted); }
+.guide__body blockquote.callout { color: var(--text); background: var(--bg-raised);
+  padding: 8px 12px; border-radius: 0 6px 6px 0; }
+.guide__body blockquote.callout--note { border-left-color: #5aa9e6; }
+.guide__body blockquote.callout--warning { border-left-color: var(--accent); }
+.guide__body blockquote.callout--danger { border-left-color: var(--warn); }
+.guide__body blockquote.callout--tip { border-left-color: var(--good); }
 .guide__body li input[type="checkbox"] { margin-right: 6px; }
 
 .diagram__cards { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; min-width: 0; }

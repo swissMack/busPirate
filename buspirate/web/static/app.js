@@ -241,8 +241,9 @@ function renderLeds(leds) {
 
   const box = $("leds");
   if (!box) return;
+  // Only the LEDs this board has: a Bit Pirate shows PWR, a Bus Pirate 6 none.
   box.replaceChildren(
-    ...LED_ORDER.map((name) => {
+    ...LED_ORDER.filter((name) => name in state.ledRules).map((name) => {
       const look = ledLook(name, leds[name]);
       return el("span", { class: look.cls, "data-led": name, text: name, title: look.title });
     })
@@ -1265,7 +1266,7 @@ function hookupDiagram(panel) {
 
 /* ------------------------------------------------------------ guide */
 
-async function openGuide(name) {
+async function openGuide(name, anchor = "") {
   state.guide.open = true;
   render();
   try {
@@ -1278,20 +1279,75 @@ async function openGuide(name) {
     state.guide.page = { name, markdown: `# Guide\n\n${error.message}` };
   }
   renderGuide();
+  if (anchor) {
+    const target = document.getElementById(anchor);
+    if (target) target.scrollIntoView();
+  }
 }
 
 function renderGuide() {
   const root = $("guide");
   const page = state.guide.page;
+  // Our own pages, then the official manual, each under its own heading.
+  const groups = [];
+  for (const p of state.guide.pages) {
+    let group = groups.find((g) => g.label === p.group);
+    if (!group) groups.push((group = { label: p.group, pages: [] }));
+    group.pages.push(p);
+  }
   const picker = el(
     "select",
     {
       onchange: (event) => openGuide(event.target.value),
     },
-    ...state.guide.pages.map((p) =>
-      el("option", { value: p.name, selected: page && p.name === page.name }, p.title)
+    ...groups.map((g) =>
+      el(
+        "optgroup",
+        { label: g.label },
+        ...g.pages.map((p) =>
+          el("option", { value: p.name, selected: page && p.name === page.name }, p.title)
+        )
+      )
     )
   );
+  const results = el("div", { class: "guide__results" });
+  const search = el("input", {
+    type: "search",
+    class: "guide__search",
+    placeholder: "Search the guides and the manual…",
+    oninput: async (event) => {
+      const query = event.target.value.trim();
+      if (query.length < 2) return results.replaceChildren();
+      const found = (await api(`/api/docs-search?q=${encodeURIComponent(query)}`)).results;
+      results.replaceChildren(
+        ...found.map((r) =>
+          el(
+            "a",
+            {
+              href: "#",
+              class: "guide__result",
+              onclick: (e) => {
+                e.preventDefault();
+                openGuide(r.name);
+              },
+            },
+            el("strong", { text: r.title }),
+            el("span", { class: "muted", text: ` — ${r.group}` }),
+            el("div", { class: "muted", text: r.snippet })
+          )
+        )
+      );
+    },
+  });
+  const banner =
+    page && page.name.startsWith("official/")
+      ? el("p", {
+          class: "guide__banner",
+          text:
+            "This is the official manual for the Bus Pirate's built-in terminal. " +
+            "You can type these commands in the Terminal panel.",
+        })
+      : null;
   const back = el("button", {
     class: "btn btn--small",
     text: "← Back to the dashboard",
@@ -1302,18 +1358,33 @@ function renderGuide() {
   });
   const body = el("div", { class: "guide__body" });
   body.innerHTML = page ? markdownToHtml(page.markdown) : "Loading…";
-  body.querySelectorAll("a[data-doc]").forEach((link) =>
+  body.querySelectorAll("a[data-doc], a[data-anchor]").forEach((link) =>
     link.addEventListener("click", (event) => {
       event.preventDefault();
-      openGuide(link.dataset.doc);
+      if (link.dataset.doc) return openGuide(link.dataset.doc, link.dataset.anchor);
+      const target = document.getElementById(link.dataset.anchor);
+      if (target) target.scrollIntoView();
     })
   );
-  root.replaceChildren(el("div", { class: "guide__bar" }, back, picker), body);
+  root.replaceChildren(el("div", { class: "guide__bar" }, back, picker, search), results, banner, body);
   root.scrollTop = 0;
 }
 
+/* Heading ids the way Hugo makes them, so the official manual's section
+   links ("command-reference.md#c-configuration-options-menu") still land. */
+function slug(text) {
+  return text
+    .toLowerCase()
+    .replace(/<[^>]+>/g, "")
+    .replace(/&[a-z]+;/g, "")
+    .replace(/[^\p{L}\p{N}\s_-]/gu, "")
+    .trim()
+    .replace(/\s/g, "-");
+}
+
 /* A deliberately small Markdown renderer: everything is HTML-escaped first,
-   so only the markup added here can reach the page. */
+   so only the markup added here can reach the page. Image paths are relative
+   to docs/ and served by /api/docs-file/. */
 function markdownToHtml(markdown) {
   const escape = (s) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -1327,11 +1398,17 @@ function markdownToHtml(markdown) {
       .replace(/`([^`]+)`/g, "<code>$1</code>")
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
       .replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>")
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, href) =>
-        href.endsWith(".md")
-          ? `<a href="#" data-doc="${href.replace(/\.md$/, "")}">${label}</a>`
-          : `<a href="${href}" target="_blank" rel="noreferrer">${label}</a>`
-      );
+      .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (match, alt, src) =>
+        /^https?:\/\//.test(src)
+          ? `<img src="${src}" alt="${alt}" loading="lazy">`
+          : `<img src="/api/docs-file/${src.replace(/^\/+/, "")}" alt="${alt}" loading="lazy">`
+      )
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, href) => {
+        const doc = href.match(/^([^#:]+)\.md(?:#(.*))?$/);
+        if (doc) return `<a href="#" data-doc="${doc[1]}" data-anchor="${doc[2] || ""}">${label}</a>`;
+        if (href.startsWith("#")) return `<a href="#" data-anchor="${href.slice(1)}">${label}</a>`;
+        return `<a href="${href}" target="_blank" rel="noreferrer">${label}</a>`;
+      });
 
   const isTableRow = (line) => line.trim().startsWith("|") && line.trim().endsWith("|");
   const cells = (line) =>
@@ -1351,7 +1428,7 @@ function markdownToHtml(markdown) {
     const heading = line.match(/^(#{1,4})\s+(.*)$/);
     if (heading) {
       const level = heading[1].length;
-      blocks.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+      blocks.push(`<h${level} id="${slug(heading[2])}">${inline(heading[2])}</h${level}>`);
       index += 1;
       continue;
     }
@@ -1387,10 +1464,15 @@ function markdownToHtml(markdown) {
       blocks.push(`<${ordered ? "ol" : "ul"}>${items.join("")}</${ordered ? "ol" : "ul"}>`);
       continue;
     }
-    if (line.startsWith("&gt; ")) {
+    if (line.startsWith("&gt;")) {
       const quote = [];
-      while (index < lines.length && lines[index].startsWith("&gt; ")) quote.push(lines[index++].slice(5));
-      blocks.push(`<blockquote>${inline(quote.join(" "))}</blockquote>`);
+      while (index < lines.length && lines[index].startsWith("&gt;")) {
+        quote.push(lines[index++].replace(/^&gt;\s?/, ""));
+      }
+      // "> **Warning:**" and friends become a coloured callout.
+      const kind = (quote[0] || "").match(/^\*\*(Note|Warning|Danger|Tip):\*\*/);
+      const cls = kind ? ` class="callout callout--${kind[1].toLowerCase()}"` : "";
+      blocks.push(`<blockquote${cls}>${quote.map(inline).join("<br>")}</blockquote>`);
       continue;
     }
     if (line.trim() === "") {

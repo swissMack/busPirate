@@ -96,16 +96,17 @@ class BusPirate6(SerialLink):
         finally:
             terminal.close()
 
-    def _status(self, timeout: Optional[float] = None) -> Status:
-        response = self.link.request(protocol.status_request(), timeout)
+    def _status(self, timeout: Optional[float] = None, quiet: bool = False) -> Status:
+        response = self.link.request(protocol.status_request(), timeout, quiet=quiet)
         if response.status is None:
             raise ProtocolError(f"the Bus Pirate 6 did not send its status: {response.error}")
         self.last_status = response.status
         self.profile = parse_bp6_status(response.status)
         return response.status
 
-    def status(self) -> Status:
-        return self._status()
+    def status(self, quiet: bool = False) -> Status:
+        """Read the board's status. ``quiet`` keeps it out of the traffic log."""
+        return self._status(quiet=quiet)
 
     def close(self) -> None:
         if self.serial is None:

@@ -70,7 +70,7 @@ check("status reads not connected", $("status-text").textContent === "Not connec
 const options = [...$("port-select").options].map((o) => o.textContent);
 check("port picker offers the simulated device", options.some((o) => o.includes("simulated-v3")), options.join("|"));
 check("welcome offers a simulated board", !!$("connect-simulated"));
-check("nav lists every panel plus the guide", $("nav").children.length === 9, `${$("nav").children.length}`);
+check("nav lists every panel plus the guide", $("nav").children.length === 10, `${$("nav").children.length}`);
 check("no HiZ button until a board is connected", $("nav").querySelector(".nav__hiz-btn") === null);
 
 // --- connect
@@ -97,7 +97,7 @@ check("USB is not steadily lit — it only flashes on traffic", /USB:off/.test(l
 
 // --- the variant switch
 check("variant selector offers every board",
-  $("variant") && [...$("variant").options].map((o) => o.value).join(",") === "auto,v3,v4,bitpirate",
+  $("variant") && [...$("variant").options].map((o) => o.value).join(",") === "auto,v3,v4,bitpirate,bp6",
   $("variant") ? [...$("variant").options].map((o) => o.value).join(",") : "no #variant");
 check("no mismatch warning while following detection", $("variant-warning").hidden);
 
@@ -617,6 +617,35 @@ $("guide").querySelector(".btn").click();
 await settle(300);
 check("back returns to the dashboard", $("guide").hidden && !$("panel").hidden);
 
+// --- the official manual: images, callouts, anchors, groups and search
+{
+  const md = window.markdownToHtml(
+    "# Title\n\n## The `c` menu\n\n> **Warning:**\n> Mind the voltage.\n\n![chip](official/images/fw/a.png)\n\n[jump](official/command-reference.md#the-c-menu)"
+  );
+  check("heading ids are slugged like Hugo's", md.includes('id="the-c-menu"'), md);
+  check("callouts are classed", md.includes('class="callout callout--warning"'), md);
+  check("images go through the docs-file route", md.includes('src="/api/docs-file/official/images/fw/a.png"'), md);
+  check("links keep their anchor",
+    md.includes('data-doc="official/command-reference"') && md.includes('data-anchor="the-c-menu"'), md);
+  check("remote images are left alone",
+    window.markdownToHtml("![x](https://e.com/a.png)").includes('src="https://e.com/a.png"'));
+}
+guideButton.click();
+await settle(600);
+check("the guide picker groups its pages",
+  $("guide").querySelector("select optgroup") !== null &&
+  $("guide").querySelector("select optgroup").label === "This app");
+const searchBox = $("guide").querySelector(".guide__search");
+check("the guide has a search box", searchBox !== null);
+if (searchBox) {
+  searchBox.value = "terminal";
+  searchBox.dispatchEvent(new window.Event("input"));
+  await settle(600);
+  check("searching lists results", $("guide").querySelectorAll(".guide__result").length > 0);
+}
+$("guide").querySelector(".btn").click();
+await settle(300);
+
 // --- a connection changed somewhere else. Found with a real v4: another
 // client connected the board, and a window showing "Not connected" never
 // looked again — its status check only ran while it thought it was connected,
@@ -706,6 +735,26 @@ check("connecting a v4 shows the v4 photo, not the v3 loaded before",
 check("and rings all twelve of its pins",
   v4Board && v4Board.querySelectorAll("circle").length === 12,
   v4Board ? `${v4Board.querySelectorAll("circle").length} rings` : "no board");
+
+// --- a Bus Pirate 6: its header drawing and its supply in the status bar
+await serverSide("disconnect");
+await settle(6000);
+$("port-select").value = "simulated-bp6";
+$("connect").click();
+await settle(1500);
+[...$("nav").children].find((b) => b.textContent === "I2C").click();
+await settle(300);
+const bp6Board = $("panel").querySelector(".card-img--board");
+check("connecting a BP6 shows its header drawing",
+  bp6Board && bp6Board.querySelector("image").getAttribute("href") === "/static/img/board-bp6.svg",
+  bp6Board ? bp6Board.querySelector("image").getAttribute("href") : "no board");
+check("and rings its ten pins",
+  bp6Board && bp6Board.querySelectorAll("circle").length === 10,
+  bp6Board ? `${bp6Board.querySelectorAll("circle").length} rings` : "no board");
+check("the LED strip shows no v3/v4 LEDs on a BP6", $("leds").children.length === 0,
+  [...$("leds").children].map((l) => l.textContent).join(","));
+check("the status bar shows the BP6's measured supply",
+  / V \/ \d+ mA/.test($("status-text").textContent), $("status-text").textContent);
 
 console.log(failures.length ? `\n${failures.length} FAILED` : "\nall frontend checks passed");
 process.exit(failures.length ? 1 : 0);

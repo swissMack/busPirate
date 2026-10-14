@@ -555,7 +555,7 @@ class DeviceSession:
             return
         self._power_read_at = time.monotonic()
         try:
-            self.bp.status()
+            self.bp.status(quiet=True)
         except (BusPirateError, OSError):
             pass  # the next poll tries again; a dead port shows as USB detached
 

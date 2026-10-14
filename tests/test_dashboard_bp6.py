@@ -157,3 +157,14 @@ def test_the_terminal_needs_no_reset_warning_on_the_bp6(client):
     connect(client)
     actions = {a["name"]: a for a in panels(client)["terminal"]["actions"]}
     assert actions["open_terminal"]["confirm"] == ""
+
+
+def test_the_power_poll_stays_out_of_the_traffic_log(client):
+    import time
+
+    connect(client)
+    before = len(state(client)["traffic"])
+    time.sleep(0.9)  # past the refresh interval, so the next poll reads the board
+    after = state(client)
+    assert client.app.state.session._power_read_at > 0  # the poll did read the board
+    assert len(after["traffic"]) == before
