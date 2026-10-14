@@ -3,7 +3,7 @@
 import pytest
 
 from buspirate.bp6 import BusPirate6
-from buspirate.exceptions import NackError, ProtocolError, UnsupportedFeatureError
+from buspirate.exceptions import ModeError, NackError, ProtocolError, UnsupportedFeatureError
 from buspirate.simulator_bp6 import FakeBp6
 from buspirate.spiflash import SPIFlash
 from buspirate.uart import UART
@@ -121,3 +121,37 @@ def test_onewire_collision_points_to_the_terminal(bp, fake):
     with bp.onewire() as ow:
         with pytest.raises(ProtocolError, match="scan"):
             ow.search_rom()
+
+
+# -- the bus is released after a failure ---------------------------------------
+
+
+def test_an_spi_error_raises_cs(bp, fake):
+    with bp.spi() as spi:
+        fake.data_faults = ["Protocol request failed"]
+        with pytest.raises(ModeError):
+            spi.write_then_read(b"\x9f", 3)
+    assert fake.data_log[-1] == (False, b"", 0, True)  # a stop-only request: CS high
+
+
+def test_an_spi_timeout_raises_cs_too(bp, fake):
+    with bp.spi() as spi:
+        fake.data_faults = [None]
+        with pytest.raises(ProtocolError):
+            spi.write_then_read(b"\x9f", 3)
+    assert fake.data_log[-1] == (False, b"", 0, True)
+
+
+def test_an_i2c_timeout_is_followed_by_a_stop(bp, fake):
+    with bp.i2c() as i2c:
+        fake.data_faults = [None]
+        with pytest.raises(ProtocolError):
+            i2c.read_register(0x76, 0xD0)
+    assert fake.data_log[-1] == (False, b"", 0, True)
+
+
+def test_a_failing_stop_does_not_hide_the_nack(bp, fake):
+    with bp.i2c() as i2c:
+        fake.data_faults = ["Protocol request failed", None]  # the NACK, then a silent STOP
+        with pytest.raises(NackError):
+            i2c.read_register(0x76, 0xD0)

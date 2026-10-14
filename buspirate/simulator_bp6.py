@@ -101,6 +101,11 @@ class FakeBp6:
         self.onewire_rom = DS18B20_ROM
         self.uart_echo = True
         self._spi_written, self._spi_read = bytearray(), 0
+        #: Failures to inject into the next data requests, in order: an error
+        #: string is sent as the reply's error, None means no reply at all.
+        self.data_faults = []
+        #: Every data request: (start, written, bytes to read, stop).
+        self.data_log = []
         self._reader = FrameReader()
         self._terminal_state = "prompt"
         self.binary = _Port(self._on_binary)
@@ -140,6 +145,18 @@ class FakeBp6:
                 self.requests.append("data")
                 request = _DR.DataRequest()
                 request.Init(table.Bytes, table.Pos)
+                self.data_log.append((
+                    bool(request.StartMain() or request.StartAlt()),
+                    bytes(request.DataWrite(i) for i in range(request.DataWriteLength())),
+                    request.BytesRead(),
+                    bool(request.StopMain() or request.StopAlt()),
+                ))
+                if self.data_faults:
+                    fault = self.data_faults.pop(0)
+                    if fault is None:
+                        continue  # the board says nothing
+                    self.binary.out += frame(self._data_response(b"", error=fault))
+                    continue
                 reply = self._data(request)
             else:
                 raise AssertionError("a RequestPacket with no contents was sent")

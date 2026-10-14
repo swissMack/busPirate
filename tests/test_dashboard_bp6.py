@@ -168,3 +168,19 @@ def test_the_power_poll_stays_out_of_the_traffic_log(client):
     after = state(client)
     assert client.app.state.session._power_read_at > 0  # the poll did read the board
     assert len(after["traffic"]) == before
+
+
+def test_the_power_poll_never_waits_behind_a_running_action(client):
+    import time
+    from types import SimpleNamespace
+
+    connect(client)
+    session = client.app.state.session
+    time.sleep(0.9)
+    assert session.wants_power_refresh()
+    real = session._lock
+    session._lock = SimpleNamespace(locked=lambda: True)  # a flash dump is running
+    try:
+        assert not session.wants_power_refresh()
+    finally:
+        session._lock = real

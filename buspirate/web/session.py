@@ -543,6 +543,16 @@ class DeviceSession:
     POWER_REFRESH_SECONDS = 0.8
 
     def wants_power_refresh(self) -> bool:
+        """Whether /api/state should read a Bus Pirate 6's supply now.
+
+        Never while an action holds the lock: a long flash dump would
+        otherwise stall every status poll behind it.
+        """
+        if self._lock is not None and self._lock.locked():
+            return False
+        return self._power_due()
+
+    def _power_due(self) -> bool:
         return (
             self.bp is not None and self.bp.is_open and self.stream is None
             and getattr(self.bp, "last_status", None) is not None
@@ -551,7 +561,8 @@ class DeviceSession:
 
     def refresh_power_blocking(self) -> None:
         """Re-read a Bus Pirate 6's supply for the status bar, at most ~1/s."""
-        if not self.wants_power_refresh():
+        # Runs under the lock (session.call), so only the timing is checked here.
+        if not self._power_due():
             return
         self._power_read_at = time.monotonic()
         try:

@@ -20,7 +20,7 @@ from typing import Dict, Iterable, List
 
 from ..device import I2C_SPEEDS_MODERN, SPI_SPEEDS
 from ..devices.ds18x20 import crc8
-from ..exceptions import ModeError, NackError, ProtocolError, UnsupportedFeatureError
+from ..exceptions import BusPirateError, ModeError, NackError, ProtocolError, UnsupportedFeatureError
 from ..i2c import SCAN_RANGE
 from ..uart import UART
 from . import protocol
@@ -95,6 +95,17 @@ class _Bp6Mode:
         self._check_active()
         return self.bp.link.request(protocol.data_request(**fields))
 
+    def _release(self) -> None:
+        """A stop-only request: STOP on I2C, CS high on SPI.
+
+        Sent after any failure, so the bus is not left mid-transaction. If it
+        fails too, the original error is the one worth reporting.
+        """
+        try:
+            self._data(stop=True)
+        except (BusPirateError, OSError):
+            pass
+
     def _limit(self, which: str) -> int:
         status = self.bp.last_status
         value = getattr(status, which, 0) if status is not None else 0
@@ -121,9 +132,13 @@ class Bp6I2C(_Bp6Mode):
         write_data = bytes(write_data)
         if not write_data:
             raise ValueError("the first byte written is the address byte")
-        response = self._data(start=True, write=write_data, read=read_count, stop=True)
+        try:
+            response = self._data(start=True, write=write_data, read=read_count, stop=True)
+        except ProtocolError:
+            self._release()
+            raise
         if response.error:
-            self._data(stop=True)  # the firmware skipped STOP on its way out
+            self._release()  # the firmware skipped STOP on its way out
             raise NackError(
                 f"0x{write_data[0] >> 1:02X} did not answer. Check the address, the "
                 "wiring and that the bus has pull-ups."
@@ -224,8 +239,15 @@ class Bp6SPI(_Bp6Mode):
                 fields["write"] = value
             else:
                 fields["read"] = value
-            response = self._data(**fields)
+            try:
+                response = self._data(**fields)
+            except ProtocolError:
+                if assert_cs:
+                    self._release()  # CS high, or the chip hears the next command as more of this one
+                raise
             if response.error:
+                if assert_cs:
+                    self._release()
                 raise ModeError(f"the Bus Pirate 6 said: {response.error}")
             out += response.data
         if len(out) != read_count:
