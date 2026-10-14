@@ -130,3 +130,12 @@ with spi.select():          # CS low for the block, high afterwards
 ```
 
 `write_then_read()` handles CS itself unless you pass `assert_cs=False`.
+
+## Bus Pirate 6
+
+CLK is **IO6**, MOSI **IO7**, MISO **IO4** and CS **IO5**. All four SPI
+modes work. Reads and writes longer than 512 bytes are split by the app with
+CS held low throughout, so a long flash dump is one transaction to the chip.
+See [Bus Pirate 6](bus-pirate-6.md), the manual's
+[SPI section](official/command-reference.md#spi) and its
+[SPI flash chips](official/devices/spi-flash-chips.md) demo.

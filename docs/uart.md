@@ -77,3 +77,12 @@ dashboard asks before starting it, and says so again afterwards.
 The Bus Pirate's UART is 3.3V logic and tolerates 5V inputs. It is **not**
 RS-232: a real serial port swings ±12V and will damage it. For RS-232 you
 need a level shifter such as a MAX3232.
+
+## Bus Pirate 6
+
+The Bus Pirate's TX is **IO4** and its RX is **IO5**; cross them over to the
+target. The binary interface offers 8 data bits with **no or even parity**;
+odd parity and 9 bits are only in the board's own terminal. In UART mode the
+board forwards whatever the target sends, so **Watch the line** shows it as
+it arrives. See [Bus Pirate 6](bus-pirate-6.md) and the manual's
+[UART section](official/command-reference.md#uart).

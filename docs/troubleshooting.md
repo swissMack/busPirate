@@ -261,3 +261,30 @@ firmware's source alone, so check these in this order:
 - [ ] UART send, and the monitor stopping cleanly on Stop
 - [ ] Terminal open and close, then an I2C scan — the session back in step
 - [ ] Disconnect leaves the board at `HIZ> `
+
+## Bus Pirate 6
+
+**Connect fails with "did not answer on its BPIO2 port".** Unplug the board
+and plug it back in, quit any `screen` session on either of its ports, and
+connect again. Firmware older than 2026-10-12 has no UART in BPIO2; update it
+(see [Bus Pirate 6](bus-pirate-6.md#updating-the-firmware)).
+
+**The supply switches itself off.** The current limit tripped. Look for a
+short, then press **Re-enable** on the Power & pull-ups panel.
+
+### Checklist on a real board
+
+Run this once per firmware update, on the owner's BP6:
+
+- [ ] Unplug and replug, then connect: BPIO2 is switched on, nothing saved.
+- [ ] The status bar says `Bus Pirate 6, firmware 2026-10-12` (or newer).
+- [ ] **3.3 V** switches the supply on, and the status bar shows a current.
+- [ ] A 1 mA limit with a load trips; **Re-enable** brings the supply back.
+- [ ] Pull-ups on: the IO readings rise to VOUT.
+- [ ] I2C scan finds a real chip.
+- [ ] SPI **Identify the chip** reads a flash's JEDEC ID.
+- [ ] UART loopback (IO4 to IO5) shows what was sent.
+- [ ] 1-Wire **Find devices** finds a DS18B20.
+- [ ] Terminal opens, `i` answers, and closing it re-reads the board.
+- [ ] `buspirate ping` from the command line reports `protocol BPIO2`.
+

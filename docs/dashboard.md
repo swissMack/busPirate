@@ -153,11 +153,14 @@ triggers a macOS privacy consent prompt.
   pin-function card, and the probe wires it uses on the cable card. Nothing to
   translate in your head.
 - **Guide** — the whole user guide is in the sidebar, and every panel links to
-  its own page.
+  its own page. The official Bus Pirate 5/6 manual is there too, as its own
+  group in the page list, and the search box looks through both.
 - **HiZ** — under **Connection** in the left column on every page, once a board is
   connected. One click lets go of the target: it stops anything running,
   leaves the protocol mode, makes every pin an input and switches the supplies
-  and pull-ups off, then stays connected. On a Bit Pirate it is `m hiz`. It
+  and pull-ups off, then stays connected. On a Bit Pirate it is `m hiz`; on a
+  Bus Pirate 6, one BPIO2 request that sets HiZ and switches the supply and
+  pull-ups off. It
   works while a stream runs, which is when you want it most. **Disconnect**
   does all that and releases the port as well.
   The button is also the indicator. It reads **HiZ**, in a green outline,

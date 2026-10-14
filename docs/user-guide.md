@@ -163,6 +163,19 @@ pinout and what `AUX1`/`AUX2` can and cannot do from the dashboard.
 
 ---
 
+## Bus Pirate 6
+
+The **Bus Pirate 6** works from the same panels as the v3 and v4, through its
+binary interface (BPIO2), plus a **Power & pull-ups** panel for its
+adjustable supply: 0.8 to 5.0 V with a current limit, and live voltage and
+current in the status bar. The Raw-wire panel is hidden on it; the board's
+own terminal does those modes. [Bus Pirate 6](bus-pirate-6.md) covers
+connecting, firmware updates, pins and what differs. The board's own manual
+is in this guide too, starting at its
+[overview](official/index.md).
+
+---
+
 ## The ESP32 Bit Pirate
 
 The [ESP32 Bit Pirate](https://github.com/geo-tp/ESP32-Bit-Pirate) is free

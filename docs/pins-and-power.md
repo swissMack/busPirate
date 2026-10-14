@@ -129,3 +129,12 @@ exits. Stop it explicitly when you are done.
 the driver refuses it on a v4 rather than sending a command that means
 something else. Disconnect the probe cable from any target first; the test
 drives every pin.
+
+## Bus Pirate 6
+
+The BP6 has no bitbang pins page. Its supply, current limit and pull-ups are
+on the **Power & pull-ups** panel: 0.8 to 5.0 V on VOUT, a current limit that
+cuts the power on a fault, and live voltage and current in the status bar.
+**Read voltages and current** lists the voltage on every IO pin. See
+[Bus Pirate 6](bus-pirate-6.md#power-and-the-current-limit) and the manual's
+[Programmable power supply](official/tutorial-basics/power-supply.md).

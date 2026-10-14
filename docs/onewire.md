@@ -72,3 +72,12 @@ DS18S20 (family `0x10`) counts in half degrees, not sixteenths, so the
 - **Wire by function, not by colour.** A probe's yellow lead is data and
   goes to **MOSI** (grey on the Seeed cable); the Bus Pirate's yellow lead
   is the ADC. A probe's black goes to GND, not to a black MISO lead.
+
+## Bus Pirate 6
+
+The data line is **IO0**. Switch the pull-ups on: 1-Wire needs one. The BP6's
+binary interface works in whole bytes, so **Find devices** reads the ROM of
+the one device on the bus. With several devices, type `m 1wire` and then
+`scan` in the Terminal panel. See [Bus Pirate 6](bus-pirate-6.md), the
+manual's [1-Wire section](official/command-reference.md#1-wire) and its
+[DS18B20 demo](official/devices/ds18b20.md).

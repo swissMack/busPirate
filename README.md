@@ -10,6 +10,10 @@ It also drives an [ESP32 Bit Pirate](docs/bitpirate.md) on an ESP32-S3
 DevKit — I2C, SPI and UART from the same panels, through that firmware's own
 command line.
 
+And it drives a [Bus Pirate 6](docs/bus-pirate-6.md) through its BPIO2 binary
+interface, including its adjustable supply and current limit. The official
+Bus Pirate 5/6 manual is bundled into the app's guide.
+
 ## Start here
 
 Plug the Bus Pirate in and double-click **`bin/dashboard.command`**. It builds
@@ -20,7 +24,7 @@ UI. From a terminal, the equivalent commands are `buspirate app` (window) and
 `buspirate dashboard` (browser).
 
 No hardware to hand? Press **Try a simulated one** on the connect screen, or
-pick `simulated-v3`, `simulated-v4` or `simulated-bitpirate` from the port
+pick `simulated-v3`, `simulated-v4`, `simulated-bitpirate` or `simulated-bp6` from the port
 list — the whole dashboard works against a simulated board. **`bin/demo.command`** starts straight
 into one.
 
@@ -98,6 +102,7 @@ device back to its terminal, so an interrupted script never strands it.
 | [I2C](docs/i2c.md) · [SPI](docs/spi.md) · [UART](docs/uart.md) · [1-Wire](docs/onewire.md) · [Pins & power](docs/pins-and-power.md) | per protocol: wiring, examples, gotchas |
 | [Bus Pirate v4](docs/bus-pirate-v4.md) | what differs from a v3 |
 | [ESP32 Bit Pirate](docs/bitpirate.md) | the third board: what it can and cannot do |
+| [Bus Pirate 6](docs/bus-pirate-6.md) | the fourth board: ports, power, firmware updates, what differs |
 | [Troubleshooting](docs/troubleshooting.md) | when it does not work |
 | [Protocol reference](docs/protocol-reference.md) | the binary command tables |
 | [Extending](docs/extending.md) | add a protocol, end to end |

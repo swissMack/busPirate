@@ -96,3 +96,13 @@ In the order worth checking:
 5. The device needs a moment after power-up — scan again.
 6. The address is outside 0x08–0x77 (rare, but some chips use reserved ones;
    pass a wider range to `scan()`).
+
+## Bus Pirate 6
+
+SDA is **IO0** and SCL is **IO1**. Switch on the pull-ups (10 kΩ) and the
+supply on the **Power & pull-ups** panel, or tick the panel's power and
+pull-up boxes. The BP6 reports one ACK or NACK per transaction, not per
+byte, so a failed write names the address rather than the byte that was
+refused. After any error the app sends a STOP, so the bus is free for the
+next try. See [Bus Pirate 6](bus-pirate-6.md), and the manual's
+[I2C section](official/command-reference.md#i2c) for the terminal commands.

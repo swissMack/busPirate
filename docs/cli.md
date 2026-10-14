@@ -102,3 +102,12 @@ with BusPirate("auto") as bp:
 `BusPirate` resets the device back to its terminal on exit, so an interrupted
 script never leaves the hardware in a strange state. See `examples/` for
 runnable versions.
+
+## Bus Pirate 6
+
+`buspirate ping`, `buspirate i2c-scan` and `buspirate spi-id` work on a BP6
+too: the app recognises it by its USB ID and finds both of its ports.
+`ping` reports `protocol BPIO2` instead of a BBIO version. To try the
+dashboard without one, run `buspirate dashboard --demo --variant bp6`. For
+the board's own terminal commands, see the manual's
+[command reference](official/command-reference.md).

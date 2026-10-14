@@ -1267,3 +1267,61 @@ def test_doc_file_route_refuses_traversal(client):
 def test_doc_search_route(client):
     body = client.get("/api/docs-search", params={"q": "terminal"}).json()
     assert body["results"]
+
+
+# -- the Bus Pirate 6 guides --------------------------------------------------
+
+
+def test_the_bp6_guide_covers_setup_power_and_firmware(client):
+    text = client.get("/api/docs/bus-pirate-6").json()["markdown"]
+    for must in ("BPIO2", "usbmodem6buspirate1", "usbmodem6buspirate3", "`$`", "RP2350",
+                 "bus_pirate6.uf2", "current limit", "10 kΩ", "Raw-wire", "official/"):
+        assert must in text, must
+
+
+def test_each_bus_guide_has_a_bp6_section(client):
+    for name in ("i2c", "spi", "uart", "onewire", "pins-and-power", "cli", "user-guide"):
+        text = client.get(f"/api/docs/{name}").json()["markdown"]
+        assert "## Bus Pirate 6" in text, name
+        assert "official/" in text, name
+
+
+def test_troubleshooting_has_the_bp6_checklist(client):
+    text = client.get("/api/docs/troubleshooting").json()["markdown"]
+    assert "## Bus Pirate 6" in text
+    assert "- [ ]" in text.split("## Bus Pirate 6", 1)[1]
+
+
+def test_every_official_link_in_our_guides_resolves(client):
+    # Pages and section anchors both, by the rules the guide renders headings with.
+    import collections
+    import re
+
+    from buspirate.web import docs
+
+    def anchors(name):
+        seen, found, fence = collections.Counter(), set(), False
+        for line in docs.read(name).split("\n"):
+            if re.match(r"^```[\w-]*\s*$", line):
+                fence = not fence
+                continue
+            heading = None if fence else re.match(r"^#{1,4}\s+(.*)$", line)
+            if heading:
+                base = re.sub(r"\s", "-", re.sub(r"[^\w\s-]", "", heading.group(1).strip().lower()))
+                found.add(f"{base}-{seen[base]}" if seen[base] else base)
+                seen[base] += 1
+        return found
+
+    for page in docs.available():
+        if page["group"] != docs.APP_GROUP:
+            continue
+        for target, anchor in re.findall(r"\]\((official/[^)#\s]+)\.md(?:#([^)\s]*))?\)", docs.read(page["name"])):
+            assert docs.read(target) is not None, (page["name"], target)
+            if anchor:
+                assert anchor in anchors(target), (page["name"], target, anchor)
+
+
+def test_the_bp6_power_panel_points_at_the_bp6_guide():
+    from buspirate.web.panels import power6
+
+    assert power6.PANEL.doc == "bus-pirate-6"
