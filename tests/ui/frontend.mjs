@@ -627,6 +627,13 @@ check("back returns to the dashboard", $("guide").hidden && !$("panel").hidden);
   check("images go through the docs-file route", md.includes('src="/api/docs-file/official/images/fw/a.png"'), md);
   check("links keep their anchor",
     md.includes('data-doc="official/command-reference"') && md.includes('data-anchor="the-c-menu"'), md);
+  const twice = window.markdownToHtml("## Bus commands\n\n## Bus commands\n\n## `:` Repeat (e.g. r:10) ");
+  check("repeated headings are numbered like Hugo's",
+    twice.includes('id="bus-commands"') && twice.includes('id="bus-commands-1"'), twice);
+  check("a leading symbol leaves a leading dash, like Hugo", twice.includes('id="-repeat-eg-r10"'), twice);
+  const inlineStart = window.markdownToHtml("```p``` and ```P``` toggle the pull-ups.\n\n## After");
+  check("a line starting with inline code is a paragraph, not a code block",
+    inlineStart.includes("<p><code>p</code> and <code>P</code> toggle") && inlineStart.includes('id="after"'), inlineStart);
   check("remote images are left alone",
     window.markdownToHtml("![x](https://e.com/a.png)").includes('src="https://e.com/a.png"'));
 }

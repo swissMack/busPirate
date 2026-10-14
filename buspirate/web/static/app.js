@@ -1371,14 +1371,15 @@ function renderGuide() {
 }
 
 /* Heading ids the way Hugo makes them, so the official manual's section
-   links ("command-reference.md#c-configuration-options-menu") still land. */
+   links ("command-reference.md#c-configuration-options-menu") still land.
+   Like Hugo, nothing is trimmed ("`:` Repeat" gives "-repeat"), and a
+   repeated heading gets -1, -2, ... (see markdownToHtml). */
 function slug(text) {
   return text
     .toLowerCase()
     .replace(/<[^>]+>/g, "")
     .replace(/&[a-z]+;/g, "")
     .replace(/[^\p{L}\p{N}\s_-]/gu, "")
-    .trim()
     .replace(/\s/g, "-");
 }
 
@@ -1391,10 +1392,21 @@ function markdownToHtml(markdown) {
 
   const blocks = [];
   const lines = escape(markdown).split("\n");
+  const ids = {};
+  const uniqueId = (text) => {
+    const base = slug(text);
+    const seen = ids[base] || 0;
+    ids[base] = seen + 1;
+    return seen ? `${base}-${seen}` : base;
+  };
   let index = 0;
 
+  // A fence is ``` plus at most a language name; the official manual also
+  // starts lines with inline ```code```, which is not one.
+  const isFence = (line) => /^```[\w-]*\s*$/.test(line);
   const inline = (text) =>
     text
+      .replace(/```([^`]+)```/g, "<code>$1</code>")
       .replace(/`([^`]+)`/g, "<code>$1</code>")
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
       .replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>")
@@ -1417,10 +1429,10 @@ function markdownToHtml(markdown) {
   while (index < lines.length) {
     const line = lines[index];
 
-    if (line.startsWith("```")) {
+    if (isFence(line)) {
       const code = [];
       index += 1;
-      while (index < lines.length && !lines[index].startsWith("```")) code.push(lines[index++]);
+      while (index < lines.length && !isFence(lines[index])) code.push(lines[index++]);
       index += 1;
       blocks.push(`<pre><code>${code.join("\n")}</code></pre>`);
       continue;
@@ -1428,7 +1440,7 @@ function markdownToHtml(markdown) {
     const heading = line.match(/^(#{1,4})\s+(.*)$/);
     if (heading) {
       const level = heading[1].length;
-      blocks.push(`<h${level} id="${slug(heading[2])}">${inline(heading[2])}</h${level}>`);
+      blocks.push(`<h${level} id="${uniqueId(heading[2].trim())}">${inline(heading[2])}</h${level}>`);
       index += 1;
       continue;
     }
@@ -1480,7 +1492,7 @@ function markdownToHtml(markdown) {
       continue;
     }
     const paragraph = [];
-    while (index < lines.length && lines[index].trim() !== "" && !/^(#{1,4}\s|```|\s*[-*]\s|\s*\d+\.\s|\|)/.test(lines[index])) {
+    while (index < lines.length && lines[index].trim() !== "" && !isFence(lines[index]) && !/^(#{1,4}\s|\s*[-*]\s|\s*\d+\.\s|\|)/.test(lines[index])) {
       paragraph.push(lines[index++]);
     }
     if (paragraph.length === 0) {
