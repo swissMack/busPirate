@@ -235,7 +235,7 @@ class FakeBp6:
             if len(written) > 1:
                 self._pointer[address] = written[1]
                 for offset, byte in enumerate(written[2:]):
-                    device[(written[1] + 1 + offset) & 0xFF] = byte
+                    device[(written[1] + offset) & 0xFF] = byte
             start = self._pointer[address]
             return self._data_response(bytes(device[(start + i) & 0xFF] for i in range(count)))
         if self.mode == "SPI":
