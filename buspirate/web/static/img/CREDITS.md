@@ -41,3 +41,10 @@ coordinates, and the diagram degrades gracefully without the image.
 The pin and LED coordinates in `BOARDS["v4"]` (in `buspirate/web/wiring.py`)
 were measured from this exact file. If you replace the photo, re-measure
 them.
+
+## Bus Pirate 6 drawing
+
+`board-bp6.svg` is drawn by `scripts/draw_bp6_board.py` from the pin list in
+`buspirate/web/wiring.py` (`BP6_HEADER`), which follows the firmware's pin map
+(`src/pirate.h`). It is this project's own work, so there is no licence to
+establish. Run the script again after changing the list.

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 525" width="700" height="525" font-family="Helvetica, Arial, sans-serif">
+<rect x="230" y="20" width="240" height="485" rx="24" fill="#1d1f24" stroke="#555"/>
+<text x="350" y="60" fill="#ddd" font-size="22" text-anchor="middle">Bus Pirate 6</text>
+<rect x="328" y="70" width="44" height="386" rx="4" fill="#111" stroke="#777"/>
+<circle cx="350" cy="110" r="9" fill="#c9a227" stroke="#7a5c00"/>
+<text x="316" y="116" fill="#eee" font-size="16" text-anchor="end">VOUT</text>
+<circle cx="350" cy="144" r="9" fill="#c9a227" stroke="#7a5c00"/>
+<text x="384" y="150" fill="#eee" font-size="16" text-anchor="start">IO0</text>
+<circle cx="350" cy="178" r="9" fill="#c9a227" stroke="#7a5c00"/>
+<text x="316" y="184" fill="#eee" font-size="16" text-anchor="end">IO1</text>
+<circle cx="350" cy="212" r="9" fill="#c9a227" stroke="#7a5c00"/>
+<text x="384" y="218" fill="#eee" font-size="16" text-anchor="start">IO2</text>
+<circle cx="350" cy="246" r="9" fill="#c9a227" stroke="#7a5c00"/>
+<text x="316" y="252" fill="#eee" font-size="16" text-anchor="end">IO3</text>
+<circle cx="350" cy="280" r="9" fill="#c9a227" stroke="#7a5c00"/>
+<text x="384" y="286" fill="#eee" font-size="16" text-anchor="start">IO4</text>
+<circle cx="350" cy="314" r="9" fill="#c9a227" stroke="#7a5c00"/>
+<text x="316" y="320" fill="#eee" font-size="16" text-anchor="end">IO5</text>
+<circle cx="350" cy="348" r="9" fill="#c9a227" stroke="#7a5c00"/>
+<text x="384" y="354" fill="#eee" font-size="16" text-anchor="start">IO6</text>
+<circle cx="350" cy="382" r="9" fill="#c9a227" stroke="#7a5c00"/>
+<text x="316" y="388" fill="#eee" font-size="16" text-anchor="end">IO7</text>
+<circle cx="350" cy="416" r="9" fill="#c9a227" stroke="#7a5c00"/>
+<text x="384" y="422" fill="#eee" font-size="16" text-anchor="start">GND</text>
+<text x="350" y="485" fill="#999" font-size="14" text-anchor="middle">USB-C on top · header viewed from the front</text>
+</svg>

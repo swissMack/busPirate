@@ -87,3 +87,73 @@ def test_the_terminal_opens_and_closing_it_rereads_the_board(client):
     stopped = client.post("/api/stream/stop").json()
     assert stopped["result"]["stopped"] is True
     assert state(client)["status"]["connected"] is True
+
+
+# -- power, pull-ups and the board -------------------------------------------
+
+
+def test_the_power_panel_is_offered_and_the_bitbang_one_is_not(client):
+    connect(client)
+    ids = panels(client)
+    assert "power6" in ids and "pins" not in ids
+    status, body = run(client, "pins", "set_pins", pullups=False, aux=False, mosi=False,
+                       clk=False, miso=False, cs=False)
+    assert status != 200
+
+
+def test_quick_voltage_buttons_switch_power_on(client):
+    connect(client)
+    status, body = run(client, "power6", "quick_3v3")
+    assert status == 200, body
+    power = state(client)["status"]["power"]
+    assert power["on"] and power["set_mv"] == 3300 and power["mv"] == 3300
+
+
+def test_high_voltage_needs_the_tick(client):
+    connect(client)
+    status, body = run(client, "power6", "set_supply", millivolts=5000, limit_ma=300, confirm_high=False)
+    assert status == 200
+    assert state(client)["status"]["power"]["on"] is False
+    assert "tick" in str(body).lower()
+    run(client, "power6", "set_supply", millivolts=5000, limit_ma=300, confirm_high=True)
+    assert state(client)["status"]["power"]["mv"] == 5000
+
+
+def test_no_limit_needs_the_tick_too(client):
+    connect(client)
+    run(client, "power6", "set_supply", millivolts=3300, limit_ma=0, confirm_high=False)
+    assert state(client)["status"]["power"]["on"] is False
+
+
+def test_a_tripped_supply_is_reported_with_a_re_enable_action(client):
+    connect(client)
+    run(client, "power6", "set_supply", millivolts=3300, limit_ma=5, confirm_high=False)
+    power = state(client)["status"]["power"]
+    assert power["tripped"] and not power["on"]
+    status, body = run(client, "power6", "readings")
+    assert "Current limit tripped" in str(body)
+    actions = {a["name"] for a in panels(client)["power6"]["actions"]}
+    assert "reenable" in actions
+
+
+def test_the_pullups_switch_shows_its_state(client):
+    connect(client)
+    run(client, "power6", "pullups", on=True)
+    assert state(client)["status"]["pullups"] is True
+
+
+def test_the_board_is_the_bp6_header(client):
+    connect(client)
+    data = state(client)
+    assert data["variant"] == "bp6"
+    board = data["board"]
+    assert board["image"] == "/static/img/board-bp6.svg"
+    assert list(board["pins"]) == ["VOUT"] + [f"IO{i}" for i in range(8)] + ["GND"]
+    i2c = {w["target"]: w["signal"] for w in panels(client)["i2c"]["wiring"]}
+    assert i2c["SDA"] == "IO0" and i2c["SCL"] == "IO1"
+
+
+def test_the_terminal_needs_no_reset_warning_on_the_bp6(client):
+    connect(client)
+    actions = {a["name"]: a for a in panels(client)["terminal"]["actions"]}
+    assert actions["open_terminal"]["confirm"] == ""
