@@ -88,9 +88,10 @@ class SerialLink:
         if on_traffic is not None:
             self._traffic_hooks.append(on_traffic)
 
-    def _make_serial(self):
+    def _make_serial(self, port: Optional[str] = None):
+        port = port or self.port
         if self._serial_factory is not None:
-            return self._serial_factory(self.port, self.baudrate, self.timeout)
+            return self._serial_factory(port, self.baudrate, self.timeout)
         try:
             import serial  # imported lazily so tests need no hardware deps
         except ImportError as exc:  # pragma: no cover - environment dependent
@@ -101,22 +102,22 @@ class SerialLink:
         # USB for about half a second whenever it is reset, Disconnect
         # included. Give it a moment rather than failing a connect made in
         # that window.
-        if self.port.startswith("/dev/"):
+        if port.startswith("/dev/"):
             deadline = time.monotonic() + PORT_RETURN_SECONDS
-            while not os.path.exists(self.port) and time.monotonic() < deadline:
+            while not os.path.exists(port) and time.monotonic() < deadline:
                 time.sleep(0.05)
-            if not os.path.exists(self.port):
+            if not os.path.exists(port):
                 raise ConnectionError(
-                    f"{self.port} is not there. Is the {self.device_name} plugged in? "
+                    f"{port} is not there. Is the {self.device_name} plugged in? "
                     "Refresh the port list after plugging it back in."
                 )
         try:
             return serial.Serial(
-                self.port, baudrate=self.baudrate, timeout=self.timeout
+                port, baudrate=self.baudrate, timeout=self.timeout
             )
         except Exception as exc:  # serial.SerialException and friends
             raise ConnectionError(
-                f"cannot open {self.port}: {exc}. If the port exists, something "
+                f"cannot open {port}: {exc}. If the port exists, something "
                 "else is probably holding it — check for a screen session."
             ) from exc
 

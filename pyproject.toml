@@ -19,7 +19,7 @@ app = ["pywebview>=5"]
 buspirate = "buspirate.cli:main"
 
 [tool.setuptools]
-packages = ["buspirate", "buspirate.bitpirate", "buspirate.devices", "buspirate.web", "buspirate.web.panels"]
+packages = ["buspirate", "buspirate.bitpirate", "buspirate.bp6", "buspirate.bp6.bpio", "buspirate.devices", "buspirate.web", "buspirate.web.panels"]
 
 [tool.setuptools.dynamic]
 version = {attr = "buspirate.__version__"}
