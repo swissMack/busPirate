@@ -34,9 +34,16 @@ def _supplies(ctx, on):
                         f"{_limit_text(ctx.bp.psu_ma)}.")
 
 
+#: What a quick button limits the current to when no limit was set.
+DEFAULT_LIMIT_MA = 300
+
+
 def _quick(millivolts):
     def handler(ctx):
-        ctx.bp.set_power(True, millivolts=millivolts)
+        # One click never switches on unlimited: "no limit" needs the tick
+        # box on Set voltage and current limit, every time.
+        limit = ctx.bp.psu_ma or DEFAULT_LIMIT_MA
+        ctx.bp.set_power(True, millivolts=millivolts, milliamps=limit)
         return _report(ctx, f"The supply is on at {millivolts / 1000:.1f} V, limit "
                             f"{_limit_text(ctx.bp.psu_ma)}.")
     return handler

@@ -375,6 +375,13 @@ _BP6_VOUT = _wire("VOUT", "VCC", "the adjustable supply — set it on Power & pu
 _BP6_NOTE = ("Every IO pin is buffered and works from 1.2 to 5 V, following VOUT. "
              "Switch the supply on, or feed the target's own voltage into VOUT.")
 
+#: On a Bus Pirate 6 the bus panels' boxes only switch things on; the Power
+#: & pull-ups panel sets the voltage and switches them off.
+_BP6_PARAM_LABELS = {
+    "power": "Switch on the supply (as set on Power & pull-ups)",
+    "pullups": "Switch on the pull-ups",
+}
+
 _BOARD_BP6 = {
     "image": "/static/img/board-bp6.svg",
     "width": BP6_GEOMETRY["width"],
@@ -402,6 +409,7 @@ _BOARD_BP6 = {
             },
         },
         "i2c": {
+            "param_labels": _BP6_PARAM_LABELS,
             "wiring": [_wire("IO0", "SDA", "data, both directions"),
                        _wire("IO1", "SCL", "clock"), _BP6_GND, _BP6_VOUT],
             "notes": ["I2C needs pull-ups: switch them on (10 kΩ) on Power & pull-ups.",
@@ -409,6 +417,7 @@ _BOARD_BP6 = {
                       _BP6_NOTE],
         },
         "spi": {
+            "param_labels": _BP6_PARAM_LABELS,
             "wiring": [_wire("IO6", "SCK / CLK", "clock"),
                        _wire("IO7", "DI / MOSI", "Bus Pirate out, chip in"),
                        _wire("IO4", "DO / MISO", "chip out, Bus Pirate in"),
@@ -419,6 +428,7 @@ _BOARD_BP6 = {
                       _BP6_NOTE],
         },
         "uart": {
+            "param_labels": _BP6_PARAM_LABELS,
             "wiring": [_wire("IO4", "RX", "the Bus Pirate's TX drives the target's receive pin"),
                        _wire("IO5", "TX", "the Bus Pirate's RX listens to the target's transmit pin"),
                        _BP6_GND],
@@ -429,6 +439,7 @@ _BOARD_BP6 = {
                       _BP6_NOTE],
         },
         "onewire": {
+            "param_labels": _BP6_PARAM_LABELS,
             "wiring": [_wire("IO0", "DQ", "data"), _BP6_GND, _BP6_VOUT],
             "notes": ["Switch the pull-ups on: 1-Wire needs one on the data line.",
                       "The dashboard finds one device. With several on the bus, type "

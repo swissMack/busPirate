@@ -76,20 +76,28 @@ class _Bp6Mode:
 
     def configure_peripherals(self, power: bool = False, pullups: bool = False,
                               aux: bool = False, cs: bool = False) -> None:
-        """Power at the voltage and limit set on the Power panel, and pull-ups."""
+        """Switch the supply and pull-ups **on** if asked; never off.
+
+        On a Bus Pirate 6 the Power & pull-ups panel owns the supply: its
+        voltage and limit are set there, and so is switching it off. A bus
+        panel's unticked box leaves the supply as it is, so running a scan
+        never cuts the power to a target someone just switched on.
+        """
         self._check_active()
         if aux or cs:
             raise UnsupportedFeatureError(
                 "the Bus Pirate 6 has no AUX or CS peripheral pins to drive. It is "
                 "a Bus Pirate v3 and v4 feature."
             )
-        fields = dict(pullup_enable=pullups, pullup_disable=not pullups)
+        fields = {}
+        if pullups:
+            fields.update(pullup_enable=True)
         if power:
-            fields.update(psu_enable=True, psu_mv=self.bp.psu_mv, psu_ma=self.bp.psu_ma)
-        else:
-            fields.update(psu_disable=True)
-        self.bp.configure(**fields)
-        self.peripherals = dict(self.peripherals, power=power, pullups=pullups)
+            fields.update(psu_enable=True, psu_mv=self.bp.psu_mv, psu_ma=self.bp.psu_ma or 300)
+        if fields:
+            self.bp.configure(**fields)
+        status = self.bp.status()
+        self.peripherals = dict(self.peripherals, power=status.psu_enabled, pullups=status.pullups)
 
     def _data(self, **fields) -> protocol.Response:
         self._check_active()

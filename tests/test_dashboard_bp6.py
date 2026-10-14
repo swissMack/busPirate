@@ -184,3 +184,28 @@ def test_the_power_poll_never_waits_behind_a_running_action(client):
         assert not session.wants_power_refresh()
     finally:
         session._lock = real
+
+
+def test_a_quick_button_never_switches_on_without_a_limit(client):
+    connect(client)
+    run(client, "power6", "set_supply", millivolts=3300, limit_ma=0, confirm_high=True)
+    assert state(client)["status"]["power"]["set_ma"] == 0
+    run(client, "power6", "quick_3v3")
+    assert state(client)["status"]["power"]["set_ma"] == 300
+
+
+def test_an_unticked_power_box_leaves_the_supply_alone(client):
+    connect(client)
+    run(client, "power6", "quick_3v3")
+    run(client, "power6", "pullups", on=True)
+    run(client, "i2c", "scan", power=False, pullups=False, speed=2)
+    status = state(client)["status"]
+    assert status["power"]["on"] and status["pullups"]
+
+
+def test_the_power_box_says_what_it_does_on_a_bp6(client):
+    connect(client)
+    scan = {a["name"]: a for a in panels(client)["i2c"]["actions"]}["scan"]
+    labels = {p["name"]: p["label"] for p in scan["params"]}
+    assert labels["power"] == "Switch on the supply (as set on Power & pull-ups)"
+    assert labels["pullups"] == "Switch on the pull-ups"

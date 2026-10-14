@@ -95,6 +95,9 @@ def create_app(
                     data[key] = override[key]
             for action in data["actions"]:
                 action.update(override.get("actions", {}).get(action["name"], {}))
+                # A board can say what a parameter means on it, in every action.
+                for param in action["params"]:
+                    param["label"] = override.get("param_labels", {}).get(param["name"], param["label"])
             panels.append(data)
         return panels
 

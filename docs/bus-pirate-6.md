@@ -75,8 +75,11 @@ The **Power & pull-ups** panel controls the supply on the **VOUT** pin.
 - While you work, the status bar shows the measured voltage and current, for
   example `3.30 V / 12 mA`.
 
-The I2C, SPI, UART and 1-Wire panels have a **power** tick box too. It
-switches the supply on at whatever voltage and limit this panel last set.
+The I2C, SPI, UART and 1-Wire panels have **Switch on the supply** and
+**Switch on the pull-ups** boxes too. Ticked, they switch them on at the
+voltage and limit this panel last set (300 mA if none). Unticked, they leave
+them as they are: only this panel switches the supply off, so running a scan
+never cuts the power to your target.
 
 More: [Programmable power supply](official/tutorial-basics/power-supply.md).
 

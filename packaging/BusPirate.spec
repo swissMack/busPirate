@@ -36,6 +36,12 @@ hiddenimports = (
         "buspirate.simulator",
         "buspirate.simulator_bitpirate",
         "buspirate.bitpirate.modes",
+        # The Bus Pirate 6 driver, its modes and its traffic summaries are
+        # imported only once one is connected, for the same reason.
+        "buspirate.bp6",
+        "buspirate.bp6.modes",
+        "buspirate.bp6.protocol",
+        "buspirate.simulator_bp6",
     ]
 )
 
