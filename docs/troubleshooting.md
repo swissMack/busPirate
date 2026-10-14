@@ -274,17 +274,38 @@ short, then press **Re-enable** on the Power & pull-ups panel.
 
 ### Checklist on a real board
 
-Run this once per firmware update, on the owner's BP6:
+Run this once per firmware update. Last run on 2026-10-14 against the owner's
+BP6 (hardware 6.2, firmware built 2026-10-12), with nothing wired to its pins.
 
-- [ ] Unplug and replug, then connect: BPIO2 is switched on, nothing saved.
-- [ ] The status bar says `Bus Pirate 6, firmware 2026-10-12` (or newer).
-- [ ] **3.3 V** switches the supply on, and the status bar shows a current.
+- [x] Unplug and replug, then connect: BPIO2 is switched on, nothing saved
+      (about 6 s, mostly waiting for BPIO2 to start).
+- [x] The status bar says `Bus Pirate 6, firmware 2026-10-12`.
+- [x] **3.3 V** switches the supply on: 3.33 V measured, 1 mA with nothing attached.
 - [ ] A 1 mA limit with a load trips; **Re-enable** brings the supply back.
-- [ ] Pull-ups on: the IO readings rise to VOUT.
-- [ ] I2C scan finds a real chip.
-- [ ] SPI **Identify the chip** reads a flash's JEDEC ID.
-- [ ] UART loopback (IO4 to IO5) shows what was sent.
-- [ ] 1-Wire **Find devices** finds a DS18B20.
-- [ ] Terminal opens, `i` answers, and closing it re-reads the board.
-- [ ] `buspirate ping` from the command line reports `protocol BPIO2`.
+      (Not yet: needs a load drawing a few mA.)
+- [x] Pull-ups on: every IO reading rises to VOUT (3.29–3.31 V; 1.77 V at 1.8 V).
+- [ ] I2C scan finds a real chip. (Unwired scan returns nothing, cleanly, twice.)
+- [ ] SPI **Identify the chip** reads a flash's JEDEC ID. (Unwired: `ff ff ff`;
+      a 1200-byte read completes.)
+- [ ] UART loopback (IO4 to IO5) shows what was sent. (Unwired: nothing back.)
+- [ ] 1-Wire **Find devices** finds a DS18B20. (Unwired: "no 1-Wire device answered".)
+- [x] Terminal opens, `i` answers, and closing it re-reads the board.
+- [x] `buspirate ping` from the command line reports `protocol BPIO2`.
 
+### Things this firmware does that the app works around
+
+Found on the real board, 2026-10-14 (firmware built 2026-10-12):
+
+- **Ctrl-C at "VT100 compatible color mode?" hangs the terminal** until the
+  board is replugged. The app only ever presses Enter there. If you use
+  `screen`, answer the question with `n` or `y`, never Ctrl-C.
+- **A BPIO2 reply sent to a closed port hangs the whole board**, terminal
+  included, until it is replugged: the firmware waits for room to send with
+  no timeout. The app always reads a reply it has asked for before closing
+  the port. If the board stops answering both ports, replug it.
+- **BPIO2 takes about 3 s to answer** after it is selected, and the first
+  reply after the terminal port is opened is seconds late too. The app waits
+  rather than asking again.
+- **Plugging the board in or out shows "Disk Not Ejected Properly"** on a
+  Mac: that is the BP6's own storage drive. Eject it in Finder first to
+  avoid the message; the app does not use it.
