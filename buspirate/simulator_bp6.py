@@ -119,7 +119,8 @@ class FakeBp6:
     BINARY = "/dev/cu.usbmodem6buspirate3"
 
     def __init__(self, bpio_active: bool = True, color_prompt: bool = False, load_ma: int = 12,
-                 bpio_settle: float = 0.2, first_reply_delay: float = 0.0) -> None:
+                 bpio_settle: float = 0.2, first_reply_delay: float = 0.0,
+                 terminal_reply_delay: float = 0.0) -> None:
         self.bpio_active = bpio_active
         self.color_prompt = color_prompt
         self.load_ma = load_ma
@@ -153,6 +154,8 @@ class FakeBp6:
         self._bpio_ready_at = 0.0
         #: How late the first reply after the binary port is opened arrives.
         self.first_reply_delay = first_reply_delay
+        #: How late the first reply after the terminal port is opened arrives.
+        self.terminal_reply_delay = terminal_reply_delay
         self._delay_next_reply = 0.0
         self.binary = _BinaryPort(self)
         self.terminal = _Port(self._on_terminal)
@@ -161,6 +164,9 @@ class FakeBp6:
         def make(port, baudrate, timeout):
             if port == terminal_port:
                 self.terminal.is_open = True
+                # Seen on the real board: the first BPIO2 reply after the
+                # terminal port is opened comes seconds late.
+                self._delay_next_reply = max(self._delay_next_reply, self.terminal_reply_delay)
                 return self.terminal
             self.binary.is_open = True
             self._delay_next_reply = self.first_reply_delay

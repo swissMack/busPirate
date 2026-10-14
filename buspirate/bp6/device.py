@@ -277,7 +277,9 @@ class BusPirate6(SerialLink):
             lent.close()
         self._mode = None
         # The terminal may have changed the mode, the supply or the pull-ups.
-        self.status()
+        # After the terminal port has been used, the real board's next reply
+        # comes seconds late: wait for it, or closing on it would hang it.
+        self._status(self.first_reply_timeout)
 
     def resync(self) -> None:
         self._mode = None

@@ -3,7 +3,7 @@
 import pytest
 
 from buspirate.bp6 import BusPirate6
-from buspirate.exceptions import ModeError
+from buspirate.exceptions import ModeError, ProtocolError
 from buspirate.simulator_bp6 import FakeBp6
 
 
@@ -193,3 +193,22 @@ def test_a_failed_connect_reads_the_late_reply_before_closing():
         make(fake, first_reply_timeout=0.2, drain_seconds=1.0).open()
     assert not fake.terminal_wedged
     assert not fake.binary.is_open
+
+
+def test_closing_the_terminal_waits_for_the_slow_reply_that_follows():
+    fake = FakeBp6(terminal_reply_delay=0.5)
+    bp = make(fake, first_reply_timeout=1.0).open()
+    bp.release_to_terminal(0)
+    bp.stop_stream()
+    assert bp.serial is fake.binary
+    assert not fake.terminal_wedged
+
+
+def test_close_after_a_timeout_reads_the_late_reply_first():
+    fake = FakeBp6()
+    bp = make(fake, drain_seconds=1.0).open()
+    fake._delay_next_reply = 0.5  # the next reply comes after the 0.2 s timeout
+    with pytest.raises(ProtocolError):
+        bp.status()
+    bp.close()
+    assert not fake.terminal_wedged
