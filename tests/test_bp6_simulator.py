@@ -71,7 +71,14 @@ def test_nothing_answers_while_bpio2_is_off():
 
 def test_the_terminal_switches_bpio2_on():
     fake = FakeBp6(bpio_active=False, color_prompt=True)
-    for keys in (b"\x03", b"n\r", b"binmode\r", b"2\r", b"n\r"):
+    for keys in (b"\r", b"n\r", b"binmode\r", b"2\r", b"n\r"):
         fake.terminal.write(keys)
     assert fake.bpio_active
     assert fake.terminal.read(4096).endswith(b"HiZ> ")
+
+
+def test_ctrl_c_at_the_colour_question_silences_the_terminal_like_the_real_board():
+    fake = FakeBp6(color_prompt=True)
+    fake.terminal.write(b"\x03")
+    fake.terminal.write(b"\r")
+    assert fake.terminal.read(4096) == b""

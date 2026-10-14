@@ -37,12 +37,38 @@ def _send(serial, notify, keys: bytes) -> None:
     notify("tx", keys)
 
 
-def select_bpio2(serial, notify, timeout: float = 3.0) -> None:
-    _send(serial, notify, b"\x03")
-    text = _read_until(serial, notify, ("> ", COLOR_PROMPT), timeout)
+def wake(serial, notify, timeout: float = 3.0) -> bool:
+    """Get the terminal to its ``HiZ>`` prompt. False if it never answers.
+
+    Never Ctrl-C: at the colour question it stops the firmware's line editor
+    for good (firmware built 2026-10-12, ui_prompt_vt100_mode_feed ignores
+    it), and the terminal stays silent until the board is replugged. Enter
+    is safe everywhere: it re-asks the question, or shows a fresh prompt.
+    The first Enter after the port opens can go unanswered, so try a few.
+    """
+    text = ""
+    for _ in range(3):
+        _send(serial, notify, b"\r")
+        text = _read_until(serial, notify, ("> ", COLOR_PROMPT), timeout / 3)
+        if text:
+            break
+    if not text:
+        return False
     if COLOR_PROMPT in text:
         _send(serial, notify, b"n\r")
         _read_until(serial, notify, ("> ",), timeout)
+    return True
+
+
+def bpio2_active(serial, notify, timeout: float = 3.0) -> bool:
+    """Whether ``i`` reports BPIO2 as the active binary mode."""
+    _send(serial, notify, b"i\r")
+    text = _read_until(serial, notify, ("Active mode",), timeout)
+    return "Active binmode: BPIO2" in text
+
+
+def select_bpio2(serial, notify, timeout: float = 3.0) -> None:
+    """Pick BPIO2 in the binmode menu, without saving it. Call ``wake`` first."""
     _send(serial, notify, b"binmode\r")
     text = _read_until(serial, notify, ("x to exit",), timeout)
     if "BPIO2" not in text:

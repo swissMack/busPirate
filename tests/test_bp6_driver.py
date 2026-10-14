@@ -19,7 +19,8 @@ def test_connect_reads_the_status():
     bp = make(fake).open()
     assert bp.profile.describe() == "Bus Pirate 6, firmware 2026-10-12"
     assert bp.last_status.mode == "HiZ"
-    assert fake.terminal.written == b""  # BPIO2 was on, the terminal was left alone
+    # BPIO2 was already on: the terminal was asked, and nothing was changed.
+    assert b"i\r" in fake.terminal.written and b"binmode" not in fake.terminal.written
 
 
 def test_connect_switches_bpio2_on_through_the_terminal_when_it_is_off():
@@ -118,3 +119,47 @@ def test_an_old_bpio_version_is_refused(monkeypatch):
     monkeypatch.setattr(link_module, "parse_response", older)
     with pytest.raises(ModeError, match="update"):
         make(FakeBp6()).open()
+
+
+def test_connecting_never_sends_ctrl_c():
+    # Ctrl-C at the colour question wedges the real terminal until a replug.
+    fake = FakeBp6(bpio_active=False, color_prompt=True)
+    make(fake).open()
+    assert b"\x03" not in fake.terminal.written
+
+
+def test_a_silent_terminal_says_to_replug():
+    fake = FakeBp6(bpio_active=False, color_prompt=True)
+    fake.terminal_wedged = True
+    with pytest.raises(ModeError, match="[Uu]nplug"):
+        BusPirate6(FakeBp6.BINARY, terminal_port=FakeBp6.TERMINAL, serial_factory=fake.factory(),
+                   connect_timeout=0.05, reply_timeout=0.05).open()
+
+
+def test_nothing_reaches_the_binary_port_before_bpio2_is_selected():
+    # On the real board, BPIO2 bytes sent to the logic analyzer silenced the
+    # terminal until a replug.
+    fake = FakeBp6(bpio_active=False, color_prompt=True)
+    bp = make(fake, reply_timeout=0.3).open()
+    assert not fake.terminal_wedged
+    assert bp.last_status.mode == "HiZ"
+
+
+def test_the_request_dropped_after_selecting_bpio2_is_retried():
+    fake = FakeBp6(bpio_active=False)
+    make(fake, reply_timeout=0.3).open()
+    assert fake.requests == ["status"]  # the dropped one never counted
+
+
+def test_a_terminal_held_elsewhere_still_connects_when_bpio2_is_on():
+    fake = FakeBp6()
+    factory = fake.factory()
+
+    def busy_terminal(port, baudrate, timeout):
+        if port == FakeBp6.TERMINAL:
+            raise ConnectionError("cannot open: Resource busy")
+        return factory(port, baudrate, timeout)
+
+    bp = BusPirate6(FakeBp6.BINARY, terminal_port=FakeBp6.TERMINAL, serial_factory=busy_terminal,
+                    connect_timeout=0.1, reply_timeout=0.2).open()
+    assert bp.last_status.mode == "HiZ"

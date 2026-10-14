@@ -52,7 +52,8 @@ def test_open_device_routes_the_usb_id_to_the_bp6(monkeypatch):
     device = connect.open_device(FakeBp6.TERMINAL, usb_id="1209:7331",
                                  serial_factory=fake.factory())
     assert isinstance(device, BusPirate6)
-    assert fake.terminal.written == b""  # never the v3/v4 nulls or BBIO reset
+    # Never the v3/v4 nulls or BBIO reset: only Enter and 'i' in the terminal.
+    assert b"\x00" not in fake.terminal.written and b"\x0f" not in fake.terminal.written
 
 
 def test_the_cli_pings_a_bp6(monkeypatch, capsys):

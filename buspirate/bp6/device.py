@@ -11,7 +11,7 @@ from ..exceptions import BusPirateError, ModeError, ProtocolError
 from . import protocol
 from .link import BpioLink
 from .protocol import Status
-from .terminal import select_bpio2
+from . import terminal as term
 
 log = logging.getLogger(__name__)
 
@@ -59,22 +59,39 @@ class BusPirate6(SerialLink):
 
     # -- connection --------------------------------------------------------
 
+    #: How many times to ask for the status once BPIO2 is (or should be) on.
+    #: The real board drops the first request after BPIO2 is selected.
+    STATUS_TRIES = 3
+
     def open(self) -> "BusPirate6":
+        """Make sure BPIO2 is on, through the terminal, then read the status.
+
+        The terminal is asked first, with ``i``, because BPIO2 bytes sent
+        while another binary mode (the logic analyzer, the default after a
+        replug) has the port left the real board's terminal silent until it
+        was replugged. If the terminal cannot be used (``screen`` has it,
+        say), the binary port is tried directly.
+        """
+        terminal_ok = self._prepare_terminal()
         if self.serial is None:
             self.serial = self._make_serial()
         self.link = BpioLink(self.serial, self._notify, self.reply_timeout)
-        try:
-            status = self._status(self.connect_timeout)
-        except ProtocolError:
-            self._switch_bpio2_on()
+        tries = self.STATUS_TRIES if terminal_ok else 1
+        status = None
+        for attempt in range(tries):
             try:
-                status = self._status(self.connect_timeout * 3)
-            except ProtocolError as exc:
-                raise ModeError(
-                    "the Bus Pirate 6 did not answer on its BPIO2 port, even after "
-                    "BPIO2 was selected in its terminal. Unplug it, plug it back "
-                    "in, and connect again."
-                ) from exc
+                status = self._status(self.connect_timeout if attempt == 0 else None)
+                break
+            except ProtocolError:
+                continue
+        if status is None:
+            raise ModeError(
+                "the Bus Pirate 6 did not answer on its BPIO2 port. Unplug it, "
+                "plug it back in, and connect again"
+                + ("." if terminal_ok else
+                   " — and quit any program (such as screen) holding its terminal port, "
+                   "so the app can switch BPIO2 on.")
+            )
         if status.flatbuffers_version[0] != protocol.VERSION_MAJOR:
             raise ModeError(
                 f"this firmware speaks BPIO {status.flatbuffers_version[0]}."
@@ -83,16 +100,21 @@ class BusPirate6(SerialLink):
             )
         return self
 
-    def _switch_bpio2_on(self) -> None:
+    def _prepare_terminal(self) -> bool:
+        """Switch BPIO2 on in the terminal if it is not. False: no terminal."""
         if not self.terminal_port:
-            raise ModeError(
-                "the Bus Pirate 6 is not in BPIO2 mode and its terminal port is "
-                "unknown. Type binmode, then 2, in its terminal, or connect by "
-                "picking the board in the port list."
-            )
-        terminal = self._make_serial(self.terminal_port)
+            return False
         try:
-            select_bpio2(terminal, self._notify)
+            terminal = self._make_serial(self.terminal_port)
+        except (BusPirateError, OSError):
+            log.debug("the Bus Pirate 6's terminal port cannot be opened", exc_info=True)
+            return False
+        try:
+            if not term.wake(terminal, self._notify):
+                return False
+            if not term.bpio2_active(terminal, self._notify):
+                term.select_bpio2(terminal, self._notify)
+            return True
         finally:
             terminal.close()
 

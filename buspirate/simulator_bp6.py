@@ -108,6 +108,10 @@ class FakeBp6:
         self.data_log = []
         self._reader = FrameReader()
         self._terminal_state = "prompt"
+        #: True once Ctrl-C has hit the colour question: nothing answers.
+        self.terminal_wedged = False
+        #: Set when BPIO2 is selected: the real board drops the next request.
+        self.drop_next_request = False
         self.binary = _Port(self._on_binary)
         self.terminal = _Port(self._on_terminal)
 
@@ -128,8 +132,17 @@ class FakeBp6:
     # -- BPIO2 ---------------------------------------------------------------
 
     def _on_binary(self, data: bytes) -> None:
+        if not self.bpio_active:
+            # Seen on the real board: BPIO2 bytes sent while another binary
+            # mode (the logic analyzer, by default) has the port left the
+            # terminal silent until a replug. Why is not known; the driver
+            # avoids it by asking the terminal first.
+            self.terminal_wedged = True
+            return
         for raw in self._reader.feed(data):
-            if not self.bpio_active:
+            if self.drop_next_request:
+                # The first request after BPIO2 is selected goes unanswered.
+                self.drop_next_request = False
                 continue
             packet = _RP.RequestPacket.GetRootAs(cobs_decode(raw[:-1]), 0)
             kind, table = packet.ContentsType(), packet.Contents()
@@ -310,6 +323,14 @@ class FakeBp6:
         self.terminal.out += text.encode()
 
     def _on_terminal(self, keys: bytes) -> None:
+        if self.terminal_wedged:
+            return
+        if keys == b"\x03" and self.color_prompt:
+            # Seen on the real board (firmware built 2026-10-12): Ctrl-C stops
+            # the colour question's line editor, which the question never
+            # restarts. The terminal stays silent until the board is replugged.
+            self.terminal_wedged = True
+            return
         if keys == b"\x03":
             self._say("^C\r\n" + ("VT100 compatible color mode? (Y/n)> " if self.color_prompt else "HiZ> "))
             return
@@ -327,14 +348,17 @@ class FakeBp6:
         elif self._terminal_state == "binmode-save" and line in ("n\r", "y\r"):
             self._terminal_state = "prompt"
             self.bpio_active = True
+            self.drop_next_request = True
             self._say(line[0] + "\n\r\n\r\nHiZ> ")
         elif line == "binmode\r":
             self._terminal_state = "binmode-menu"
             self._say("binmode\n\r\n 1. SUMP logic analyzer\r\n 2. BPIO2 flatbuffer interface\r\n"
                       "Select binary mode\r\nx to exit (1) > ")
         elif line == "i\r":
+            binmode = "BPIO2 flatbuffer interface" if self.bpio_active else "SUMP logic analyzer"
             self._say("i\n\r\nBus Pirate 6\r\nFirmware main branch @ unknown (Oct 12 2026 09:04:39)\r\n"
-                      "RP2350B with 512KB RAM, 128Mbit FLASH\r\n\r\nHiZ> ")
+                      "RP2350B with 512KB RAM, 128Mbit FLASH\r\n"
+                      f"Active binmode: {binmode}\r\nActive mode: HiZ\r\n\r\nHiZ> ")
         elif line == "\r":
             self._say("\n\r\nHiZ> ")
         else:
