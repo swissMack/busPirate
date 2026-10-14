@@ -854,7 +854,7 @@ def test_the_led_note_is_per_variant(client):
 def test_the_board_registry_is_keyed_by_variant():
     from buspirate.web.wiring import BOARDS
 
-    assert list(BOARDS) == ["v3", "v4", "bitpirate"]
+    assert list(BOARDS) == ["v3", "v4", "bitpirate", "bp6"]
     board = BOARDS["v3"]
     assert board["label"] == "Bus Pirate v3.6"
     assert len(board["pins"]) == 10
@@ -871,7 +871,7 @@ def test_the_state_reports_the_detected_variant(client):
     assert body["variant"] == client.variant
     assert body["variant_detected"] == client.variant
     assert body["variant_source"] == "detected"
-    assert body["variants"] == ["v3", "v4", "bitpirate"]
+    assert body["variants"] == ["v3", "v4", "bitpirate", "bp6"]
 
 
 def test_an_unconnected_dashboard_defaults_to_v3_and_says_so(client):

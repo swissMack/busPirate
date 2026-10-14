@@ -84,7 +84,7 @@ def _readings(ctx):
 PANEL = Panel(
     id="power6",
     requires=device_module.CAP_PSU_PROGRAMMABLE,
-    doc="bus-pirate-6",
+    doc="pins-and-power",  # bus-pirate-6 once that page exists (Task 13)
     title="Power & pull-ups",
     blurb="The Bus Pirate 6's adjustable supply on VOUT, its current limit, and the pull-ups.",
     mode=None,
