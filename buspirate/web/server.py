@@ -164,7 +164,18 @@ def create_app(
     async def doc_index() -> Dict[str, Any]:
         return {"pages": docs_module.available()}
 
-    @app.get("/api/docs/{name}")
+    @app.get("/api/docs-file/{path:path}")
+    async def doc_file(path: str):
+        found = docs_module.file_path(path)
+        if found is None:
+            return _error(f"no guide file called {path!r}", status=404)
+        return FileResponse(found)
+
+    @app.get("/api/docs-search")
+    async def doc_search(q: str = "") -> Dict[str, Any]:
+        return {"results": docs_module.search(q)}
+
+    @app.get("/api/docs/{name:path}")
     async def doc_page(name: str) -> JSONResponse:
         text = docs_module.read(name)
         if text is None:

@@ -1258,3 +1258,12 @@ def test_the_version_lives_in_one_place():
     assert 'dynamic = ["version"]' in pyproject
     assert re.search(r"^version\s*=\s*\"", pyproject, re.M) is None
     assert 'attr = "buspirate.__version__"' in pyproject
+
+
+def test_doc_file_route_refuses_traversal(client):
+    assert client.get("/api/docs-file/..%2F..%2Fpyproject.toml").status_code == 404
+
+
+def test_doc_search_route(client):
+    body = client.get("/api/docs-search", params={"q": "terminal"}).json()
+    assert body["results"]
