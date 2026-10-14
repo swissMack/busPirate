@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import sys
 
-from . import BusPirate, BusPirateError, discover, resolve
+from . import BusPirateError, discover, resolve
+from .connect import open_device
+from .ports import usb_id_for
 from .exceptions import GuiUnavailableError
 from .i2c import I2C, SCAN_RANGE, stuck_bus_warning
 from .spi import SPI
@@ -74,9 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
     dash.add_argument(
         "--variant",
         default="v3",
-        choices=["v3", "v4", "bitpirate"],
-        help="which device the demo simulates: a Bus Pirate v3 or v4, or an "
-        "ESP32 Bit Pirate (default: v3)",
+        choices=["v3", "v4", "bitpirate", "bp6"],
+        help="which device the demo simulates: a Bus Pirate v3 or v4, an "
+        "ESP32 Bit Pirate, or a Bus Pirate 6 (default: v3)",
     )
     dash.add_argument("--no-browser", action="store_true", help="do not open a browser")
 
@@ -97,9 +100,9 @@ def build_parser() -> argparse.ArgumentParser:
     appcmd.add_argument(
         "--variant",
         default="v3",
-        choices=["v3", "v4", "bitpirate"],
-        help="which device the demo simulates: a Bus Pirate v3 or v4, or an "
-        "ESP32 Bit Pirate (default: v3)",
+        choices=["v3", "v4", "bitpirate", "bp6"],
+        help="which device the demo simulates: a Bus Pirate v3 or v4, an "
+        "ESP32 Bit Pirate, or a Bus Pirate 6 (default: v3)",
     )
     return parser
 
@@ -126,16 +129,29 @@ def cmd_ports(args) -> int:
     return 0
 
 
+def _open(port_arg):
+    """Open whatever board is on the port with the driver it needs.
+
+    ``open_device`` hands back a board that is already open, so ``with``
+    only has to close it.
+    """
+    port = resolve(port_arg)
+    return contextlib.closing(open_device(port, usb_id=usb_id_for(port)))
+
+
 def cmd_ping(args) -> int:
-    with BusPirate(resolve(args.port)) as bp:
+    with _open(args.port) as bp:
         print(f"{bp.port}: {bp.profile.describe()}")
-        print(f"  bitbang protocol BBIO{bp.bitbang_version}")
+        if bp.bitbang_version is not None:
+            print(f"  bitbang protocol BBIO{bp.bitbang_version}")
+        else:
+            print(f"  protocol {bp.protocol_label}")
         print(f"  features: {', '.join(sorted(bp.profile.capabilities)) or 'none'}")
     return 0
 
 
 def cmd_i2c_scan(args) -> int:
-    with BusPirate(resolve(args.port)) as bp:
+    with _open(args.port) as bp:
         with bp.i2c() as i2c:
             i2c.configure_peripherals(
                 power=not args.no_power, pullups=not args.no_pullups
@@ -159,7 +175,7 @@ def cmd_i2c_scan(args) -> int:
 
 
 def cmd_spi_id(args) -> int:
-    with BusPirate(resolve(args.port)) as bp:
+    with _open(args.port) as bp:
         with bp.spi() as spi:
             spi.configure_peripherals(power=True)
             spi.set_speed(args.speed)

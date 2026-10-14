@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .exceptions import ConnectionError
 
@@ -24,6 +24,8 @@ KNOWN_ADAPTERS = {
     (0x0403, 0x6001): "FTDI FT232R (Bus Pirate v3)",
     (0x0403, 0x6015): "FTDI FT231X",
     (0x04D8, 0xFB00): "Microchip CDC (Bus Pirate v4)",
+    # One board, two CDC ports: its terminal and its BPIO2 binary interface.
+    (0x1209, 0x7331): "Bus Pirate 5/6 (terminal + BPIO2 ports)",
     (0x10C4, 0xEA60): "Silicon Labs CP2102",
     (0x1A86, 0x7523): "WCH CH340",
 }
@@ -45,6 +47,8 @@ class PortCandidate:
     serial_number: Optional[str] = None
     score: int = 0
     note: str = ""
+    #: A Bus Pirate 5/6's second port (BPIO2), shown under its terminal port.
+    partner: Optional[str] = None
 
     @property
     def likely_bus_pirate(self) -> bool:
@@ -62,6 +66,8 @@ class PortCandidate:
             bits.append(f"[{self.usb_id}]")
         if self.note:
             bits.append(f"- {self.note}")
+        if self.partner:
+            bits.append(f"(BPIO2 on {self.partner})")
         return "  ".join(bits)
 
 
@@ -72,9 +78,16 @@ def discover(include_unlikely: bool = False) -> List[PortCandidate]:
     except ImportError as exc:  # pragma: no cover - environment dependent
         raise ConnectionError("pyserial is required: pip install pyserial") from exc
 
+    infos = list(list_ports.comports())
+    pairs = pair_bp6(infos)
     candidates = []
-    for info in list_ports.comports():
+    for info in infos:
+        pair = pairs.get(info.device)
+        if pair and info.device != pair[0]:
+            continue  # shown once, under its terminal port
         candidate = _score(info)
+        if pair:
+            candidate.partner = pair[1]
         if candidate.score < 0 and not include_unlikely:
             continue
         candidates.append(candidate)
@@ -130,6 +143,59 @@ def _score(info) -> PortCandidate:
         candidate.note = f"{candidate.note}; names itself a Bus Pirate".lstrip("; ")
 
     return candidate
+
+
+BP6_ID = (0x1209, 0x7331)
+
+
+def _natural(device: str):
+    import re
+
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", device)]
+
+
+def pair_bp6(infos) -> Dict[str, Tuple[str, str]]:
+    """Each Bus Pirate 5/6 port mapped to (terminal port, BPIO2 port).
+
+    Its two CDC ports share a USB location (pyserial's ``location``); the
+    lower-numbered one is the terminal. The USB serial number is the same
+    on every unit ("6buspirate"), so it cannot tell two boards apart.
+    """
+    groups: Dict[str, List[str]] = {}
+    for item in infos:
+        if (getattr(item, "vid", None), getattr(item, "pid", None)) == BP6_ID:
+            key = getattr(item, "location", None) or item.device
+            groups.setdefault(key, []).append(item.device)
+    pairs: Dict[str, Tuple[str, str]] = {}
+    for devices in groups.values():
+        devices.sort(key=_natural)
+        if len(devices) >= 2:
+            pair = (devices[0], devices[-1])
+            for device in devices:
+                pairs[device] = pair
+    return pairs
+
+
+def bp6_ports_for(device: str) -> Tuple[str, Optional[str]]:
+    """``(terminal, binary)`` for a port of a plugged-in Bus Pirate 5/6."""
+    from serial.tools import list_ports
+
+    pair = pair_bp6(list_ports.comports()).get(device)
+    if pair:
+        return pair
+    if device.endswith("1"):
+        return device, device[:-1] + "3"
+    if device.endswith("3"):
+        return device[:-1] + "1", device
+    return device, None
+
+
+def usb_id_for(device: str) -> Optional[str]:
+    """The ``VID:PID`` of the adapter behind ``device``, if it is plugged in."""
+    for candidate in discover(include_unlikely=True):
+        if candidate.device == device or candidate.partner == device:
+            return candidate.usb_id
+    return None
 
 
 def resolve(port: Optional[str]) -> str:

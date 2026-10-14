@@ -549,6 +549,7 @@ def test_the_i2c_scan_command_warns_when_every_address_answers(monkeypatch, caps
     # The same stuck bus, from the command line: `buspirate i2c-scan` on the
     # real v3 printed "112 device(s)" and nothing else.
     import argparse
+    import contextlib
 
     from buspirate import cli
     from buspirate.base import BusPirate
@@ -557,8 +558,10 @@ def test_the_i2c_scan_command_warns_when_every_address_answers(monkeypatch, caps
     fake = FakeSerial(variant="v3", i2c_devices=range(0x08, 0x78))
     monkeypatch.setattr(cli, "resolve", lambda port: "/dev/cu.test")
     monkeypatch.setattr(
-        cli, "BusPirate",
-        lambda port: BusPirate(port, serial_factory=fake_factory(fake), identify_timeout=0.05),
+        cli, "_open",
+        lambda port: contextlib.closing(
+            BusPirate("/dev/cu.test", serial_factory=fake_factory(fake), identify_timeout=0.05).open()
+        ),
     )
     args = argparse.Namespace(port="auto", no_power=False, no_pullups=False, speed=2)
     assert cli.cmd_i2c_scan(args) == 1
