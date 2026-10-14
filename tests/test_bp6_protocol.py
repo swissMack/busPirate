@@ -171,3 +171,56 @@ def test_no_answer_is_a_protocol_error():
     link = BpioLink(_Port([]), lambda *a: None, timeout=0.05)
     with pytest.raises(ProtocolError):
         link.request(protocol.status_request())
+
+
+def _status_response():
+    from buspirate.bp6.bpio import StatusResponse as ST
+
+    b = flatbuffers.Builder(64)
+    ST.StatusResponseStart(b)
+    contents = ST.StatusResponseEnd(b)
+    RS.ResponsePacketStart(b)
+    RS.ResponsePacketAddContentsType(b, ResponsePacketContents.StatusResponse)
+    RS.ResponsePacketAddContents(b, contents)
+    b.Finish(RS.ResponsePacketEnd(b))
+    return bytes(b.Output())
+
+
+def test_a_stale_reply_of_another_kind_is_skipped():
+    # A status reply left over from a request that timed out (a replugged
+    # board answering late) must not be taken as the answer to a data request.
+    port = _Port([frame(_status_response()) + frame(_data_response(b"\x01"))])
+    link = BpioLink(port, lambda *a: None, timeout=0.2)
+    assert link.request(protocol.data_request(read=1)).data == b"\x01"
+
+
+class _WaitingPort(_Port):
+    """A port with bytes already waiting before anything is sent."""
+
+    def __init__(self, waiting, replies):
+        super().__init__(replies)
+        self.pending += waiting
+
+    @property
+    def in_waiting(self):
+        return len(self.pending)
+
+
+def test_bytes_waiting_before_a_request_are_cleared_but_async_data_kept():
+    stale = frame(_data_response(b"\x99")) + frame(_data_response(b"hi", is_async=True))
+    port = _WaitingPort(stale, [frame(_data_response(b"\x01"))])
+    link = BpioLink(port, lambda *a: None, timeout=0.2)
+    assert link.request(protocol.data_request(read=1)).data == b"\x01"
+    assert bytes(link.async_rx) == b"hi"
+
+
+def test_a_corrupt_frame_is_skipped_not_raised_as_value_error():
+    port = _Port([b"\x05\x11\x00" + frame(_data_response(b"\x01"))])
+    link = BpioLink(port, lambda *a: None, timeout=0.2)
+    assert link.request(protocol.data_request(read=1)).data == b"\x01"
+
+
+def test_only_corrupt_frames_end_in_a_protocol_error():
+    link = BpioLink(_Port([b"\x05\x11\x00"]), lambda *a: None, timeout=0.05)
+    with pytest.raises(ProtocolError):
+        link.request(protocol.data_request(read=1))

@@ -157,14 +157,16 @@ def _natural(device: str):
 def pair_bp6(infos) -> Dict[str, Tuple[str, str]]:
     """Each Bus Pirate 5/6 port mapped to (terminal port, BPIO2 port).
 
-    Its two CDC ports share a USB location (pyserial's ``location``); the
-    lower-numbered one is the terminal. The USB serial number is the same
+    Its two CDC ports share a USB location (pyserial's ``location``, less any
+    ``:interface`` suffix); the lower-numbered one is the terminal. The USB serial number is the same
     on every unit ("6buspirate"), so it cannot tell two boards apart.
     """
     groups: Dict[str, List[str]] = {}
     for item in infos:
         if (getattr(item, "vid", None), getattr(item, "pid", None)) == BP6_ID:
-            key = getattr(item, "location", None) or item.device
+            # macOS gives "1-1" for both ports; Linux and Windows append the
+            # interface ("1-2:1.0", "1-2:1.2"), which is not part of the board.
+            key = (getattr(item, "location", None) or item.device).split(":")[0]
             groups.setdefault(key, []).append(item.device)
     pairs: Dict[str, Tuple[str, str]] = {}
     for devices in groups.values():

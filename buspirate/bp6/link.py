@@ -4,6 +4,12 @@ In UART mode the firmware also sends unsolicited DataResponses with
 ``is_async`` set, whenever the target transmits. They can arrive before the
 reply to whatever was asked, so they are set aside in ``async_rx`` rather
 than mistaken for it.
+
+A reply can also arrive late — to a request that already timed out, say on a
+board that was just plugged back in. So bytes already waiting are cleared
+before each request (their async data kept), and a reply of the wrong kind
+for the request is skipped. Either way, one late answer never shifts every
+later reply by one.
 """
 
 from __future__ import annotations
@@ -13,8 +19,24 @@ from collections import deque
 from typing import Callable, Deque, Optional
 
 from ..exceptions import ProtocolError
+from .bpio import RequestPacket as _RP
+from .bpio.RequestPacketContents import RequestPacketContents
 from .framing import FrameReader, cobs_decode, frame
 from .protocol import Response, parse_response
+
+#: What kind of reply each kind of request gets.
+_REPLY_KIND = {
+    RequestPacketContents.StatusRequest: "status",
+    RequestPacketContents.ConfigurationRequest: "configuration",
+    RequestPacketContents.DataRequest: "data",
+}
+
+
+def _expected(payload: bytes) -> Optional[str]:
+    try:
+        return _REPLY_KIND.get(_RP.RequestPacket.GetRootAs(payload, 0).ContentsType())
+    except Exception:  # noqa: BLE001 - a request we built ourselves; be lenient
+        return None
 
 
 class BpioLink:
@@ -34,6 +56,8 @@ class BpioLink:
         dashboard's background status poll, which would otherwise fill the
         traffic log with two lines a second.
         """
+        self._clear_stale(quiet)
+        expected = _expected(payload)
         raw = frame(payload)
         self.serial.write(raw)
         flush = getattr(self.serial, "flush", None)
@@ -52,6 +76,8 @@ class BpioLink:
             if response.is_async:
                 self.async_rx += response.data
                 continue
+            if expected and response.kind not in (expected, "error"):
+                continue  # a late answer to an earlier request
             return response
 
     def poll_async(self, seconds: float) -> bytes:
@@ -67,10 +93,37 @@ class BpioLink:
         self.async_rx.clear()
         return data
 
+    def _clear_stale(self, quiet: bool) -> None:
+        """Drop replies nobody is waiting for; keep what the target sent."""
+        waiting = getattr(self.serial, "in_waiting", 0) or 0
+        while waiting:
+            chunk = self.serial.read(waiting)
+            if not chunk:
+                break
+            for raw in self._reader.feed(chunk):
+                if not quiet:
+                    self._notify("rx", raw)
+                self._frames.append(raw)
+            waiting = getattr(self.serial, "in_waiting", 0) or 0
+        while self._frames:
+            response = self._parse(self._frames.popleft())
+            if response is not None and response.is_async:
+                self.async_rx += response.data
+
+    @staticmethod
+    def _parse(raw: bytes) -> Optional[Response]:
+        """A frame's reply, or None for a frame too damaged to read."""
+        try:
+            return parse_response(cobs_decode(raw[:-1]))
+        except (ValueError, ProtocolError):
+            return None
+
     def _next(self, deadline: float, quiet: bool = False) -> Optional[Response]:
         while True:
-            if self._frames:
-                return parse_response(cobs_decode(self._frames.popleft()[:-1]))
+            while self._frames:
+                response = self._parse(self._frames.popleft())
+                if response is not None:
+                    return response
             if time.monotonic() >= deadline:
                 return None
             chunk = self.serial.read(256)

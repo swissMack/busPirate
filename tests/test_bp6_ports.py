@@ -70,3 +70,8 @@ def test_the_cli_pings_a_bp6(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Bus Pirate 6, firmware 2026-10-12" in out and "protocol BPIO2" in out
     assert fake.mode == "HiZ" and not fake.binary.is_open  # closed once, left in HiZ
+
+
+def test_linux_locations_carry_the_interface_and_still_pair():
+    pairs = ports.pair_bp6([info("/dev/ttyACM1", "1-2:1.2"), info("/dev/ttyACM0", "1-2:1.0")])
+    assert pairs["/dev/ttyACM1"] == ("/dev/ttyACM0", "/dev/ttyACM1")
