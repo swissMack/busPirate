@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
 
 from ..base import SerialLink, TrafficHook
@@ -41,11 +42,16 @@ class BusPirate6(SerialLink):
         on_traffic: Optional[TrafficHook] = None,
         reply_timeout: float = 1.0,
         connect_timeout: float = 0.6,
+        bpio2_settle: float = 3.5,
     ) -> None:
         super().__init__(port, baudrate, timeout, serial_factory, on_traffic)
         self.terminal_port = terminal_port
         self.reply_timeout = reply_timeout
         self.connect_timeout = connect_timeout
+        #: How long to send nothing after selecting BPIO2. The real board took
+        #: about 2.8 s to answer, and requests sent sooner were lost and, at
+        #: least twice, left its terminal silent until a replug.
+        self.bpio2_settle = bpio2_settle
         self.profile = parse_bp6_status(None)
         self.link: Optional[BpioLink] = None
         self.last_status: Optional[Status] = None
@@ -60,8 +66,7 @@ class BusPirate6(SerialLink):
     # -- connection --------------------------------------------------------
 
     #: How many times to ask for the status once BPIO2 is (or should be) on.
-    #: The real board drops the first request after BPIO2 is selected.
-    STATUS_TRIES = 3
+    STATUS_TRIES = 2
 
     def open(self) -> "BusPirate6":
         """Make sure BPIO2 is on, through the terminal, then read the status.
@@ -72,7 +77,10 @@ class BusPirate6(SerialLink):
         was replugged. If the terminal cannot be used (``screen`` has it,
         say), the binary port is tried directly.
         """
-        terminal_ok = self._prepare_terminal()
+        prepared = self._prepare_terminal()
+        terminal_ok = prepared is not None
+        if prepared == "selected":
+            time.sleep(self.bpio2_settle)
         if self.serial is None:
             self.serial = self._make_serial()
         self.link = BpioLink(self.serial, self._notify, self.reply_timeout)
@@ -80,7 +88,8 @@ class BusPirate6(SerialLink):
         status = None
         for attempt in range(tries):
             try:
-                status = self._status(self.connect_timeout if attempt == 0 else None)
+                first = attempt == 0 and prepared != "selected"
+                status = self._status(self.connect_timeout if first else None)
                 break
             except ProtocolError:
                 continue
@@ -100,21 +109,26 @@ class BusPirate6(SerialLink):
             )
         return self
 
-    def _prepare_terminal(self) -> bool:
-        """Switch BPIO2 on in the terminal if it is not. False: no terminal."""
+    def _prepare_terminal(self) -> Optional[str]:
+        """Switch BPIO2 on in the terminal if it is not.
+
+        ``"active"`` if it already was, ``"selected"`` if it was switched on
+        just now, None if the terminal could not be used.
+        """
         if not self.terminal_port:
-            return False
+            return None
         try:
             terminal = self._make_serial(self.terminal_port)
         except (BusPirateError, OSError):
             log.debug("the Bus Pirate 6's terminal port cannot be opened", exc_info=True)
-            return False
+            return None
         try:
             if not term.wake(terminal, self._notify):
-                return False
-            if not term.bpio2_active(terminal, self._notify):
-                term.select_bpio2(terminal, self._notify)
-            return True
+                return None
+            if term.bpio2_active(terminal, self._notify):
+                return "active"
+            term.select_bpio2(terminal, self._notify)
+            return "selected"
         finally:
             terminal.close()
 

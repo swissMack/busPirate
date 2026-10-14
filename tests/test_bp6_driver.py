@@ -10,6 +10,7 @@ from buspirate.simulator_bp6 import FakeBp6
 def make(fake, **kw):
     kw.setdefault("reply_timeout", 0.2)
     kw.setdefault("connect_timeout", 0.1)
+    kw.setdefault("bpio2_settle", 0.25)
     return BusPirate6(FakeBp6.BINARY, terminal_port=FakeBp6.TERMINAL,
                       serial_factory=fake.factory(), **kw)
 
@@ -145,10 +146,19 @@ def test_nothing_reaches_the_binary_port_before_bpio2_is_selected():
     assert bp.last_status.mode == "HiZ"
 
 
-def test_the_request_dropped_after_selecting_bpio2_is_retried():
-    fake = FakeBp6(bpio_active=False)
-    make(fake, reply_timeout=0.3).open()
-    assert fake.requests == ["status"]  # the dropped one never counted
+def test_nothing_is_sent_while_bpio2_is_starting_up():
+    # The real board needs ~2.8 s after BPIO2 is selected; anything sent
+    # sooner is lost, and has left its terminal silent until a replug.
+    fake = FakeBp6(bpio_active=False, bpio_settle=0.3)
+    make(fake, reply_timeout=0.3, bpio2_settle=0.4).open()
+    assert not fake.terminal_wedged
+    assert fake.requests == ["status"]
+
+
+def test_bpio2_already_on_is_not_selected_again():
+    fake = FakeBp6()
+    make(fake).open()
+    assert b"binmode" not in fake.terminal.written
 
 
 def test_a_terminal_held_elsewhere_still_connects_when_bpio2_is_on():

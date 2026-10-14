@@ -7,6 +7,8 @@ the driver asks; it is not a firmware emulator.
 
 from __future__ import annotations
 
+import time
+
 import flatbuffers
 
 from .bp6.bpio import ConfigurationRequest as _CR
@@ -82,7 +84,8 @@ class FakeBp6:
     TERMINAL = "/dev/cu.usbmodem6buspirate1"
     BINARY = "/dev/cu.usbmodem6buspirate3"
 
-    def __init__(self, bpio_active: bool = True, color_prompt: bool = False, load_ma: int = 12) -> None:
+    def __init__(self, bpio_active: bool = True, color_prompt: bool = False, load_ma: int = 12,
+                 bpio_settle: float = 0.2) -> None:
         self.bpio_active = bpio_active
         self.color_prompt = color_prompt
         self.load_ma = load_ma
@@ -110,8 +113,10 @@ class FakeBp6:
         self._terminal_state = "prompt"
         #: True once Ctrl-C has hit the colour question: nothing answers.
         self.terminal_wedged = False
-        #: Set when BPIO2 is selected: the real board drops the next request.
-        self.drop_next_request = False
+        #: How long BPIO2 takes to start answering once selected (real board:
+        #: about 2.8 s). Requests before then are lost and wedge the terminal.
+        self.bpio_settle = bpio_settle
+        self._bpio_ready_at = 0.0
         self.binary = _Port(self._on_binary)
         self.terminal = _Port(self._on_terminal)
 
@@ -139,11 +144,13 @@ class FakeBp6:
             # avoids it by asking the terminal first.
             self.terminal_wedged = True
             return
+        if time.monotonic() < self._bpio_ready_at:
+            # Seen on the real board: BPIO2 takes about 2.8 s to answer after
+            # it is selected, and requests sent before then went unanswered
+            # and, at least twice, left the terminal silent until a replug.
+            self.terminal_wedged = True
+            return
         for raw in self._reader.feed(data):
-            if self.drop_next_request:
-                # The first request after BPIO2 is selected goes unanswered.
-                self.drop_next_request = False
-                continue
             packet = _RP.RequestPacket.GetRootAs(cobs_decode(raw[:-1]), 0)
             kind, table = packet.ContentsType(), packet.Contents()
             if kind == RequestPacketContents.StatusRequest:
@@ -348,7 +355,7 @@ class FakeBp6:
         elif self._terminal_state == "binmode-save" and line in ("n\r", "y\r"):
             self._terminal_state = "prompt"
             self.bpio_active = True
-            self.drop_next_request = True
+            self._bpio_ready_at = time.monotonic() + self.bpio_settle
             self._say(line[0] + "\n\r\n\r\nHiZ> ")
         elif line == "binmode\r":
             self._terminal_state = "binmode-menu"
