@@ -125,9 +125,19 @@ def test_no_limit_needs_the_tick_too(client):
     assert state(client)["status"]["power"]["on"] is False
 
 
+def test_a_supply_that_will_not_start_is_explained(client):
+    connect(client)  # the simulated target draws 12 mA
+    status, body = run(client, "power6", "set_supply", millivolts=3300, limit_ma=5,
+                       confirm_high=False)
+    assert status != 200
+    assert "would not start" in str(body) and "5 mA limit" in str(body)
+    assert state(client)["status"]["power"]["on"] is False
+
+
 def test_a_tripped_supply_is_reported_with_a_re_enable_action(client):
     connect(client)
-    run(client, "power6", "set_supply", millivolts=3300, limit_ma=5, confirm_high=False)
+    run(client, "power6", "set_supply", millivolts=3300, limit_ma=20, confirm_high=False)
+    client.app.state.session.bp.serial.owner.set_load(50)  # a short, while running
     power = state(client)["status"]["power"]
     assert power["tripped"] and not power["on"]
     status, body = run(client, "power6", "readings")

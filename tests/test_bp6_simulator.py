@@ -19,15 +19,62 @@ def test_status_matches_the_real_board():
     assert status.max_read == 512
 
 
-def test_power_and_trip():
+def _status(link):
+    return link.request(protocol.status_request()).status
+
+
+def _supply(link, ma):
+    return link.request(protocol.configuration_request(psu_enable=True, psu_mv=3300, psu_ma=ma))
+
+
+def test_power_within_the_limit():
     fake = FakeBp6(load_ma=50)
     link = link_to(fake)
-    link.request(protocol.configuration_request(psu_enable=True, psu_mv=3300, psu_ma=300))
-    status = link.request(protocol.status_request()).status
+    assert _supply(link, 300).error is None
+    status = _status(link)
     assert status.psu_enabled and status.psu_mv == 3300 and status.psu_ma == 50
-    link.request(protocol.configuration_request(psu_enable=True, psu_mv=3300, psu_ma=20))
-    status = link.request(protocol.status_request()).status
+
+
+# Seen on the real board (2026-10-16, an 818 Ω load drawing 4 mA): switching
+# on into a load over the limit, or lowering the limit under it, is refused
+# outright — the supply stays off and the trip flag stays clear.
+
+
+def test_switching_on_into_too_much_load_is_refused():
+    fake = FakeBp6(load_ma=4)
+    link = link_to(fake)
+    assert _supply(link, 1).error == "Power supply initialization failed"
+    status = _status(link)
+    assert not status.psu_enabled and not status.psu_tripped
+
+
+def test_lowering_the_limit_under_the_load_is_refused():
+    fake = FakeBp6(load_ma=4)
+    link = link_to(fake)
+    _supply(link, 10)
+    assert _supply(link, 2).error == "Power supply initialization failed"
+    status = _status(link)
+    assert not status.psu_enabled and not status.psu_tripped
+
+
+def test_a_load_added_while_running_trips_and_the_trip_stays_until_it_can_start():
+    fake = FakeBp6(load_ma=1)
+    link = link_to(fake)
+    _supply(link, 3)
+    fake.set_load(4)
+    status = _status(link)
     assert status.psu_tripped and not status.psu_enabled
+    # Switching off does not clear the trip, and switching back on into the
+    # same load is not refused: it stays off and tripped.
+    link.request(protocol.configuration_request(psu_disable=True))
+    assert _status(link).psu_tripped
+    assert _supply(link, 3).error is None
+    status = _status(link)
+    assert status.psu_tripped and not status.psu_enabled
+    # A limit the load fits under brings it back and clears the trip.
+    _supply(link, 10)
+    status = _status(link)
+    assert status.psu_enabled and not status.psu_tripped
 
 
 def test_i2c_register_read():

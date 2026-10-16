@@ -18,6 +18,8 @@ log = logging.getLogger(__name__)
 
 MIN_MV, MAX_MV = 800, 5000
 MAX_MA = 500
+#: The firmware's whole answer when the supply cannot start.
+PSU_REFUSED = "Power supply initialization failed"
 
 
 class BusPirate6(SerialLink):
@@ -182,6 +184,14 @@ class BusPirate6(SerialLink):
 
     def configure(self, **fields) -> None:
         response = self.link.request(protocol.configuration_request(**fields))
+        if response.error == PSU_REFUSED and fields.get("psu_enable"):
+            # On the real board this is a load over the current limit at
+            # switch-on, or a limit lowered under the load (2026-10-16).
+            limit = fields.get("psu_ma") or self.psu_ma
+            raise ModeError(
+                f"The supply would not start: the target draws more than the {limit} mA "
+                "limit. Check the wiring for a short, or raise the limit."
+            )
         if response.error:
             raise ModeError(f"the Bus Pirate 6 refused that: {response.error}")
 

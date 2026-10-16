@@ -55,6 +55,25 @@ def test_power_on_off_and_limits():
         bp.set_power(True, milliamps=600)
 
 
+def test_a_supply_that_will_not_start_says_why_in_plain_words():
+    fake = FakeBp6(load_ma=4)
+    bp = make(fake).open()
+    with pytest.raises(ModeError) as refused:
+        bp.set_power(True, millivolts=3300, milliamps=1)
+    message = str(refused.value)
+    assert "would not start" in message and "1 mA limit" in message
+    assert "initialization failed" not in message
+
+
+def test_a_bus_panels_power_tick_says_why_too():
+    fake = FakeBp6(load_ma=4)
+    bp = make(fake).open()
+    bp.psu_mv, bp.psu_ma = 3300, 2
+    with bp.i2c() as i2c:
+        with pytest.raises(ModeError, match="would not start"):
+            i2c.configure_peripherals(power=True)
+
+
 def test_a_board_error_is_a_mode_error():
     bp = make(FakeBp6()).open()
     with pytest.raises(ModeError, match="Invalid mode name"):

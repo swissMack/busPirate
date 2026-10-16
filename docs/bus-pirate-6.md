@@ -67,6 +67,8 @@ The **Power & pull-ups** panel controls the supply on the **VOUT** pin.
 - A **current limit** from 1 to 500 mA, 300 mA unless you change it. If the
   target draws more, the board cuts the power. The status bar and the panel
   say **Current limit tripped**; fix the fault, then press **Re-enable**.
+  If the target already draws too much when you switch on, the board does
+  not start the supply at all: the app says **The supply would not start**.
 - The quick buttons switch the supply on at **1.8, 3.3 or 5.0 V** in one
   click. 5.0 V asks first, because it can damage a 3.3 V part.
 - **Set voltage and current limit** takes any value. Going above 3.6 V, or
@@ -139,7 +141,7 @@ terminal).
 
 **The supply keeps switching itself off.** That is the current limit
 tripping. Look for a short, or raise the limit if the target really needs
-more.
+more. **"The supply would not start"** is the same fault caught at switch-on.
 
 **Nothing found on I2C.** Switch on the supply (or power the target), switch
 on the pull-ups, and check SDA is on IO0 and SCL on IO1.
