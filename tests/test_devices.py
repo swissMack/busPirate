@@ -261,6 +261,14 @@ def test_max31855_names_its_faults():
     assert "nothing is driving MISO" in max31855.decode(b"\xff\xff\xff\xff")[0][1]
 
 
+def test_max31855_all_zeros_points_at_the_clock_too():
+    # Seen on a real board: CLK on the wrong lead gives all zeros, because
+    # the chip keeps sending its first bit (the sign, 0) without a clock.
+    note = max31855.decode(b"\x00\x00\x00\x00")[0][1]
+    assert "CLK (purple)" in note
+    assert "MISO" in note
+
+
 # -- AD595 -------------------------------------------------------------------
 
 

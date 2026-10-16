@@ -211,6 +211,25 @@ parts and then with the probe cable alone:
       nothing on the ADC lead it reads a clean 0.000 V: the input divider
       pulls it to ground
 
+Checked on 2026-10-16 on the same **Bus Pirate v4, firmware 7.0**:
+
+- [x] SPI "Read a sensor" with a MAX31855 module on +3.3V (1 MHz, mode 0)
+      and a sheathed K-type probe. In hot water it read about 36.5 °C, in
+      cold water about 0 °C, with readings down to −0.50 °C (`ff f8 …`). The
+      chip's own temperature was 26–30 °C and no fault bit was set. The probe
+      is only checked for direction: against hand-guessed water temperatures
+      it read about 5 °C low at both ends, and that is the module's offset,
+      not the Bus Pirate's.
+  - **All zeros meant CLK was on the wrong lead.** Grey is MOSI; CLK is
+    **purple**. Without a clock the chip keeps sending its first bit (0), so
+    every read was `00 00 00 00`.
+  - **Do not touch a sheathed probe while it measures.** Most sheathed probes
+    are grounded-junction (the tip is welded to the sheath), so a hand or a
+    mouth on the sheath couples mains hum into the microvolt input. The
+    reading fell 10–20 °C *below* the chip's temperature, whichever way round
+    the leads were, which looks like reversed polarity but is not. Test in a
+    cup of water with your hands off the probe.
+
 ## Not yet verified against hardware
 
 These still deserve a check the first time you have the hardware, and a bug
@@ -223,8 +242,6 @@ report here if they are wrong:
       been checked against the documentation, not a scope.
 - [ ] A flash erase/write/verify round trip on a real chip, ideally one you
       have dumped first
-- [ ] SPI "Read a sensor" with a real MAX31855 — checked against its
-      datasheet only
 - [ ] The I2C and SPI sniffers against real traffic — in particular whether
       stopping resynchronises cleanly on your firmware version
 - [ ] v4: the measured LED and pin coordinates land on the real parts
