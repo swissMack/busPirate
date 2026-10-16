@@ -265,8 +265,9 @@ def test_max31855_all_zeros_points_at_the_clock_too():
     # Seen on a real board: CLK on the wrong lead gives all zeros, because
     # the chip keeps sending its first bit (the sign, 0) without a clock.
     note = max31855.decode(b"\x00\x00\x00\x00")[0][1]
-    assert "CLK (purple)" in note
-    assert "MISO" in note
+    assert "CLK" in note and "MISO" in note
+    # Every board reads this: no cable colours, which differ between them.
+    assert "purple" not in note
 
 
 # -- AD595 -------------------------------------------------------------------
