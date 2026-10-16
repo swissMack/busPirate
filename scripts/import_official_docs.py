@@ -71,6 +71,11 @@ def _plain(markup: str) -> str:
     return "\n".join(line.rstrip() for line in text.strip("\n").splitlines())
 
 
+def _without_suffix(text: str, suffix: str) -> str:
+    # str.removesuffix is Python 3.9+, and CI still runs 3.8.
+    return text[: -len(suffix)] if suffix and text.endswith(suffix) else text
+
+
 def _relref(target: str) -> str:
     path, _, anchor = target.partition("#")
     # Some links were written against a local preview server.
@@ -129,7 +134,7 @@ def convert_page(text: str, page_path: str, repo: Path, report: List[str]) -> Tu
         report.append(f"{page_path}: dropped shortcode {match.group(1)}")
         return ""
 
-    page_url = page_path.replace("content/", "").removesuffix(".md").removesuffix("/_index") + "/"
+    page_url = _without_suffix(_without_suffix(page_path.replace("content/", ""), ".md"), "/_index") + "/"
     text = _READFILE.sub(readfile, text)
     text = _ALERT.sub(alert, text)
     text = _TERM.sub(lambda m: "```text\n" + _plain(m.group(1)) + "\n```", text)
