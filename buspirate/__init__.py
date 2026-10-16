@@ -54,4 +54,4 @@ __all__ = [
 
 # The one place the version lives: pyproject.toml reads it from here, the
 # app build reads it from here, and the dashboard shows it in its top bar.
-__version__ = "0.6.0"
+__version__ = "0.6.1"
