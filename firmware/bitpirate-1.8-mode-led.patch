@@ -1,0 +1,180 @@
+From 47df2fc283be1d243313d15cbb7c7395ede122f2 Mon Sep 17 00:00:00 2001
+From: swissMack <tmackmood@gmail.com>
+Date: Mon, 12 Oct 2026 13:01:23 +0200
+Subject: [PATCH] Show the current mode on the S3 DevKit's RGB LED
+
+The DevKit has no screen, so its built-in WS2812 (GPIO48) becomes its
+device view: RgbLedView lights it in the colour of the current mode on
+show(), and the system menu's Screen brightness sets how bright it is.
+HIZ is dark, I2C blue, SPI green, UART/HDUART yellow, 1WIRE cyan, any
+other mode dim white. GPIO48 is added to the protected pins so no mode
+can drive it, and the help lists the colours.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+---
+ platformio.ini                         |  6 ++--
+ src/Boards/Common/Views/RgbLedView.cpp | 45 ++++++++++++++++++++++++++
+ src/Boards/Common/Views/RgbLedView.h   | 28 ++++++++++++++++
+ src/Boards/S3DevKit/S3DevKitBoard.h    |  4 +--
+ src/Shells/HelpShell.cpp               |  5 +++
+ 5 files changed, 83 insertions(+), 5 deletions(-)
+ create mode 100644 src/Boards/Common/Views/RgbLedView.cpp
+ create mode 100644 src/Boards/Common/Views/RgbLedView.h
+
+diff --git a/platformio.ini b/platformio.ini
+index 29dbea84..a7ecac0b 100644
+--- a/platformio.ini
++++ b/platformio.ini
+@@ -453,7 +453,7 @@ build_flags =
+   -DDEVICE_S3DEVKIT
+ 
+   ; --- Pin in use ---
+-  -DPROTECTED_PINS="\"3, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 45, 46\""
++  -DPROTECTED_PINS="\"3, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 45, 46, 48\""
+ 
+   ; --- Builtin LED ---
+   -DLED_PIN=48
+@@ -531,7 +531,7 @@ build_flags =
+   -DDEVICE_S3DEVKIT
+ 
+   ; --- Pin in use ---
+-  -DPROTECTED_PINS="\"3, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 45, 46\""
++  -DPROTECTED_PINS="\"3, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 45, 46, 48\""
+ 
+   ; --- Builtin LED ---
+   -DLED_PIN=48
+@@ -613,7 +613,7 @@ build_flags =
+   -DDEVICE_S3DEVKIT
+ 
+   ; --- Pin in use ---
+-  -DPROTECTED_PINS="\"19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 45, 46\""
++  -DPROTECTED_PINS="\"19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 45, 46, 48\""
+ 
+   ; --- Builtin LED ---
+   -DLED_PIN=48 -DLED_TYPE_RGB=true
+diff --git a/src/Boards/Common/Views/RgbLedView.cpp b/src/Boards/Common/Views/RgbLedView.cpp
+new file mode 100644
+index 00000000..0c2ee3dc
+--- /dev/null
++++ b/src/Boards/Common/Views/RgbLedView.cpp
+@@ -0,0 +1,45 @@
++#include "RgbLedView.h"
++
++#include <Arduino.h>
++
++RgbLedView::RgbLedView(uint8_t pin) : pin(pin) {}
++
++void RgbLedView::initialize() {
++    clear();
++}
++
++void RgbLedView::show(PinoutConfig& config) {
++    mode = ModeEnumMapper::fromString(config.getMode());
++    write();
++}
++
++void RgbLedView::clear() {
++    mode = ModeEnum::HIZ;
++    write();
++}
++
++void RgbLedView::setBrightness(uint8_t value) {
++    brightness = value;
++    write();
++}
++
++uint8_t RgbLedView::getBrightness() {
++    return brightness;
++}
++
++void RgbLedView::write() {
++    const uint8_t level = brightness;
++    uint8_t r = 0, g = 0, b = 0;
++    switch (mode) {
++        case ModeEnum::HIZ:
++        case ModeEnum::None:    break;                          // off
++        case ModeEnum::I2C:     b = level; break;               // blue
++        case ModeEnum::SPI:     g = level; break;               // green
++        case ModeEnum::UART:
++        case ModeEnum::HDUART:  r = level; g = level; break;    // yellow
++        case ModeEnum::OneWire: g = level; b = level; break;    // cyan
++        default:                r = g = b = level / 3; break;   // dim white
++    }
++    // The core's own RMT driver, not FastLED: LED mode owns FastLED.
++    rgbLedWrite(pin, r, g, b);
++}
+diff --git a/src/Boards/Common/Views/RgbLedView.h b/src/Boards/Common/Views/RgbLedView.h
+new file mode 100644
+index 00000000..949cb272
+--- /dev/null
++++ b/src/Boards/Common/Views/RgbLedView.h
+@@ -0,0 +1,28 @@
++#pragma once
++
++#include "Boards/Common/Views/NoScreenDeviceView.h"
++
++// A board's built-in RGB LED as a one-pixel display: show() lights it in the
++// colour of the current mode. Everything a screen would draw is a no-op,
++// inherited from NoScreenDeviceView.
++//
++// HIZ is dark (every pin released), I2C blue, SPI green, UART/HDUART yellow,
++// 1WIRE cyan, any other mode dim white.
++class RgbLedView : public NoScreenDeviceView {
++public:
++    explicit RgbLedView(uint8_t pin);
++
++    void initialize() override;
++    void show(PinoutConfig& config) override;
++    void clear() override;
++    void setBrightness(uint8_t brightness) override;
++    uint8_t getBrightness() override;
++
++private:
++    void write();
++
++    uint8_t pin;
++    // Low on purpose: a WS2812 at full power is blinding on the desk.
++    uint8_t brightness = 24;
++    ModeEnum mode = ModeEnum::HIZ;
++};
+diff --git a/src/Boards/S3DevKit/S3DevKitBoard.h b/src/Boards/S3DevKit/S3DevKitBoard.h
+index e33aaa90..ec5f8b7c 100644
+--- a/src/Boards/S3DevKit/S3DevKitBoard.h
++++ b/src/Boards/S3DevKit/S3DevKitBoard.h
+@@ -2,7 +2,7 @@
+ 
+ #ifdef DEVICE_S3DEVKIT
+ 
+-#include "Boards/Common/Views/NoScreenDeviceView.h"
++#include "Boards/Common/Views/RgbLedView.h"
+ #include "Boards/Common/Inputs/DefaultInput.h"
+ #include "Boards/Common/Serial/BoardHostSerial.h"
+ 
+@@ -15,7 +15,7 @@ public:
+ 
+ private:
+     BoardHostSerial hostSerial;
+-    NoScreenDeviceView deviceView;
++    RgbLedView deviceView{LED_PIN};
+     DefaultInput deviceInput;
+ };
+ 
+diff --git a/src/Shells/HelpShell.cpp b/src/Shells/HelpShell.cpp
+index e42af478..a4fff3c6 100644
+--- a/src/Shells/HelpShell.cpp
++++ b/src/Shells/HelpShell.cpp
+@@ -115,6 +115,11 @@ void HelpShell::cmdGeneral() {
+         "P                    - Enable pull-up",
+         "p                    - Disable pull-up",
+         "",
++#if defined(DEVICE_S3DEVKIT) && defined(LED_PIN) && LED_TYPE_RGB
++        "Board LED: off HIZ, blue I2C, green SPI,",
++        "  yellow UART/HDUART, cyan 1WIRE, white other",
++        "",
++#endif
+         "Tip: use 'mode' (or 'm')."
+     };
+ 
+-- 
+2.54.0 (Apple Git-157)
+

@@ -30,8 +30,8 @@ or run `buspirate dashboard --demo --variant bitpirate`.
 
 ## The board LED (mode colours)
 
-With the [mode-LED firmware](#installing-the-mode-led-firmware) (version `1.7-led`), the
-DevKit's RGB LED shows which mode the board is in:
+With the [mode-LED firmware](#installing-the-mode-led-firmware), the DevKit's
+RGB LED shows which mode the board is in:
 
 | LED | Mode | What it means |
 |-----|------|---------------|
@@ -49,22 +49,22 @@ when connected, blue when no network is saved, red when it fails).
 
 ### Installing the mode-LED firmware
 
-The LED colours come from a small patch to geo-tp's v1.7 firmware, kept in
-this repo as `firmware/bitpirate-1.7-mode-led.patch`. It changes nothing the
-dashboard relies on; the board reports its version as `1.7-led`. It also
-adds pin 48 (the LED) to the protected pins, and puts the colour key in the
-board's own `help`.
-
-The patch also pins FastLED to 3.10.3: geo-tp's config asks for `^3.3.3`,
-and every FastLED released since no longer builds with this source.
+The LED colours come from a small patch to geo-tp's v1.8 firmware, kept in
+this repo as `firmware/bitpirate-1.8-mode-led.patch` and offered upstream as
+[PR #191](https://github.com/geo-tp/ESP32-Bit-Pirate/pull/191). It makes the
+LED the DevKit's display (`RgbLedView`): each mode change lights it, and the
+**Screen brightness** setting in the board's `system` menu sets how bright it
+is (default 9 %). It changes nothing the dashboard relies on; the board still
+reports version `1.8`. It also adds pin 48 (the LED) to the protected pins,
+and puts the colour key in the board's own `help`.
 
 Build it with [PlatformIO](https://platformio.org), then merge the parts
 into one image:
 
 ```sh
-git clone --branch v1.7 https://github.com/geo-tp/ESP32-Bit-Pirate.git
+git clone --branch v1.8 https://github.com/geo-tp/ESP32-Bit-Pirate.git
 cd ESP32-Bit-Pirate
-git apply /path/to/busPirate/firmware/bitpirate-1.7-mode-led.patch
+git apply /path/to/busPirate/firmware/bitpirate-1.8-mode-led.patch
 pio run -e s3-devkit-n16-r8          # or s3-devkit for an 8 MB board
 B=.pio/build/s3-devkit-n16-r8
 python3 -m esptool --chip esp32s3 merge_bin -o $B/firmware.factory.bin \
@@ -87,7 +87,7 @@ On the USB TTL (CH340) port, use the default reset and `--baud 460800`:
 921600 fails there.
 
 To go back to stock, flash the release `.bin` from
-[geo-tp's releases](https://github.com/geo-tp/ESP32-Bit-Pirate/releases/tag/v1.7)
+[geo-tp's releases](https://github.com/geo-tp/ESP32-Bit-Pirate/releases/tag/v1.8)
 at `0x0` the same way.
 
 ## How it differs from a Bus Pirate
