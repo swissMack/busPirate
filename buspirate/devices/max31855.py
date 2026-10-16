@@ -5,8 +5,8 @@ find the chip: the user picks it from a list, and ``measure`` takes no
 address. This chip has no commands either — take CS low and clock out 4
 bytes.
 
-Not yet tried on real hardware: the decoder is checked against the
-datasheet's own example values only.
+Checked on a real board (Bus Pirate v4, firmware 7.0) on 2026-10-16,
+including a reading below 0 °C.
 """
 
 from __future__ import annotations
@@ -28,9 +28,14 @@ def decode(raw: bytes) -> Meaning:
     if len(raw) < 4:
         return [("MAX31855", f"needs 4 bytes to translate, got {len(raw)}")]
     word = int.from_bytes(raw[:4], "big")
-    if word in (0x00000000, 0xFFFFFFFF):
-        return [("Note", f"all bits {'0' if word == 0 else '1'}: nothing is driving MISO. "
+    if word == 0xFFFFFFFF:
+        return [("Note", "all bits 1: nothing is driving MISO. "
                          "Check MISO, CS and the chip's power.")]
+    if word == 0x00000000:
+        # Without a clock the chip keeps sending its first bit, the sign: 0.
+        return [("Note", "all bits 0: the chip is not sending. Check CLK (purple), "
+                         "MISO, CS and the chip's power — a missing clock gives "
+                         "all zeros too.")]
     thermocouple = _signed(word >> 18, 14) * 0.25
     internal = _signed((word >> 4) & 0xFFF, 12) * 0.0625
     meaning = [
