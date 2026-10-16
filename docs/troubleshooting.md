@@ -287,25 +287,47 @@ connect again. Firmware older than 2026-10-12 has no UART in BPIO2; update it
 (see [Bus Pirate 6](bus-pirate-6.md#updating-the-firmware)).
 
 **The supply switches itself off.** The current limit tripped. Look for a
-short, then press **Re-enable** on the Power & pull-ups panel.
+short, then press **Re-enable** on the Power & pull-ups panel. If it stays
+off, the fault is still there: fix it, or set a higher limit first.
+
+**"The supply would not start".** The target already draws more than the
+limit when the supply is switched on (or the limit was lowered below what it
+draws). The firmware refuses to start rather than tripping, so there is
+nothing to re-enable: look for a short, or raise the limit.
 
 ### Checklist on a real board
 
-Run this once per firmware update. Last run on 2026-10-14 against the owner's
-BP6 (hardware 6.2, firmware built 2026-10-12), with nothing wired to its pins.
+Run this once per firmware update. First run on 2026-10-14 against the
+owner's BP6 (hardware 6.2, firmware built 2026-10-12) with nothing wired to
+its pins; the wired checks followed on 2026-10-16, on the same firmware, with
+the supply at 3.3 V and a 100 mA limit unless noted.
 
 - [x] Unplug and replug, then connect: BPIO2 is switched on, nothing saved
       (about 6 s, mostly waiting for BPIO2 to start).
 - [x] The status bar says `Bus Pirate 6, firmware 2026-10-12`.
 - [x] **3.3 V** switches the supply on: 3.33 V measured, 1 mA with nothing attached.
-- [ ] A 1 mA limit with a load trips; **Re-enable** brings the supply back.
-      (Not yet: needs a load drawing a few mA.)
+- [x] Current limit, with an 818 Ω resistor from VOUT to GND (about 4 mA):
+      a 10 mA limit holds it (3.30–3.36 V, 3–4 mA). Fitting the resistor
+      while the supply runs at a 3 mA limit **trips** it: off, and the trip
+      flag set, which survives switching off and reconnecting. **Re-enable**
+      with the resistor still on leaves it off and tripped; with the limit
+      raised to 10 mA it comes back and the flag clears. Switching **on** into
+      the resistor at 1 mA, or lowering the limit to 2 mA under it, is
+      refused instead ("Power supply initialization failed", no trip flag) —
+      the app says the supply would not start, and why.
 - [x] Pull-ups on: every IO reading rises to VOUT (3.29–3.31 V; 1.77 V at 1.8 V).
-- [ ] I2C scan finds a real chip. (Unwired scan returns nothing, cleanly, twice.)
+- [x] I2C scan finds a real chip: an AHT20 + BMP280 module on IO0/IO1,
+      pull-ups off (it has its own). The scan finds exactly 0x38 and 0x77;
+      Read the sensors gives 29.82 °C / 30.3 %RH (CRC OK) and 30.51 °C /
+      941.17 hPa. (Unwired, the scan returns nothing, cleanly, twice.)
 - [ ] SPI **Identify the chip** reads a flash's JEDEC ID. (Unwired: `ff ff ff`;
       a 1200-byte read completes.)
-- [ ] UART loopback (IO4 to IO5) shows what was sent. (Unwired: nothing back.)
-- [ ] 1-Wire **Find devices** finds a DS18B20. (Unwired: "no 1-Wire device answered".)
+- [x] UART loopback (IO4 to IO5) at 115200: "Hi", "Hello" and a 44-byte
+      message come back complete, and nothing arrives before anything is
+      sent. (Unwired: nothing back.)
+- [x] 1-Wire **Find devices** finds a DS18B20 on IO0 with an external
+      4.7 kΩ pull-up to VOUT: ROM `28 7f 4b 6e 00 00 00 be`, 25.50 °C three
+      times, CRC OK. (Unwired: "no 1-Wire device answered".)
 - [x] Terminal opens, `i` answers, and closing it re-reads the board.
 - [x] `buspirate ping` from the command line reports `protocol BPIO2`.
 

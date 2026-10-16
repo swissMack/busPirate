@@ -175,6 +175,15 @@ class FakeBp6:
 
     # -- the target ----------------------------------------------------------
 
+    def over_limit(self) -> bool:
+        return 0 < self.psu_ma < self.load_ma
+
+    def set_load(self, milliamps: int) -> None:
+        """Change what the target draws, as when a part is plugged in."""
+        self.load_ma = milliamps
+        if self.psu_enabled and self.over_limit():
+            self.psu_enabled, self.psu_tripped = False, True
+
     def uart_receive(self, data: bytes) -> None:
         self.binary.send(frame(self._data_response(bytes(data), is_async=True)))
 
@@ -287,12 +296,19 @@ class FakeBp6:
             if not 800 <= request.PsuSetMv() <= 5000:
                 error = "PSU voltage out of range"
             else:
+                # As the real board did on 2026-10-16: a load over the limit
+                # is refused at switch-on, unless the supply has tripped, in
+                # which case it just stays off and tripped. A load the limit
+                # covers brings it on and clears the trip.
                 self.psu_mv, self.psu_ma = request.PsuSetMv(), request.PsuSetMa()
-                self.psu_tripped = 0 < self.psu_ma < self.load_ma
-                self.psu_enabled = not self.psu_tripped
+                if self.over_limit():
+                    self.psu_enabled = False
+                    if not self.psu_tripped:
+                        error = "Power supply initialization failed"
+                else:
+                    self.psu_enabled, self.psu_tripped = True, False
         if request.PsuDisable():
-            self.psu_enabled = False
-            self.psu_tripped = False
+            self.psu_enabled = False  # the trip flag stays, as on the real board
         if request.PullupEnable():
             self.pullups = True
         if request.PullupDisable():
