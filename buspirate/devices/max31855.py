@@ -33,7 +33,7 @@ def decode(raw: bytes) -> Meaning:
                          "Check MISO, CS and the chip's power.")]
     if word == 0x00000000:
         # Without a clock the chip keeps sending its first bit, the sign: 0.
-        return [("Note", "all bits 0: the chip is not sending. Check CLK (purple), "
+        return [("Note", "all bits 0: the chip is not sending. Check CLK, "
                          "MISO, CS and the chip's power — a missing clock gives "
                          "all zeros too.")]
     thermocouple = _signed(word >> 18, 14) * 0.25

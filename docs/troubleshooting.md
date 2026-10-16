@@ -290,6 +290,13 @@ connect again. Firmware older than 2026-10-12 has no UART in BPIO2; update it
 short, then press **Re-enable** on the Power & pull-ups panel. If it stays
 off, the fault is still there: fix it, or set a higher limit first.
 
+**An SPI chip reads all zeros, or all ones.** Check each lead by the
+heat-shrink label on the cable end, not the labels by the board's connector,
+which do not line up exactly with the pins. To tell a missing MISO from a
+missing clock, switch the pull-ups on and read again: a MISO lead that goes
+nowhere then reads `ff ff ff ff`, while a chip that is powered but not clocked
+still reads zeros. **Read voltages and current** shows what each IO pin sits at.
+
 **"The supply would not start".** The target already draws more than the
 limit when the supply is switched on (or the limit was lowered below what it
 draws). The firmware refuses to start rather than tripping, so there is
@@ -328,6 +335,10 @@ the supply at 3.3 V and a 100 mA limit unless noted.
 - [x] 1-Wire **Find devices** finds a DS18B20 on IO0 with an external
       4.7 kΩ pull-up to VOUT: ROM `28 7f 4b 6e 00 00 00 be`, 25.50 °C three
       times, CRC OK. (Unwired: "no 1-Wire device answered".)
+- [x] SPI **Read a sensor** with a MAX31855 module (MISO IO4, CS IO5, CLK
+      IO6, 1 MHz, mode 0): the probe at rest read 25.25 °C, the chip
+      28.9–29.1 °C, no fault, in line with the DS18B20's 25.50 °C on the
+      same bench.
 - [x] Terminal opens, `i` answers, and closing it re-reads the board.
 - [x] `buspirate ping` from the command line reports `protocol BPIO2`.
 

@@ -102,7 +102,10 @@ More: [Pull-up resistors](official/tutorial-basics/pullup-resistors.md).
 | UART | TX **IO4**, RX **IO5** |
 | 1-Wire | data **IO0** |
 
-The header reads VOUT, IO0 to IO7, GND. The hook-up drawing on each panel
+The header reads VOUT, IO0 to IO7, GND, so IO4 is the **sixth** pin, not
+the fourth. Go by the **heat-shrink labels on the cable ends**: the labels on
+the board's connector do not line up exactly with the pins, and on
+2026-10-16 that put a MAX31855 one pin off. The hook-up drawing on each panel
 shows the pins that panel uses. **Read voltages and current** on the Power
 panel lists the voltage on every IO pin, labelled with its job in the current
 mode.
