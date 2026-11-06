@@ -1,0 +1,24 @@
+diff --git a/platformio.ini b/platformio.ini
+index a7ecac0b..773c3f00 100644
+--- a/platformio.ini
++++ b/platformio.ini
+@@ -471,7 +471,8 @@ build_flags =
+   -DHDUART_PIN=17
+ 
+   ; --- I2C ---
+-  -DI2C_SCL_PIN=7 -DI2C_SDA_PIN=6
++  ; The Bit Pirate Dock carries IO15/IO16 to its header, not 6/7.
++  -DI2C_SCL_PIN=16 -DI2C_SDA_PIN=15
+   -DI2C_FREQ=100000
+ 
+   ; --- SPI ---
+@@ -549,7 +550,8 @@ build_flags =
+   -DHDUART_PIN=17
+ 
+   ; --- I2C ---
+-  -DI2C_SCL_PIN=7 -DI2C_SDA_PIN=6
++  ; The Bit Pirate Dock carries IO15/IO16 to its header, not 6/7.
++  -DI2C_SCL_PIN=16 -DI2C_SDA_PIN=15
+   -DI2C_FREQ=100000
+ 
+   ; --- SPI ---
