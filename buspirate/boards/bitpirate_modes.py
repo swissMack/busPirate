@@ -67,6 +67,9 @@ DIO = CliMode(
     blurb="Drive, read and time the header pins one at a time: levels, PWM, pulses, servos.",
     doc="bitpirate-wiki/09-dio",
     wires=(("IO15 … IO13", "the target pin", "whichever header pin you pick in each action"),),
+    # Leaving DIO resets nothing (ModeController releaseMode skips it), so a
+    # pin set high, a PWM or a servo would carry on after HiZ.
+    release=tuple(f"reset {g}" for g in DOCK_GPIOS),
     commands=(
         CliCommand("read", "Read a pin", "read {pin}", (_PIN,)),
         CliCommand("set", "Set a pin", "set {pin} {level}", (
@@ -132,7 +135,8 @@ WIFI = CliMode(
         # the password may not.
         CliCommand("connect", "Connect", "connect {ssid} {password}", (
             CliParam("ssid", "text", "Network (SSID)"),
-            CliParam("password", "text", "Password", help="No spaces", spaces=False),
+            CliParam("password", "text", "Password", help="No spaces", spaces=False,
+                     secret=True),
         ), timeout=25.0, help="The board remembers it for next time"),
         CliCommand("disconnect", "Disconnect", "disconnect"),
         CliCommand("ping", "Ping a host", "ping {host}", (

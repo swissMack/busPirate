@@ -151,7 +151,7 @@ def test_a_usage_reply_is_an_error_too(bp):
 def test_a_command_that_never_ends_is_stopped_and_reported(bp, fake):
     fake.onewire_devices = []  # "read" then waits for a part forever
     mode = bp.cli_mode(_BY_ID["onewire_cli"])
-    with pytest.raises(ModeError, match="stopped"):
+    with pytest.raises(ModeError, match="Enter was pressed to stop it"):
         mode.run("read", timeout=0.3)
     # Enter stopped it: the board is back at its prompt and takes commands.
     assert fake._state == "prompt"
@@ -276,7 +276,7 @@ def test_running_a_mode_action_returns_lines(client):
     assert "Temperature: 23.50 °C" in result["lines"]
 
 
-def test_a_refusal_is_an_error_in_the_boards_words(client):
+def test_a_firmware_refusal_is_shown_in_the_boards_words(client):
     _connect(client, "simulated-bitpirate")
     response = _run(client, "wifi", "ping", host="8.8.8.8")
     assert response.status_code == 200, response.text  # the board's own answer
@@ -340,3 +340,69 @@ def test_the_simulator_can_have_no_wifi_in_reach(monkeypatch):
     assert FakeBitPirateSerial().wifi_networks == []
     monkeypatch.delenv("BUSPIRATE_SIM_WIFI")
     assert FakeBitPirateSerial().wifi_networks
+
+
+# -- review fixes ------------------------------------------------------------------
+
+
+def test_the_wifi_password_is_never_shown(client):
+    _connect(client, "simulated-bitpirate")
+    response = _run(client, "wifi", "connect", ssid="HomeNet", password="hunter2")
+    assert response.status_code == 200, response.text
+    assert "hunter2" not in response.text
+
+
+def test_the_wifi_password_is_not_in_a_timeout_error(bp):
+    mode = bp.cli_mode(_BY_ID["onewire_cli"])
+    bp.serial.onewire_devices = []
+    with pytest.raises(ModeError) as caught:
+        mode.run("read", timeout=0.3, shown="read ****")
+    assert "read ****" in str(caught.value)
+
+
+def test_a_stopped_autobaud_still_forgets_the_baud_rate(client):
+    from dataclasses import replace
+
+    from buspirate.web.panels.cli_modes import action_for
+
+    _connect(client, "simulated-bitpirate")
+    session = _session(client)
+    uart = session.ensure_mode("uart")
+    session.bp.settings["UART"]["Baud rate"] = "115200"
+    # No target talks, so it is stopped; the board is left at its last probe rate.
+    quick = replace(EXTRA_ACTIONS["uart"][0], timeout=0.3)
+    with pytest.raises(ModeError):
+        action_for(quick).handler(type("Ctx", (), {"mode": uart})())
+    assert "Baud rate" not in session.bp.settings["UART"]
+
+
+def test_hiz_releases_pins_dio_drove(client):
+    _connect(client, "simulated-bitpirate")
+    assert _run(client, "dio", "set", pin=15, level="H").status_code == 200
+    assert _run(client, "dio", "pwm", pin=16, freq=1000, duty=50).status_code == 200
+    assert _run(client, "connection", "hiz").status_code == 200
+    # The board's own record: nothing driven, no PWM.
+    fake = _session(client).bp.serial
+    assert fake.dio_levels == {} and fake.dio_pwm == {}
+    assert fake.mode == "HIZ"
+
+
+def test_a_bad_field_is_refused_before_the_mode_changes(client):
+    _connect(client, "simulated-bitpirate")
+    assert _run(client, "i2c", "scan").status_code == 200
+    fake = _session(client).bp.serial
+    response = _run(client, "wifi", "connect", ssid="", password="x")
+    assert response.status_code == 400
+    assert fake.mode == "I2C"
+    assert not any(c.lower() == "m wifi" for c in fake.commands)
+
+
+def _session(client):
+    for route in client.app.routes:
+        endpoint = getattr(route, "endpoint", None)
+        cells = getattr(endpoint, "__closure__", None) or ()
+        for cell in cells:
+            value = cell.cell_contents
+            if type(value).__name__ == "DeviceSession":
+                return value
+    raise AssertionError("no session")

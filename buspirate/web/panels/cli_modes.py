@@ -9,7 +9,7 @@ the Bit Pirate's extra commands, so the two can never differ.
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any, Dict, List, Optional
 
 from ... import boards
 from ...boards._modes import CliCommand, CliMode, CliParam, cli_mode_capability
@@ -42,20 +42,30 @@ def _param(p: CliParam) -> Param:
                  choices=p.choices, minimum=p.minimum, maximum=p.maximum)
 
 
-def action_for(cmd: CliCommand, requires: str = None) -> Action:
+def action_for(cmd: CliCommand, requires: Optional[str] = None) -> Action:
     """The button for one command: fill in its line, run it, show the reply."""
     by_name = {p.name: p for p in cmd.params}
 
+    def words(values: Dict[str, Any], mask: bool = False) -> str:
+        return cmd.line.format(**{
+            name: "****" if mask and by_name[name].secret else _word(by_name[name], v)
+            for name, v in values.items()
+        })
+
     def handler(ctx, **values):
-        line = cmd.line.format(**{name: _word(by_name[name], v) for name, v in values.items()})
+        line, shown = words(values), words(values, mask=True)
         if cmd.streams:
             ctx.mode.start_stream(line)
             return live(cmd.label, decoder="console",
                         caption="What the board prints, as it prints it. Stop ends it.")
-        said = ctx.mode.run(line, timeout=cmd.timeout)
-        if cmd.forgets:
-            ctx.mode.forget(cmd.forgets)
-        return lines(said, caption=f"The board's reply to '{line}'")
+        try:
+            said = ctx.mode.run(line, timeout=cmd.timeout, shown=shown)
+        finally:
+            # Even a stopped command may have changed them (autobaud leaves
+            # the UART at the last rate it tried).
+            if cmd.forgets:
+                ctx.mode.forget(cmd.forgets)
+        return lines(said, caption=f"The board's reply to '{shown}'")
 
     return Action(
         name=cmd.name,
@@ -65,6 +75,7 @@ def action_for(cmd: CliCommand, requires: str = None) -> Action:
         requires=requires,
         stream=cmd.streams,
         handler=handler,
+        check=words if cmd.params else None,
     )
 
 

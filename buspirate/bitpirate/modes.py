@@ -160,7 +160,7 @@ class _CliMode:
 
     # -- any command -------------------------------------------------------
 
-    def run(self, line: str, timeout: float = 5.0) -> List[str]:
+    def run(self, line: str, timeout: float = 5.0, shown: Optional[str] = None) -> List[str]:
         """Run one command line; return what the board said, nothing else.
 
         The echo and the prompt are left out, and blank lines at either end.
@@ -168,7 +168,8 @@ class _CliMode:
         raised with the board's own words. A command still running when the
         board has been quiet for ``timeout`` seconds — one waiting for a part
         that never answers — is stopped with Enter, which ends every loop the
-        firmware has, and reported.
+        firmware has, and reported. ``shown`` is the line as it may be shown
+        in that report, with any password masked.
         """
         self._check_active()
         try:
@@ -179,8 +180,9 @@ class _CliMode:
             except BusPirateError:
                 pass
             raise ModeError(
-                f"the Bit Pirate was still busy with {line!r} after {timeout:g} s "
-                "without a word, so it was stopped. Is the part connected?"
+                f"the Bit Pirate was still busy with {shown or line!r} after "
+                f"{timeout:g} s without saying more, so Enter was pressed to stop "
+                "it. Is the part connected?"
             ) from exc
         self._check(reply)
         lines = list(reply.lines)

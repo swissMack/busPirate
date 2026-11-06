@@ -28,6 +28,8 @@ class CliParam:
     help: str = ""
     #: False for a word the firmware splits on spaces (a Wi-Fi password).
     spaces: bool = True
+    #: Never shown back: replaced by **** in captions and errors.
+    secret: bool = False
 
 
 @dataclass(frozen=True)
@@ -71,6 +73,10 @@ class CliMode:
     #: Its wiring rows on the dock header, as (signal, target, note); the
     #: panel adds GND before and VIO after. Empty for a radio mode.
     wires: Tuple[Tuple[str, str, str], ...] = ()
+    #: Lines that let go of every pin it may have driven, run in this mode
+    #: on HiZ and on disconnect when it was used: the firmware's own
+    #: ``m hiz`` leaves some modes' outputs (DIO's levels, PWM) running.
+    release: Tuple[str, ...] = ()
 
 
 def cli_mode_capability(mode_id: str) -> str:

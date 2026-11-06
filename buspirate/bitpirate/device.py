@@ -53,6 +53,9 @@ class BitPirate(SerialLink):
         #: What each mode's config dialog was last told, by mode name.
         self.settings: Dict[str, Dict[str, str]] = {}
         self._mode = None
+        #: Modes entered this session whose pins HiZ must let go of itself,
+        #: by mode id (see boards._modes.CliMode.release).
+        self._to_release: Dict[str, object] = {}
 
     # -- connection --------------------------------------------------------
 
@@ -108,7 +111,7 @@ class BitPirate(SerialLink):
         try:
             if self._mode is not None:
                 self._mode.close()
-            self.cli.command("m hiz")
+            self.hiz()
         except (BusPirateError, OSError):
             log.debug("could not leave the board in HiZ; closing anyway", exc_info=True)
         finally:
@@ -167,7 +170,21 @@ class BitPirate(SerialLink):
         """Enter one of the board's own modes, described by a boards CliMode."""
         from .modes import CliModeSession
 
-        return self._enter_mode(CliModeSession, lambda bp: CliModeSession(bp, spec))
+        mode = self._enter_mode(CliModeSession, lambda bp: CliModeSession(bp, spec))
+        if spec.release:
+            self._to_release[spec.id] = spec
+        return mode
+
+    def hiz(self) -> None:
+        """Let go of every pin: undo what modes like DIO left driving, then
+        ``m hiz``. Call with no mode open."""
+        for spec in list(self._to_release.values()):
+            mode = self.cli_mode(spec)
+            for line in spec.release:
+                mode.run(line)
+            mode.close()
+        self._to_release.clear()
+        self.cli.command("m hiz")
 
     # -- streams and the terminal -----------------------------------------
 

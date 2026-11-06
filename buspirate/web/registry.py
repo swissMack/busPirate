@@ -113,6 +113,9 @@ class Action:
     switch: str = ""
     #: The button's text, when it should differ from the card's title.
     button: str = ""
+    #: Called with the coerced params before the device is touched; raises
+    #: ParamError to refuse them, so nothing (not even a mode change) is sent.
+    check: Optional[Callable[[Dict[str, Any]], None]] = None
 
     def to_json(self) -> dict:
         return {
