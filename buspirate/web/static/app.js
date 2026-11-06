@@ -137,7 +137,6 @@ function applyState(data) {
 function render() {
   renderStatus();
   renderNav();
-  renderRecipes();
   const connected = state.status.connected;
   const guiding = state.guide.open;
   $("welcome").hidden = connected || guiding;
@@ -179,18 +178,9 @@ function ledMeans(name) {
 }
 
 
+/* The board picture follows the Connection panel's "Follow the board"
+   choice; the top bar only warns when that disagrees with what is plugged in. */
 function renderVariant() {
-  const select = $("variant");
-  if (!select) return;
-  const wanted = ["auto", ...state.variants];
-  if ([...select.options].map((o) => o.value).join() !== wanted.join()) {
-    select.replaceChildren(
-      el("option", { value: "auto" }, "Follow the board"),
-      ...state.variants.map((v) => el("option", { value: v }, state.variantLabels[v] || v))
-    );
-  }
-  select.value = state.variantSource === "override" ? state.variant : "auto";
-
   // Only a genuine disagreement is worth a warning: an override that matches
   // what is plugged in is harmless.
   const warning = $("variant-warning");
@@ -454,35 +444,6 @@ function panelDoc() {
   return panel ? panel.doc : null;
 }
 
-function renderRecipes() {
-  const strip = $("recipes");
-  const recipes = [];
-  for (const panel of state.panels) {
-    for (const action of panel.actions) {
-      if (action.recipe) recipes.push({ panel, action });
-    }
-  }
-  strip.hidden = !state.status.connected || !recipes.length;
-  strip.replaceChildren(
-    ...recipes.map(({ panel, action }) =>
-      el("button", {
-        class: "btn btn--small",
-        text: `${panel.title}: ${action.label}`,
-        title: action.help || "",
-        onclick: () => {
-          state.current = panel.id;
-          render();
-          const form = document.querySelector(`[data-action="${action.name}"]`);
-          if (form) {
-            form.scrollIntoView({ block: "center", behavior: "smooth" });
-            form.querySelector("button").focus();
-          }
-        },
-      })
-    )
-  );
-}
-
 /* ------------------------------------------------------------------ panel */
 
 function renderPanel() {
@@ -601,7 +562,10 @@ function actionBlock(panel, action) {
       // whatever was loaded before connecting — a v3 by default — and the
       // poll below never noticed, because the status it compares against
       // had already been updated here.
-      if (connectionChanged(before, body.status)) await reloadBoard();
+      // So does "Follow the board", which changes which board is shown.
+      if (connectionChanged(before, body.status) || action.name === "set_variant") {
+        await reloadBoard();
+      }
       if (body.result && body.result.render === "stream" && body.result.input) {
         // A console stream (never anything sniffer-shaped — that is what
         // `input` picks out, not `kind`) gets the same rendering the panel
@@ -1126,29 +1090,6 @@ $("log-toggle").addEventListener("click", (event) => {
   log.classList.toggle("collapsed");
   event.target.textContent = log.classList.contains("collapsed") ? "Show" : "Hide";
 });
-$("variant").addEventListener("change", async (event) => {
-  try {
-    await api("/api/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        panel: "connection",
-        action: "set_variant",
-        params: { variant: event.target.value },
-      }),
-    });
-    await loadState();
-  } catch (error) {
-    // Nothing changed server-side, so state is still accurate — resync the
-    // select to it rather than leaving it showing the pick that failed, and
-    // surface the failure the way other action failures do.
-    renderVariant();
-    const warning = $("variant-warning");
-    warning.hidden = false;
-    warning.textContent = error.message;
-  }
-});
-
 refreshPorts();
 loadState();
 connectFeed();
@@ -1542,7 +1483,6 @@ function markdownToHtml(markdown) {
   return blocks.join("\n");
 }
 
-$("guide-btn").addEventListener("click", () => openGuide(panelDoc() || "user-guide"));
 
 /* Keep the window honest. Unplugging does not close the handle on macOS, so
    the only way to notice is to re-check — and the connection can change

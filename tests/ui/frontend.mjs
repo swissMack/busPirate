@@ -79,7 +79,9 @@ await settle(600);
 check("welcome hidden after connecting", $("welcome").hidden);
 check("panel visible after connecting", !$("panel").hidden);
 check("status shows the device", /SIMULATED Bus Pirate v3/.test($("status-text").textContent), $("status-text").textContent);
-check("recipe strip appeared", !$("recipes").hidden && $("recipes").children.length >= 8, `${$("recipes").children.length}`);
+check("the top bar holds no buttons or pickers, only status",
+  window.document.querySelector(".topbar").querySelectorAll("button, select").length === 0,
+  [...window.document.querySelector(".topbar").querySelectorAll("button, select")].map((n) => n.id || n.textContent).join("|"));
 
 // --- USB indicator
 check("USB indicator names the port", /USB: simulated-v3/.test($("usb").textContent), $("usb").textContent);
@@ -95,13 +97,29 @@ check("PWR and MODE light up once connected", /PWR:on/.test(leds()) && /MODE:on/
 check("VREG stays dark until the supplies are switched on", /VREG:off/.test(leds()), leds());
 check("USB is not steadily lit — it only flashes on traffic", /USB:off/.test(leds()), leds());
 
-// --- the variant switch
-check("variant selector offers every board",
-  $("variant") && [...$("variant").options].map((o) => o.value).join(",") === "auto,v3,v4,bitpirate,bp6",
-  $("variant") ? [...$("variant").options].map((o) => o.value).join(",") : "no #variant");
-check("its options carry the board names from buspirate.boards",
-  $("variant") && [...$("variant").options].some((o) => o.textContent === "ESP32 Bit Pirate"),
-  $("variant") ? [...$("variant").options].map((o) => o.textContent).join("|") : "no #variant");
+// --- the variant switch: the Connection panel's "Follow the board"
+// action, the one place it lives.
+const showBoard = async (variant, back = "I2C") => {
+  [...$("nav").children].find((b) => b.textContent === "Connection").click();
+  await settle(200);
+  const form = $("panel").querySelector('[data-action="set_variant"]');
+  form.querySelector('[name="variant"]').value = variant;
+  form.querySelector("button").click();
+  await settle(700);
+  [...$("nav").children].find((b) => b.textContent === back).click();
+  await settle(300);
+};
+{
+  [...$("nav").children].find((b) => b.textContent === "Connection").click();
+  await settle(200);
+  const picker = $("panel").querySelector('[data-action="set_variant"] [name="variant"]');
+  check("the Connection panel offers every board",
+    picker && [...picker.options].map((o) => o.value).join(",") === "auto,v3,v4,bitpirate,bp6",
+    picker ? [...picker.options].map((o) => o.value).join(",") : "no picker");
+  check("with the board names from buspirate.boards",
+    picker && [...picker.options].some((o) => /ESP32 Bit Pirate/.test(o.textContent)),
+    picker ? [...picker.options].map((o) => o.textContent).join("|") : "no picker");
+}
 check("no mismatch warning while following detection", $("variant-warning").hidden);
 
 // --- I2C panel
@@ -137,9 +155,7 @@ check("the LEDs sit along the top edge of the photo",
 check("the board photo says the LED states are inferred",
   $("panel").textContent.includes("no command that reads the LEDs back"));
 
-$("variant").value = "v4";
-$("variant").dispatchEvent(new window.Event("change"));
-await settle(600);
+await showBoard("v4");
 check("switching to v4 redraws the diagram with the v4 board",
   $("panel").querySelector(".card-img--board image").getAttribute("href") === "/static/img/board-v4.jpg",
   $("panel").querySelector(".card-img--board image").getAttribute("href"));
@@ -154,14 +170,10 @@ check("the caption under the v4 photo names the v4 board, not v3",
   v4Captions.includes("Bus Pirate v4.0") && !v4Captions.includes("Bus Pirate v3.6"),
   v4Captions);
 check("overriding onto the wrong board warns", !$("variant-warning").hidden);
-$("variant").value = "v3";
-$("variant").dispatchEvent(new window.Event("change"));
-await settle(600);
+await showBoard("v3");
 check("an override that agrees with the hardware does not warn",
   $("variant-warning").hidden, `warning text: ${$("variant-warning").textContent}`);
-$("variant").value = "auto";
-$("variant").dispatchEvent(new window.Event("change"));
-await settle(600);
+await showBoard("auto");
 check("returning to auto clears the warning", $("variant-warning").hidden);
 
 const cards = $("panel").querySelectorAll(".card-img:not(.card-img--board)");
