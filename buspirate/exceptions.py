@@ -9,6 +9,10 @@ class ConnectionError(BusPirateError):
     """The serial port could not be opened or is not usable."""
 
 
+class PortGoneError(ConnectionError):
+    """The port stopped working mid-session: the board reset or was unplugged."""
+
+
 class ModeError(BusPirateError):
     """The Bus Pirate would not enter or leave a mode."""
 

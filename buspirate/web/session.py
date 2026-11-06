@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Set
 from .. import boards
 from .. import device as device_module
 from ..connect import open_device
-from ..exceptions import BusPirateError, ConnectionError, ModeError
+from ..exceptions import BusPirateError, ConnectionError, ModeError, PortGoneError
 from ..ports import discover, resolve
 from .decoders import make_decoder
 from .registry import Action, Panel, live, load_panels
@@ -821,9 +821,15 @@ class DeviceSession:
                     self.bp.profile.require(required)
         if action.check is not None:
             action.check(params)  # refuse bad input before anything is sent
-        mode = self.ensure_mode(panel.mode)
-        context = ActionContext(self, mode)
-        result = action.handler(context, **params)
+        try:
+            mode = self.ensure_mode(panel.mode)
+            result = action.handler(ActionContext(self, mode), **params)
+        except PortGoneError:
+            # The handle is dead even if the board is back under the same
+            # name; keeping it would fail every click the same way. Dropped,
+            # the Connect page is one click from a working session again.
+            self._drop_connection()
+            raise
         if action.stream:
             self._begin_stream(panel, action, result)
         return result

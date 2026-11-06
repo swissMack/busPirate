@@ -18,6 +18,8 @@ line editor (src/Managers/CommandLineManager.cpp) shape everything here:
 
 from __future__ import annotations
 
+import contextlib
+
 import re
 import time
 from dataclasses import dataclass, field
@@ -135,6 +137,11 @@ class CliTransport:
     command, so a long but busy reply is never cut short.
     """
 
+    def _alive(self):
+        """The link's dead-port guard (SerialLink._port_alive); a bare test link has none."""
+        guard = getattr(self.link, "_port_alive", None)
+        return guard() if guard is not None else contextlib.nullcontext()
+
     def __init__(self, link, timeout: float = 3.0) -> None:
         self.link = link
         self.timeout = timeout
@@ -225,7 +232,8 @@ class CliTransport:
         answered_line = -1
         deadline = time.monotonic() + timeout
         while True:
-            chunk = self.link.serial.read(256)
+            with self._alive():
+                chunk = self.link.serial.read(256)
             if chunk:
                 buffer += chunk
                 self.link._notify("rx", bytes(chunk))
@@ -273,7 +281,8 @@ class CliTransport:
         buffer = bytearray()
         deadline = time.monotonic() + quiet
         while time.monotonic() < deadline:
-            chunk = self.link.serial.read(256)
+            with self._alive():
+                chunk = self.link.serial.read(256)
             if chunk:
                 buffer += chunk
                 self.link._notify("rx", bytes(chunk))
