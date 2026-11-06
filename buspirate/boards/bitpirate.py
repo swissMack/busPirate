@@ -163,6 +163,16 @@ BOARD = Board(
     terminal_caption="The Bit Pirate's own command line. Type a command; 'help' lists them.",
     guide_page="bitpirate",
     manual="bitpirate-wiki",
+    traffic_text=True,
+    # Its own wiki for each job, not our Bus Pirate pages with their probe
+    # cable colours.
+    panel_docs={
+        "connection": "bitpirate",
+        "terminal": "bitpirate-wiki/99-general",
+        "i2c": "bitpirate-wiki/05-i2c",
+        "spi": "bitpirate-wiki/06-spi",
+        "uart": "bitpirate-wiki/03-uart",
+    },
     wiring=_BOARD_BITPIRATE,
     led_rules=LED_RULES,
     led_note=LED_NOTE,

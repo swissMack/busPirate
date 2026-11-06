@@ -81,6 +81,7 @@ def create_app(
         # pins and caveats; it replaces a panel's wiring, notes and wording
         # rather than the panel modules learning about every board.
         overrides = BOARDS[session.effective_variant()].get("panels", {})
+        panel_docs = boards.get(session.effective_variant()).panel_docs
         panels = []
         for panel in session.panels:
             data = panel.to_json()
@@ -89,6 +90,7 @@ def create_app(
             data["actions"] = [a for a in data["actions"] if offered(a)]
             for action in data["actions"]:
                 action["params"] = [p for p in action["params"] if offered(p)]
+            data["doc"] = panel_docs.get(panel.id, data.get("doc"))
             override = overrides.get(panel.id, {})
             for key in ("blurb", "wiring", "notes"):
                 if key in override:

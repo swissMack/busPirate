@@ -10,7 +10,6 @@
 <body>
 <header class="topbar">
   <div class="brand">bus<b>Pirate</b> <span id="app-version" class="brand__version"></span></div>
-  <div id="recipes" class="recipes" hidden></div>
   <div class="spacer"></div>
   <div class="statusblock">
     <div id="status" class="status status--off">
@@ -18,14 +17,8 @@
     </div>
     <div id="usb" class="usb muted">USB: no device</div>
     <div id="leds" class="leds" role="group" aria-label="Board indicator LEDs"></div>
-    <div class="variantpick">
-      <select id="variant" aria-label="Which board to show">
-        <option value="auto">Follow the board</option>
-      </select>
-      <span id="variant-warning" class="variant-warning" role="status" aria-live="polite" hidden></span>
-    </div>
+    <span id="variant-warning" class="variant-warning" role="status" aria-live="polite" hidden></span>
   </div>
-  <button id="guide-btn" class="btn btn--small">Guide</button>
 </header>
 
 <main class="layout">

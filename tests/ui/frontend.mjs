@@ -79,7 +79,9 @@ await settle(600);
 check("welcome hidden after connecting", $("welcome").hidden);
 check("panel visible after connecting", !$("panel").hidden);
 check("status shows the device", /SIMULATED Bus Pirate v3/.test($("status-text").textContent), $("status-text").textContent);
-check("recipe strip appeared", !$("recipes").hidden && $("recipes").children.length >= 8, `${$("recipes").children.length}`);
+check("the top bar holds no buttons or pickers, only status",
+  window.document.querySelector(".topbar").querySelectorAll("button, select").length === 0,
+  [...window.document.querySelector(".topbar").querySelectorAll("button, select")].map((n) => n.id || n.textContent).join("|"));
 
 // --- USB indicator
 check("USB indicator names the port", /USB: simulated-v3/.test($("usb").textContent), $("usb").textContent);
@@ -95,13 +97,29 @@ check("PWR and MODE light up once connected", /PWR:on/.test(leds()) && /MODE:on/
 check("VREG stays dark until the supplies are switched on", /VREG:off/.test(leds()), leds());
 check("USB is not steadily lit — it only flashes on traffic", /USB:off/.test(leds()), leds());
 
-// --- the variant switch
-check("variant selector offers every board",
-  $("variant") && [...$("variant").options].map((o) => o.value).join(",") === "auto,v3,v4,bitpirate,bp6",
-  $("variant") ? [...$("variant").options].map((o) => o.value).join(",") : "no #variant");
-check("its options carry the board names from buspirate.boards",
-  $("variant") && [...$("variant").options].some((o) => o.textContent === "ESP32 Bit Pirate"),
-  $("variant") ? [...$("variant").options].map((o) => o.textContent).join("|") : "no #variant");
+// --- the variant switch: the Connection panel's "Follow the board"
+// action, the one place it lives.
+const showBoard = async (variant, back = "I2C") => {
+  [...$("nav").children].find((b) => b.textContent === "Connection").click();
+  await settle(200);
+  const form = $("panel").querySelector('[data-action="set_variant"]');
+  form.querySelector('[name="variant"]').value = variant;
+  form.querySelector("button").click();
+  await settle(700);
+  [...$("nav").children].find((b) => b.textContent === back).click();
+  await settle(300);
+};
+{
+  [...$("nav").children].find((b) => b.textContent === "Connection").click();
+  await settle(200);
+  const picker = $("panel").querySelector('[data-action="set_variant"] [name="variant"]');
+  check("the Connection panel offers every board",
+    picker && [...picker.options].map((o) => o.value).join(",") === "auto,v3,v4,bitpirate,bp6",
+    picker ? [...picker.options].map((o) => o.value).join(",") : "no picker");
+  check("with the board names from buspirate.boards",
+    picker && [...picker.options].some((o) => /ESP32 Bit Pirate/.test(o.textContent)),
+    picker ? [...picker.options].map((o) => o.textContent).join("|") : "no picker");
+}
 check("no mismatch warning while following detection", $("variant-warning").hidden);
 
 // --- I2C panel
@@ -137,9 +155,7 @@ check("the LEDs sit along the top edge of the photo",
 check("the board photo says the LED states are inferred",
   $("panel").textContent.includes("no command that reads the LEDs back"));
 
-$("variant").value = "v4";
-$("variant").dispatchEvent(new window.Event("change"));
-await settle(600);
+await showBoard("v4");
 check("switching to v4 redraws the diagram with the v4 board",
   $("panel").querySelector(".card-img--board image").getAttribute("href") === "/static/img/board-v4.jpg",
   $("panel").querySelector(".card-img--board image").getAttribute("href"));
@@ -154,14 +170,10 @@ check("the caption under the v4 photo names the v4 board, not v3",
   v4Captions.includes("Bus Pirate v4.0") && !v4Captions.includes("Bus Pirate v3.6"),
   v4Captions);
 check("overriding onto the wrong board warns", !$("variant-warning").hidden);
-$("variant").value = "v3";
-$("variant").dispatchEvent(new window.Event("change"));
-await settle(600);
+await showBoard("v3");
 check("an override that agrees with the hardware does not warn",
   $("variant-warning").hidden, `warning text: ${$("variant-warning").textContent}`);
-$("variant").value = "auto";
-$("variant").dispatchEvent(new window.Event("change"));
-await settle(600);
+await showBoard("auto");
 check("returning to auto clears the warning", $("variant-warning").hidden);
 
 const cards = $("panel").querySelectorAll(".card-img:not(.card-img--board)");
@@ -608,17 +620,39 @@ guideButton.click();
 await settle(700);
 check("guide replaces the panel", !$("guide").hidden && $("panel").hidden);
 check("guide renders a heading", $("guide").querySelector("h1") !== null);
+check("no stray 'null' above the guide page",
+  ![...$("guide").childNodes].some((n) => n.nodeType === 3 && n.textContent === "null"));
 check("guide renders the I2C page for the I2C panel",
   /I2C/.test($("guide").querySelector("h1").textContent), $("guide").textContent.slice(0, 60));
 check("guide renders tables", $("guide").querySelector("table") !== null);
 check("guide shows the corrected cable colours",
   /grey/.test($("guide").textContent) && /purple/.test($("guide").textContent),
   $("guide").textContent.slice(0, 80));
-const picker = $("guide").querySelector("select");
-check("guide lists every page", picker.options.length >= 13, `${picker.options.length}`);
-$("guide").querySelector(".btn").click();
+// The guide's contents live in the left column, not a drop-down.
+check("the guide has no drop-down", $("guide").querySelector("select") === null);
+check("HiZ stays one click away while the guide is open",
+  $("nav").querySelector(".nav__hiz-btn") !== null);
+check("the column turns into the guide's contents",
+  $("nav").querySelector(".nav__back") !== null && $("nav").querySelector(".nav__search") !== null &&
+  $("nav").querySelectorAll("details.nav__group").length >= 2,
+  $("nav").textContent.slice(0, 80));
+{
+  const current = $("nav").querySelector('button[aria-current="true"][data-doc]');
+  check("the open page is marked in the column", current && current.dataset.doc === "i2c",
+    current ? current.dataset.doc : "none marked");
+  const spi = $("nav").querySelector('button[data-doc="spi"]');
+  spi.click();
+  await settle(500);
+  check("a page in the column opens it", /SPI/.test($("guide").querySelector("h1").textContent),
+    $("guide").querySelector("h1").textContent);
+  check("and becomes the marked one",
+    $("nav").querySelector('button[aria-current="true"][data-doc]').dataset.doc === "spi");
+}
+$("nav").querySelector(".nav__back").click();
 await settle(300);
-check("back returns to the dashboard", $("guide").hidden && !$("panel").hidden);
+check("back returns to the panel it came from",
+  $("guide").hidden && !$("panel").hidden && $("panel").querySelector("h1").textContent === "I2C",
+  $("panel").querySelector("h1") ? $("panel").querySelector("h1").textContent : "no panel");
 
 // --- the official manual: images, callouts, anchors, groups and search
 {
@@ -640,20 +674,24 @@ check("back returns to the dashboard", $("guide").hidden && !$("panel").hidden);
   check("remote images are left alone",
     window.markdownToHtml("![x](https://e.com/a.png)").includes('src="https://e.com/a.png"'));
 }
-guideButton.click();
+[...$("nav").children].find((b) => b.textContent === "Guide").click();
 await settle(600);
-check("the guide picker groups its pages",
-  $("guide").querySelector("select optgroup") !== null &&
-  $("guide").querySelector("select optgroup").label === "This app");
-const searchBox = $("guide").querySelector(".guide__search");
-check("the guide has a search box", searchBox !== null);
+check("the column groups the guide's pages, this app first",
+  $("nav").querySelector("details.nav__group summary") !== null &&
+  $("nav").querySelector("details.nav__group summary").textContent === "This app");
+const searchBox = $("nav").querySelector(".nav__search");
+check("the column has the guide's search box", searchBox !== null);
 if (searchBox) {
   searchBox.value = "terminal";
   searchBox.dispatchEvent(new window.Event("input"));
   await settle(600);
-  check("searching lists results", $("guide").querySelectorAll(".guide__result").length > 0);
+  check("searching lists results in the column", $("nav").querySelectorAll(".nav__results .guide__result").length > 0);
+  searchBox.value = "t";
+  searchBox.dispatchEvent(new window.Event("input"));
+  await settle(300);
+  check("a one-letter search clears them", $("nav").querySelectorAll(".nav__results .guide__result").length === 0);
 }
-$("guide").querySelector(".btn").click();
+$("nav").querySelector(".nav__back").click();
 await settle(300);
 
 // --- a connection changed somewhere else. Found with a real v4: another
@@ -677,14 +715,26 @@ check("a window showing Not connected notices a connect made elsewhere",
   $("status-text").textContent);
 
 // --- an ESP32 Bit Pirate: no probe cable, no supplies, DevKit pins
+[...$("nav").children].find((b) => b.textContent === "Guide").click();
+await settle(600);
 await serverSide("connect", { port: "simulated-bitpirate" });
 await settle(6000);
+check("switching board with the guide open rebuilds its contents",
+  [...$("nav").querySelectorAll("details.nav__group summary")].some((x) => x.textContent === "ESP32 Bit Pirate wiki"),
+  [...$("nav").querySelectorAll("details.nav__group summary")].map((x) => x.textContent).join("|"));
+$("nav").querySelector(".nav__back").click();
+await settle(300);
 check("the Bit Pirate is named in the status",
   /ESP32 Bit Pirate/.test($("status-text").textContent), $("status-text").textContent);
 const bitNav = [...$("nav").children].map((b) => b.textContent);
 check("panels a Bit Pirate cannot drive are not in the nav",
   bitNav.includes("I2C") && !bitNav.includes("1-Wire") && !bitNav.includes("Pins & power"),
   bitNav.join("|"));
+{
+  const rows = [...$("log-lines").children].map((r) => r.textContent);
+  check("its traffic reads as text, not hex", rows.some((t) => /HIZ>/.test(t)),
+    rows.slice(-3).join(" / ").slice(0, 160));
+}
 [...$("nav").children].find((b) => b.textContent === "I2C").click();
 await settle(300);
 const bitBoard = $("panel").querySelector(".card-img--board");

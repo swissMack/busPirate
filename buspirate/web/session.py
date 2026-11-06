@@ -9,8 +9,10 @@ are ordinary synchronous functions; they never see any of this.
 from __future__ import annotations
 
 import asyncio
+import codecs
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -51,6 +53,44 @@ SIMULATED_VARIANTS = tuple(boards.REGISTRY)
 
 #: How each simulated board is named in the port list.
 SIMULATED_NAMES = {v: b.simulated_name for v, b in boards.REGISTRY.items()}
+
+
+#: A complete terminal escape: CSI (``ESC [ … final``), OSC (``ESC ] … BEL``
+#: or ``ESC \``), or a short one such as a charset pick (``ESC ( B``) or
+#: ``ESC 7``.
+_ESCAPE = re.compile(
+    r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[ -/]*[0-~])"
+)
+#: The start of one cut off at the end of a read.
+_ESCAPE_UNFINISHED = re.compile(r"\x1b(?:\[[0-?]*[ -/]*|\][^\x07\x1b]*|[ -/]*)$")
+
+
+class TextTraffic:
+    """One direction of a text board's traffic, made readable read by read.
+
+    The driver reports traffic a serial read at a time, so an escape code or
+    a multi-byte character can be cut in two; what is cut off is held back
+    until the rest arrives. Escape codes go, line breaks show as ⏎ and other
+    control characters as ·, so a line stays on one row and nothing in it
+    acts on the page.
+    """
+
+    def __init__(self) -> None:
+        self._decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        self._pending = ""
+
+    def feed(self, data: bytes) -> str:
+        text = _ESCAPE.sub("", self._pending + self._decoder.decode(bytes(data)))
+        cut = _ESCAPE_UNFINISHED.search(text)
+        self._pending = text[cut.start():] if cut else ""
+        text = text[: cut.start()] if cut else text
+        text = text.replace("\r\n", "⏎").replace("\n", "⏎").replace("\r", "⏎")
+        return "".join(c if c >= " " or c == "⏎" else "·" for c in text)
+
+
+def traffic_text(data: bytes) -> str:
+    """One complete chunk of a text board's bytes, made readable."""
+    return TextTraffic().feed(data)
 
 
 def simulated_variant(port: Optional[str]) -> Optional[str]:
@@ -230,6 +270,8 @@ class DeviceSession:
         #: the traffic log. Set before connecting, so the status request sent
         #: while opening is summarised too.
         self._bpio2_traffic = False
+        self._text_traffic = False
+        self._text_decoders = {"rx": TextTraffic(), "tx": TextTraffic()}
         #: When the Bus Pirate 6's supply was last read, for the status poll.
         self._power_read_at = 0.0
 
@@ -279,6 +321,10 @@ class DeviceSession:
             from ..bp6.protocol import describe_frame
 
             entry["summary"] = describe_frame(direction, data)
+        # A board that talks text: show what was said. Not while the Terminal
+        # holds the port; its own pane already shows the text.
+        if self._text_traffic and not isinstance(self.stream, TerminalState):
+            entry["text"] = self._text_decoders[direction].feed(data)
         self.traffic.append(entry)
         self.emit(entry)
 
@@ -363,11 +409,20 @@ class DeviceSession:
             simulated_variant(resolved) == "bp6"
             or (self.port_info or {}).get("usb_id") == "1209:7331"
         )
+        # Known before the first byte, so the banner already reads as text:
+        # the simulated Bit Pirate, or any board on Espressif's USB ID.
+        self._text_decoders = {"rx": TextTraffic(), "tx": TextTraffic()}
+        self._text_traffic = simulated_variant(resolved) == "bitpirate" or str(
+            (self.port_info or {}).get("usb_id") or ""
+        ).upper().startswith("303A:")
         try:
             self.bp = self._open_device(resolved)
         except BaseException:
             self._bpio2_traffic = False
+            self._text_traffic = False
             raise
+        # A Bit Pirate found by its banner rather than its USB ID.
+        self._text_traffic = boards.get(self.bp.profile.variant).traffic_text
         self.port = resolved
         self.mode_name = None
         self._mode = None
@@ -394,6 +449,8 @@ class DeviceSession:
         self.port = None
         self.port_info = None
         self._bpio2_traffic = False
+        self._text_traffic = False
+        self._text_decoders = {"rx": TextTraffic(), "tx": TextTraffic()}
         self.mode_name = None
         self._mode = None
         # Whatever we drove the pins to is no longer true of the board, and
@@ -862,6 +919,8 @@ class DeviceSession:
         self.port = None
         self.port_info = None
         self._bpio2_traffic = False
+        self._text_traffic = False
+        self._text_decoders = {"rx": TextTraffic(), "tx": TextTraffic()}
         self.display_variant = None
         self.mode_name = None
         self._mode = None

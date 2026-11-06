@@ -135,3 +135,98 @@ def test_an_override_outside_the_registry_is_refused(client):
         json={"panel": "connection", "action": "set_variant", "params": {"variant": "v9"}},
     )
     assert response.status_code == 400
+
+
+# -- step 2: one way around ----------------------------------------------------
+
+
+@pytest.fixture
+def client_bitpirate(client):
+    response = client.post(
+        "/api/run",
+        json={"panel": "connection", "action": "connect", "params": {"port": "simulated-bitpirate"}},
+    )
+    assert response.status_code == 200, response.text
+    return client
+
+
+def test_text_traffic_drops_escapes_and_marks_line_breaks():
+    from buspirate.web.session import traffic_text
+
+    assert traffic_text(b"\rI2C> scan\x1b[K\r\nFound 0x68\r\n") == "⏎I2C> scan⏎Found 0x68⏎"
+    assert traffic_text(b"\x00ok") == "·ok"
+
+
+def test_only_text_boards_get_text_traffic():
+    assert boards.REGISTRY["bitpirate"].traffic_text is True
+    assert not any(b.traffic_text for v, b in boards.REGISTRY.items() if v != "bitpirate")
+
+
+def test_a_bit_pirate_traffic_event_carries_its_text(client_bitpirate):
+    response = client_bitpirate.post(
+        "/api/run", json={"panel": "i2c", "action": "scan", "params": {}}
+    )
+    assert response.status_code == 200, response.text
+    traffic = client_bitpirate.get("/api/state").json()["traffic"]
+    assert any("scan" in entry.get("text", "") for entry in traffic)
+
+
+def test_bus_pirate_traffic_stays_hex_only(client):
+    client.post("/api/run", json={"panel": "connection", "action": "connect",
+                                  "params": {"port": "simulated-v3"}})
+    traffic = client.get("/api/state").json()["traffic"]
+    assert traffic and not any("text" in entry for entry in traffic)
+
+
+def test_a_bit_pirate_reads_as_text_from_its_first_byte(client_bitpirate):
+    # The banner and prompt come before the board is identified.
+    traffic = client_bitpirate.get("/api/state").json()["traffic"]
+    assert traffic and all("text" in entry for entry in traffic)
+
+
+def test_every_board_panel_doc_exists():
+    from buspirate.web import docs
+
+    for board in boards.REGISTRY.values():
+        for page in board.panel_docs.values():
+            assert docs.read(page) is not None, (board.variant, page)
+
+
+def test_a_bit_pirate_panel_links_to_its_own_reference(client_bitpirate):
+    panels = {p["id"]: p for p in client_bitpirate.get("/api/state").json()["panels"]}
+    assert panels["i2c"]["doc"] == "bitpirate-wiki/05-i2c"
+    assert panels["spi"]["doc"] == "bitpirate-wiki/06-spi"
+    assert panels["uart"]["doc"] == "bitpirate-wiki/03-uart"
+    assert panels["terminal"]["doc"] == "bitpirate-wiki/99-general"
+    assert panels["connection"]["doc"] == "bitpirate"
+
+
+def test_bus_pirate_panel_docs_are_unchanged(client):
+    panels = {p["id"]: p for p in client.get("/api/state").json()["panels"]}
+    assert panels["i2c"]["doc"] == "i2c"
+
+
+# -- review fixes ---------------------------------------------------------------
+
+
+def test_text_traffic_keeps_an_escape_split_across_reads_out():
+    from buspirate.web.session import TextTraffic
+
+    t = TextTraffic()
+    assert t.feed(b"OK\x1b") == "OK"
+    assert t.feed(b"[32mgreen") == "green"
+
+
+def test_text_traffic_joins_a_character_split_across_reads():
+    from buspirate.web.session import TextTraffic
+
+    t = TextTraffic()
+    assert t.feed(b"21.5 \xc2") == "21.5 "
+    assert t.feed(b"\xb0C") == "°C"
+
+
+@pytest.mark.parametrize("raw", [b"\x1b(Bx", b"\x1b[2~x", b"\x1b]0;title\x07x", b"\x1b7x"])
+def test_text_traffic_drops_other_escape_forms(raw):
+    from buspirate.web.session import TextTraffic
+
+    assert TextTraffic().feed(raw) == "x"
