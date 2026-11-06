@@ -184,9 +184,12 @@ Web CLI this app cannot drive the board.
    the board's own hotspot.
 3. **Watch the LED:** white is connecting, green is ready, blue means no
    Wi-Fi is saved, red means it failed.
-4. **Open the address.** It's the one at the top of the app, now marked
-   *last seen*, because the board has left USB. On the hotspot it's always
-   http://192.168.4.1.
+4. **Open the address.** It's the one at the top of the app. While the
+   board is still on USB it shows as plain text, *Web CLI after a reset*;
+   once the board has left USB it becomes a link, marked *last seen*. On the
+   hotspot it's always http://192.168.4.1. Give it about 10 seconds after
+   the green LED: the board starts its web server before its page, and
+   until then it answers "Nothing matches the given URI". Reload.
 5. **Back to this app:** reset without pressing the button.
 
 The address is the one your router gave the board last time. If the router

@@ -824,6 +824,13 @@ check("a remembered Web CLI address shows at the top, marked last seen",
     && $("webcli").querySelector("a")?.href === "http://192.168.1.50/",
   $("webcli").textContent);
 check("and says how to reach it", /short-press/.test($("webcli").title), $("webcli").title);
+check("and to wait for the page to come up", /10 seconds/.test($("webcli").title), $("webcli").title);
+// While the board is still on USB its Web CLI is not running: no link yet.
+window.renderWebCli({ connected: true, variant: "bitpirate",
+  web_cli: { ip: "192.168.1.77", on_wifi: true, simulated: true } });
+check("on USB the address is plain text, to use after a reset",
+  !$("webcli").querySelector("a") && /after a reset: 192\.168\.1\.77/.test($("webcli").textContent),
+  $("webcli").innerHTML);
 
 // --- connecting a v4 from a window opened with nothing connected
 // Reported on real hardware 2026-09-29: the I2C hook-up showed the v3 photo
