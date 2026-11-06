@@ -1315,10 +1315,28 @@ def test_every_official_link_in_our_guides_resolves(client):
     for page in docs.available():
         if page["group"] != docs.APP_GROUP:
             continue
-        for target, anchor in re.findall(r"\]\((official/[^)#\s]+)\.md(?:#([^)\s]*))?\)", docs.read(page["name"])):
+        for target, anchor in re.findall(r"\]\(((?:official|bitpirate-wiki)/[^)#\s]+)\.md(?:#([^)\s]*))?\)", docs.read(page["name"])):
             assert docs.read(target) is not None, (page["name"], target)
             if anchor:
                 assert anchor in anchors(target), (page["name"], target, anchor)
+
+
+def test_the_bitpirate_wiki_is_listed_whole_and_its_links_and_images_resolve():
+    import re
+
+    from buspirate.web import docs
+
+    wiki = [p for p in docs.available("bitpirate") if p["group"] == docs.BITPIRATE_GROUP]
+    assert wiki[0]["name"] == "bitpirate-wiki/home"
+    assert {"bitpirate-wiki/05-i2c", "bitpirate-wiki/99-pinout"} <= {p["name"] for p in wiki}
+    for page in wiki:
+        text = docs.read(page["name"])
+        # The viewer escapes HTML, so none may be left to show as raw tags.
+        assert not re.search(r"<(img|details|summary|br)\b", text, re.I), page["name"]
+        for target in re.findall(r"\]\((bitpirate-wiki/[^)#\s]+)\.md", text):
+            assert docs.read(target) is not None, (page["name"], target)
+        for image in re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", text):
+            assert docs.file_path(image) is not None, (page["name"], image)
 
 
 def test_the_bp6_power_panel_points_at_the_bp6_guide():

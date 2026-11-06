@@ -95,20 +95,90 @@ at `0x0` the same way.
 | | Bus Pirate v3 / v4 | ESP32 Bit Pirate |
 |---|---|---|
 | How the dashboard talks to it | binary bitbang protocol | its text command line |
-| Target power | switchable 3.3V and 5V supplies | none; wire the DevKit's 3V3 pin if needed |
-| Voltage | 3.3V and 5V targets | **3.3V only**, and its pins are not 5V tolerant |
+| Target power | switchable 3.3V and 5V supplies | the dock's VIO pin: 5V, 3V3 or 1V8 from its slide switch |
+| Voltage | 3.3V and 5V targets | 5V, 3V3 or 1V8 through the dock's level shifters (a bare DevKit is **3.3V only** and not 5V tolerant) |
 | Pull-ups | on-board, fed from VPU | the ESP32's internal ones (about 45 kΩ) |
-| Pins | fixed probe cable | any GPIO; the defaults are shown below |
+| Pins | fixed probe cable | the dock's Bus Pirate 6 header; the firmware can use any GPIO |
 | I2C writes | an ACK reported for every byte | the address is checked with `ping`; later bytes are not reported |
 | SPI clock | 30 kHz to 8 MHz | whole MHz: 1, 2, 4 or 8 from the list |
 | SPI modes | 0 to 3 | mode 0 only |
 | SPI flash | read, dump, write, erase, verify | read, dump and verify |
 | UART | send, listen, monitor, bridge | send and monitor |
-| Sniffers, 1-Wire, raw wire, Pins & power | yes | not offered |
+| Sniffers, 1-Wire, raw wire, Pins & power | yes | not in the dashboard; sniffers and 1-Wire are in its terminal |
 
 Hidden actions are not errors to work around. They are things this board
 cannot do through the dashboard. Most can still be done by hand in the
 **Terminal** panel; type `help` there.
+
+## Its terminal: far more than the dashboard drives
+
+The dashboard covers the jobs the Bus Pirates share: I2C, SPI and UART. The
+Bit Pirate's own command line goes much further: 25 modes, including radios
+and USB tricks no Bus Pirate has. Open the **Terminal** panel and type
+`mode` (or `m`) to pick one, `help` for that mode's commands, and
+`man` for the firmware's own manual.
+
+While a Bit Pirate is connected, the guide's side menu lists the
+**ESP32 Bit Pirate wiki**, imported into this app, with a page per mode. The
+table below links to each one.
+
+### Wired buses
+
+| Mode | What it is for | Some of its commands |
+|---|---|---|
+| [I2C](bitpirate-wiki/05-i2c.md) | I2C bus: much more than the dashboard's panel | `discovery`, `identify`, `sniff`, `dump`, `regs`, `monitor`, `eeprom`, `slave`, `recover`, `glitch` |
+| [SPI](bitpirate-wiki/06-spi.md) | SPI devices, flash, EEPROMs and SD cards | `flash`, `eeprom`, `sdcard` (with `ls`, `cat`, `cd`), `sniff`, `slave` |
+| [UART](bitpirate-wiki/03-uart.md) | Serial ports | `autobaud`, `scan`, `sniff`, `bridge`, `at`, `xmodem`, `emulator`, `trigger` |
+| [HDUART](bitpirate-wiki/04-hduart.md) | Half-duplex UART on one wire | `bridge` |
+| [1-Wire](bitpirate-wiki/02-1wire.md) | DS18B20 sensors, iButtons, 1-Wire EEPROMs | `scan`, `temp`, `ibutton`, `eeprom`, `sniff` |
+| [2-Wire](bitpirate-wiki/07-2wire.md) | Smartcards and memory cards | `smartcard`, `sniff` |
+| [3-Wire](bitpirate-wiki/08-3wire.md) | 93Cxx Microwire EEPROMs | `eeprom` |
+| [DIO](bitpirate-wiki/09-dio.md) | Any GPIO by hand | `read`, `set`, `pulse`, `pwm`, `servo`, `measure`, `sniff` |
+| [JTAG](bitpirate-wiki/15-jtag.md) | Finding JTAG/SWD pins, OpenOCD adapter | `scan`, `openocd` |
+| [CAN](bitpirate-wiki/17-can.md) | CAN bus (with a transceiver module) | `sniff`, `send`, `receive` |
+| [I2S](bitpirate-wiki/16-i2s.md) | Digital audio in and out | `play`, `record`, `test` |
+| [LED](bitpirate-wiki/10-led.md) | Addressable RGB LED strips | `fill`, `set`, `rainbow`, `chase`, `blink` |
+| [Ethernet](bitpirate-wiki/18-ethernet.md) | A W5500 Ethernet module | `ping`, `nmap`, `ssh`, `telnet`, `http`, `modbus` |
+
+### Radio and USB
+
+| Mode | What it is for | Some of its commands |
+|---|---|---|
+| [Wi-Fi](bitpirate-wiki/14-wifi.md) | The ESP32's own Wi-Fi | `scan`, `connect`, `sniff`, `ap`, `repeater`, `waterfall` |
+| [Bluetooth](bitpirate-wiki/13-bluetooth.md) | BLE scanning and HID | `scan`, `sniff`, `keyboard`, `mouse` |
+| [USB](bitpirate-wiki/12-usb.md) | Act as a keyboard, mouse, gamepad or USB stick | `keyboard`, `mouse`, `storage`, `host`, `adapters` |
+| [Infrared](bitpirate-wiki/11-infrared.md) | IR remote controls (with an IR module) | `receive`, `send`, `record`, `replay` |
+| [Sub-GHz](bitpirate-wiki/19-subghz.md) | 315/433/868/915 MHz radio (CC1101 module) | `scan`, `sweep`, `receive`, `record`, `replay` |
+| [RFID](bitpirate-wiki/20-rfid.md) | 13.56 MHz NFC tags (PN532 module) | `read`, `write`, `clone` |
+| [RF24](bitpirate-wiki/21-rf24.md) | 2.4 GHz nRF24L01 modules | `scan`, `receive`, `sweep`, `waterfall` |
+| [FM](bitpirate-wiki/22-fm.md) | Si4713 FM transmitter | `broadcast`, `sweep` |
+| [Cell](bitpirate-wiki/23-cell.md) | A GSM/LTE modem | `sim`, `sms`, `call`, `network` |
+| [LoRa](bitpirate-wiki/24-lora.md) | SX1262 LoRa transceivers | see the page |
+
+### Everywhere
+
+- [General commands](bitpirate-wiki/99-general.md): `mode`, `system`,
+  `profile` (save settings), `logic` and `analogic` (a terminal logic
+  analyser and voltmeter), `listen`, `wizard`.
+- [Instruction syntax](bitpirate-wiki/99-instructions.md): the Bus
+  Pirate-style `[ 0x.. r:N ]` sequences, also used by this dashboard.
+- [LittleFS](bitpirate-wiki/99-littlefs.md), [Python scripts](bitpirate-wiki/99-python.md),
+  [USB adapters](bitpirate-wiki/99-adapters.md) and the
+  [Pirate Assistant](bitpirate-wiki/99-assistant.md).
+
+### Pins outside the dashboard
+
+The dashboard moves only I2C, SPI and UART onto the dock's header (see
+[Pins](#pins-the-bit-pirate-dock)). Every other mode starts on the
+firmware's own default pins, and many are not on the header. In that mode,
+type `config` and give it header pins: IO15 to IO18 and IO10 to IO13
+(GPIO numbers). For example, 1-Wire's default GPIO6 is off the header, so
+give it 15, which is the Bus Pirate 6's 1-Wire pin. Radio modes for modules
+on the DevKit's own headers, and Wi-Fi, Bluetooth and USB, need no header
+pins at all.
+
+The dock's slide switch still sets the voltage on the header. A module wired
+to the DevKit directly gets 3.3V logic with no protection.
 
 ## Pins: the Bit Pirate Dock
 
