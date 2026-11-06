@@ -279,6 +279,31 @@ firmware's source alone, so check these in this order:
 - [ ] Terminal open and close, then an I2C scan — the session back in step
 - [ ] Disconnect leaves the board at `HIZ> `
 
+### Bit Pirate modes (from the menu)
+
+Each on the dock, run from its panel. 1-Wire and DIO need a part on the
+header; Wi-Fi and Bluetooth need nothing. Where the real reply differs from
+the simulator's, the simulator is fixed to match.
+
+- [ ] 1-Wire: entering it sets Data GPIO to 15 (`config` shows `[15]`)
+- [ ] 1-Wire with a DS18B20 on IO15 and a 4k7 pull-up: Find devices, Ping,
+      Read the ROM, Read DS18B20 temperature
+- [ ] 1-Wire with nothing on the bus: Read the ROM is stopped and reported,
+      and the next action works
+- [ ] 1-Wire Sniff: shows the line live; Stop, then HiZ, leave the board at `HIZ> `
+- [ ] DIO: Set IO15 high and Read it back; PWM on IO15, then Measure
+      frequency on a pin wired to it; Reset a pin stops the PWM
+- [ ] DIO Servo and Pulse on a scope or a servo
+- [ ] JTAG: entering it sets the scan pins to the eight header pins; Find
+      SWD pins on a target (any order on the header)
+- [ ] Wi-Fi: Scan, Status, Connect to a known network, Ping a host,
+      Disconnect
+- [ ] Bluetooth: Scan (about 10 s), Status
+- [ ] I2C extras: Identify 50, Discovery, Dump a part, Recover the bus, Sniff
+- [ ] UART Find the baud rate with a target talking on RX: the rate is
+      found and saved, and Set the line up afterwards still works
+- [ ] Switching 1-Wire → I2C → 1-Wire: each mode comes back with its pins
+
 ## Bus Pirate 6
 
 **Connect fails with "did not answer on its BPIO2 port".** Unplug the board
