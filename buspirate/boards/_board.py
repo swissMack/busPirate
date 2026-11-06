@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, FrozenSet, Optional
+from typing import Any, Dict, FrozenSet, Optional, Tuple
+
+from ._modes import CliMode
 
 
 @dataclass(frozen=True)
@@ -37,3 +39,5 @@ class Board:
     #: Guide page by panel id, where this board has its own reference for
     #: that job; other panels keep their own page.
     panel_docs: Dict[str, str] = field(default_factory=dict)
+    #: Its own command-line modes, each offered as a panel (web/panels/cli_modes.py).
+    modes: Tuple[CliMode, ...] = ()
