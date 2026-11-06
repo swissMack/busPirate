@@ -956,7 +956,9 @@ function addLogLine(event) {
       el("span", { class: "muted", text: event.at + "  " }),
       el("span", { class: event.direction, text: (event.direction === "tx" ? "->" : "<-") + "  " }),
       event.summary ? el("span", { class: "summary", text: event.summary + "  " }) : null,
-      event.hex
+      // A board that talks text (the Bit Pirate) gets what was said; the
+      // bytes stay one hover away.
+      event.text !== undefined ? el("span", { class: "text", text: event.text, title: event.hex }) : event.hex
     )
   );
   while (lines.childElementCount > 500) lines.firstElementChild.remove();
@@ -1372,7 +1374,10 @@ function renderGuide() {
       if (target) target.scrollIntoView();
     })
   );
-  root.replaceChildren(el("div", { class: "guide__bar" }, back, picker, search), results, banner, body);
+  // Filtered: replaceChildren() prints a null child as the text "null".
+  root.replaceChildren(
+    ...[el("div", { class: "guide__bar" }, back, picker, search), results, banner, body].filter(Boolean)
+  );
   root.scrollTop = 0;
 }
 

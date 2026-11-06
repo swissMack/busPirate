@@ -608,6 +608,8 @@ guideButton.click();
 await settle(700);
 check("guide replaces the panel", !$("guide").hidden && $("panel").hidden);
 check("guide renders a heading", $("guide").querySelector("h1") !== null);
+check("no stray 'null' above the guide page",
+  ![...$("guide").childNodes].some((n) => n.nodeType === 3 && n.textContent === "null"));
 check("guide renders the I2C page for the I2C panel",
   /I2C/.test($("guide").querySelector("h1").textContent), $("guide").textContent.slice(0, 60));
 check("guide renders tables", $("guide").querySelector("table") !== null);
@@ -685,6 +687,11 @@ const bitNav = [...$("nav").children].map((b) => b.textContent);
 check("panels a Bit Pirate cannot drive are not in the nav",
   bitNav.includes("I2C") && !bitNav.includes("1-Wire") && !bitNav.includes("Pins & power"),
   bitNav.join("|"));
+{
+  const rows = [...$("log-lines").children].map((r) => r.textContent);
+  check("its traffic reads as text, not hex", rows.some((t) => /HIZ>/.test(t)),
+    rows.slice(-3).join(" / ").slice(0, 160));
+}
 [...$("nav").children].find((b) => b.textContent === "I2C").click();
 await settle(300);
 const bitBoard = $("panel").querySelector(".card-img--board");

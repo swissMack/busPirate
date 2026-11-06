@@ -163,6 +163,7 @@ BOARD = Board(
     terminal_caption="The Bit Pirate's own command line. Type a command; 'help' lists them.",
     guide_page="bitpirate",
     manual="bitpirate-wiki",
+    traffic_text=True,
     wiring=_BOARD_BITPIRATE,
     led_rules=LED_RULES,
     led_note=LED_NOTE,

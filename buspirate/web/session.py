@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -51,6 +52,20 @@ SIMULATED_VARIANTS = tuple(boards.REGISTRY)
 
 #: How each simulated board is named in the port list.
 SIMULATED_NAMES = {v: b.simulated_name for v, b in boards.REGISTRY.items()}
+
+
+_ANSI_CSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def traffic_text(data: bytes) -> str:
+    """Bytes from a text board as one readable line for the Traffic panel.
+
+    Terminal escape codes go, line breaks show as ⏎ and other control bytes
+    as ·, so the line stays on one row and nothing in it acts on the page.
+    """
+    text = _ANSI_CSI.sub("", bytes(data).decode("utf-8", "replace"))
+    text = text.replace("\r\n", "⏎").replace("\n", "⏎").replace("\r", "⏎")
+    return "".join(c if c >= " " or c == "⏎" else "·" for c in text)
 
 
 def simulated_variant(port: Optional[str]) -> Optional[str]:
@@ -230,6 +245,7 @@ class DeviceSession:
         #: the traffic log. Set before connecting, so the status request sent
         #: while opening is summarised too.
         self._bpio2_traffic = False
+        self._text_traffic = False
         #: When the Bus Pirate 6's supply was last read, for the status poll.
         self._power_read_at = 0.0
 
@@ -279,6 +295,10 @@ class DeviceSession:
             from ..bp6.protocol import describe_frame
 
             entry["summary"] = describe_frame(direction, data)
+        # A board that talks text: show what was said. Not while the Terminal
+        # holds the port; its own pane already shows the text.
+        if self._text_traffic and not isinstance(self.stream, TerminalState):
+            entry["text"] = traffic_text(data)
         self.traffic.append(entry)
         self.emit(entry)
 
@@ -363,11 +383,19 @@ class DeviceSession:
             simulated_variant(resolved) == "bp6"
             or (self.port_info or {}).get("usb_id") == "1209:7331"
         )
+        # Known before the first byte, so the banner already reads as text:
+        # the simulated Bit Pirate, or any board on Espressif's USB ID.
+        self._text_traffic = simulated_variant(resolved) == "bitpirate" or str(
+            (self.port_info or {}).get("usb_id") or ""
+        ).upper().startswith("303A:")
         try:
             self.bp = self._open_device(resolved)
         except BaseException:
             self._bpio2_traffic = False
+            self._text_traffic = False
             raise
+        # A Bit Pirate found by its banner rather than its USB ID.
+        self._text_traffic = boards.get(self.bp.profile.variant).traffic_text
         self.port = resolved
         self.mode_name = None
         self._mode = None
@@ -394,6 +422,7 @@ class DeviceSession:
         self.port = None
         self.port_info = None
         self._bpio2_traffic = False
+        self._text_traffic = False
         self.mode_name = None
         self._mode = None
         # Whatever we drove the pins to is no longer true of the board, and
@@ -862,6 +891,7 @@ class DeviceSession:
         self.port = None
         self.port_info = None
         self._bpio2_traffic = False
+        self._text_traffic = False
         self.display_variant = None
         self.mode_name = None
         self._mode = None
