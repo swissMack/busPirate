@@ -74,3 +74,13 @@ def test_device_reads_board_names_from_the_registry(monkeypatch):
     fake = dataclasses.replace(boards.REGISTRY["v4"], name="Renamed")
     monkeypatch.setitem(boards.REGISTRY, "v4", fake)
     assert d.DeviceProfile(variant="v4").describe() == "Renamed"
+
+
+def test_wiring_is_served_from_the_boards():
+    from buspirate.web import wiring
+
+    assert list(wiring.BOARDS) == list(boards.REGISTRY)
+    for variant, board in boards.REGISTRY.items():
+        assert wiring.BOARDS[variant] is board.wiring
+        assert wiring.LED_RULES[variant] is board.led_rules
+        assert wiring.LED_NOTES[variant] == board.led_note
