@@ -25,7 +25,8 @@ const state = {
   variants: [],
   ledRules: {},
   current: localStorage.getItem("bp.panel") || null,
-  guide: { open: false, pages: [], page: null },
+  // `from` is the panel the guide was opened from, which Back returns to.
+  guide: { open: false, pages: [], page: null, from: null },
   busy: false,
 };
 
@@ -116,6 +117,7 @@ function applyState(data) {
     if (state.guide.open) {
       api("/api/docs").then((body) => {
         state.guide.pages = body.pages;
+        renderNav();
         renderGuide();
       }).catch(() => {});
     }
@@ -275,6 +277,9 @@ function renderUsb(usb) {
 
 function renderNav() {
   const nav = $("nav");
+  if (state.guide.open) return renderGuideNav(nav);
+  nav.classList.remove("nav--guide");
+  delete nav.dataset.key;
   nav.replaceChildren(
     ...state.panels.flatMap((panel) => [
       el("button", {
@@ -298,6 +303,85 @@ function renderNav() {
       onclick: () => openGuide(panelDoc() || "user-guide"),
     })
   );
+}
+
+/* While the guide is open the column is its contents: Back, a search box,
+   then the pages under collapsible headings (this app, then the connected
+   board's manual), the open one marked. Built once per page list and only
+   re-marked after that, so a status update never wipes what is being typed. */
+function renderGuideNav(nav) {
+  const current = state.guide.page ? state.guide.page.name : null;
+  const key = `${state.variant}:${state.guide.pages.length}`;
+  if (nav.dataset.key === key) {
+    nav.querySelectorAll("button[data-doc]").forEach((b) =>
+      b.setAttribute("aria-current", b.dataset.doc === current ? "true" : "false"));
+    return;
+  }
+  nav.dataset.key = key;
+  nav.classList.add("nav--guide");
+  const results = el("div", { class: "nav__results" });
+  const search = el("input", {
+    type: "search",
+    class: "nav__search",
+    placeholder: "Search the guide…",
+    oninput: async (event) => {
+      const query = event.target.value.trim();
+      if (query.length < 2) return results.replaceChildren();
+      const found = (await api(`/api/docs-search?q=${encodeURIComponent(query)}`)).results;
+      if (event.target.value.trim() !== query) return; // typed on meanwhile
+      results.replaceChildren(
+        ...found.map((r) =>
+          el(
+            "a",
+            {
+              href: "#",
+              class: "guide__result",
+              onclick: (e) => {
+                e.preventDefault();
+                openGuide(r.name);
+              },
+            },
+            el("strong", { text: r.title }),
+            el("div", { class: "muted", text: r.group })
+          )
+        )
+      );
+    },
+  });
+  const groups = [];
+  for (const p of state.guide.pages) {
+    let group = groups.find((g) => g.label === p.group);
+    if (!group) groups.push((group = { label: p.group, pages: [] }));
+    group.pages.push(p);
+  }
+  nav.replaceChildren(
+    el("button", { class: "nav__back", text: "← Back", onclick: closeGuide }),
+    search,
+    results,
+    ...groups.map((g) =>
+      el(
+        "details",
+        { class: "nav__group", open: true },
+        el("summary", { text: g.label }),
+        ...g.pages.map((p) =>
+          el("button", {
+            text: p.title,
+            "data-doc": p.name,
+            "aria-current": p.name === current ? "true" : "false",
+            onclick: () => openGuide(p.name),
+          })
+        )
+      )
+    )
+  );
+}
+
+function closeGuide() {
+  state.guide.open = false;
+  if (state.guide.from && state.panels.some((p) => p.id === state.guide.from)) {
+    state.current = state.guide.from;
+  }
+  render();
 }
 
 /* HiZ: one click, from any page, to let go of the target — every pin an
@@ -1275,6 +1359,7 @@ function hookupDiagram(panel) {
 /* ------------------------------------------------------------ guide */
 
 async function openGuide(name, anchor = "") {
+  if (!state.guide.open) state.guide.from = state.current;
   state.guide.open = true;
   render();
   try {
@@ -1286,6 +1371,7 @@ async function openGuide(name, anchor = "") {
   } catch (error) {
     state.guide.page = { name, markdown: `# Guide\n\n${error.message}` };
   }
+  renderNav();
   renderGuide();
   if (anchor) {
     const target = document.getElementById(anchor);
@@ -1296,57 +1382,6 @@ async function openGuide(name, anchor = "") {
 function renderGuide() {
   const root = $("guide");
   const page = state.guide.page;
-  // Our own pages, then the official manual, each under its own heading.
-  const groups = [];
-  for (const p of state.guide.pages) {
-    let group = groups.find((g) => g.label === p.group);
-    if (!group) groups.push((group = { label: p.group, pages: [] }));
-    group.pages.push(p);
-  }
-  const picker = el(
-    "select",
-    {
-      onchange: (event) => openGuide(event.target.value),
-    },
-    ...groups.map((g) =>
-      el(
-        "optgroup",
-        { label: g.label },
-        ...g.pages.map((p) =>
-          el("option", { value: p.name, selected: page && p.name === page.name }, p.title)
-        )
-      )
-    )
-  );
-  const results = el("div", { class: "guide__results" });
-  const search = el("input", {
-    type: "search",
-    class: "guide__search",
-    placeholder: "Search the guides and the manual…",
-    oninput: async (event) => {
-      const query = event.target.value.trim();
-      if (query.length < 2) return results.replaceChildren();
-      const found = (await api(`/api/docs-search?q=${encodeURIComponent(query)}`)).results;
-      results.replaceChildren(
-        ...found.map((r) =>
-          el(
-            "a",
-            {
-              href: "#",
-              class: "guide__result",
-              onclick: (e) => {
-                e.preventDefault();
-                openGuide(r.name);
-              },
-            },
-            el("strong", { text: r.title }),
-            el("span", { class: "muted", text: ` — ${r.group}` }),
-            el("div", { class: "muted", text: r.snippet })
-          )
-        )
-      );
-    },
-  });
   const banner =
     page && page.name.startsWith("official/")
       ? el("p", {
@@ -1356,14 +1391,6 @@ function renderGuide() {
             "You can type these commands in the Terminal panel.",
         })
       : null;
-  const back = el("button", {
-    class: "btn btn--small",
-    text: "← Back to the dashboard",
-    onclick: () => {
-      state.guide.open = false;
-      render();
-    },
-  });
   const body = el("div", { class: "guide__body" });
   body.innerHTML = page ? markdownToHtml(page.markdown) : "Loading…";
   body.querySelectorAll("a[data-doc], a[data-anchor]").forEach((link) =>
@@ -1375,9 +1402,7 @@ function renderGuide() {
     })
   );
   // Filtered: replaceChildren() prints a null child as the text "null".
-  root.replaceChildren(
-    ...[el("div", { class: "guide__bar" }, back, picker, search), results, banner, body].filter(Boolean)
-  );
+  root.replaceChildren(...[banner, body].filter(Boolean));
   root.scrollTop = 0;
 }
 
@@ -1527,7 +1552,8 @@ $("guide-btn").addEventListener("click", () => openGuide(panelDoc() || "user-gui
    the device changes, take the whole state (panels, board, variant) and
    re-render, not just the header. */
 setInterval(async () => {
-  if (state.guide.open) return;
+  // Also while the guide is open: it sits in the column now, so a board
+  // changed elsewhere must rebuild its contents for that board's manual.
   try {
     const data = await api("/api/state");
     const was = state.status;

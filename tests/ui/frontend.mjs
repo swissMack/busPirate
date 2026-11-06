@@ -616,11 +616,29 @@ check("guide renders tables", $("guide").querySelector("table") !== null);
 check("guide shows the corrected cable colours",
   /grey/.test($("guide").textContent) && /purple/.test($("guide").textContent),
   $("guide").textContent.slice(0, 80));
-const picker = $("guide").querySelector("select");
-check("guide lists every page", picker.options.length >= 13, `${picker.options.length}`);
-$("guide").querySelector(".btn").click();
+// The guide's contents live in the left column, not a drop-down.
+check("the guide has no drop-down", $("guide").querySelector("select") === null);
+check("the column turns into the guide's contents",
+  $("nav").querySelector(".nav__back") !== null && $("nav").querySelector(".nav__search") !== null &&
+  $("nav").querySelectorAll("details.nav__group").length >= 2,
+  $("nav").textContent.slice(0, 80));
+{
+  const current = $("nav").querySelector('button[aria-current="true"][data-doc]');
+  check("the open page is marked in the column", current && current.dataset.doc === "i2c",
+    current ? current.dataset.doc : "none marked");
+  const spi = $("nav").querySelector('button[data-doc="spi"]');
+  spi.click();
+  await settle(500);
+  check("a page in the column opens it", /SPI/.test($("guide").querySelector("h1").textContent),
+    $("guide").querySelector("h1").textContent);
+  check("and becomes the marked one",
+    $("nav").querySelector('button[aria-current="true"][data-doc]').dataset.doc === "spi");
+}
+$("nav").querySelector(".nav__back").click();
 await settle(300);
-check("back returns to the dashboard", $("guide").hidden && !$("panel").hidden);
+check("back returns to the panel it came from",
+  $("guide").hidden && !$("panel").hidden && $("panel").querySelector("h1").textContent === "I2C",
+  $("panel").querySelector("h1") ? $("panel").querySelector("h1").textContent : "no panel");
 
 // --- the official manual: images, callouts, anchors, groups and search
 {
@@ -642,20 +660,24 @@ check("back returns to the dashboard", $("guide").hidden && !$("panel").hidden);
   check("remote images are left alone",
     window.markdownToHtml("![x](https://e.com/a.png)").includes('src="https://e.com/a.png"'));
 }
-guideButton.click();
+[...$("nav").children].find((b) => b.textContent === "Guide").click();
 await settle(600);
-check("the guide picker groups its pages",
-  $("guide").querySelector("select optgroup") !== null &&
-  $("guide").querySelector("select optgroup").label === "This app");
-const searchBox = $("guide").querySelector(".guide__search");
-check("the guide has a search box", searchBox !== null);
+check("the column groups the guide's pages, this app first",
+  $("nav").querySelector("details.nav__group summary") !== null &&
+  $("nav").querySelector("details.nav__group summary").textContent === "This app");
+const searchBox = $("nav").querySelector(".nav__search");
+check("the column has the guide's search box", searchBox !== null);
 if (searchBox) {
   searchBox.value = "terminal";
   searchBox.dispatchEvent(new window.Event("input"));
   await settle(600);
-  check("searching lists results", $("guide").querySelectorAll(".guide__result").length > 0);
+  check("searching lists results in the column", $("nav").querySelectorAll(".nav__results .guide__result").length > 0);
+  searchBox.value = "t";
+  searchBox.dispatchEvent(new window.Event("input"));
+  await settle(300);
+  check("a one-letter search clears them", $("nav").querySelectorAll(".nav__results .guide__result").length === 0);
 }
-$("guide").querySelector(".btn").click();
+$("nav").querySelector(".nav__back").click();
 await settle(300);
 
 // --- a connection changed somewhere else. Found with a real v4: another
@@ -679,8 +701,15 @@ check("a window showing Not connected notices a connect made elsewhere",
   $("status-text").textContent);
 
 // --- an ESP32 Bit Pirate: no probe cable, no supplies, DevKit pins
+[...$("nav").children].find((b) => b.textContent === "Guide").click();
+await settle(600);
 await serverSide("connect", { port: "simulated-bitpirate" });
 await settle(6000);
+check("switching board with the guide open rebuilds its contents",
+  [...$("nav").querySelectorAll("details.nav__group summary")].some((x) => x.textContent === "ESP32 Bit Pirate wiki"),
+  [...$("nav").querySelectorAll("details.nav__group summary")].map((x) => x.textContent).join("|"));
+$("nav").querySelector(".nav__back").click();
+await settle(300);
 check("the Bit Pirate is named in the status",
   /ESP32 Bit Pirate/.test($("status-text").textContent), $("status-text").textContent);
 const bitNav = [...$("nav").children].map((b) => b.textContent);

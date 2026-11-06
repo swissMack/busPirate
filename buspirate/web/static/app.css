@@ -64,6 +64,24 @@ body {
 }
 /* HiZ sits under the Connection tab, so it is in the same place on every
    page. */
+/* The guide's contents, when the guide is open. */
+.nav__back { margin: 0 12px 8px; padding: 7px 10px; text-align: left; background: none;
+  border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: inherit; cursor: pointer; }
+.nav__back:hover { border-color: var(--accent); }
+.nav__search { margin: 0 12px 8px; padding: 7px 10px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.nav__results { margin: 0 12px; }
+.nav__results:empty { display: none; }
+.nav__results .guide__result { display: block; padding: 6px 4px; color: var(--text); text-decoration: none;
+  border-bottom: 1px solid var(--line); font-size: 13px; }
+.nav__group { margin-top: 6px; }
+.nav__group summary { padding: 6px 16px; color: var(--muted); font-size: 12px; text-transform: uppercase;
+  letter-spacing: 0.04em; cursor: pointer; }
+.nav__group > button { display: block; width: 100%; text-align: left; padding: 5px 16px 5px 26px;
+  background: none; border: 0; border-left: 3px solid transparent; color: var(--muted);
+  font: inherit; font-size: 14px; cursor: pointer; }
+.nav__group > button:hover { color: var(--text); }
+.nav__group > button[aria-current="true"] { color: var(--text); border-left-color: var(--accent); background: var(--bg); }
 .nav__hiz { padding: 4px 16px 10px 19px; }
 /* HiZ, at rest: a calm green outline — the target is safe. */
 .nav__hiz .nav__hiz-btn { width: 100%; font-weight: 600; color: var(--good); border-color: var(--good); }
@@ -193,6 +211,7 @@ table.data td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line);
     position: sticky; right: 0; background: var(--bg-raised); border-left: 1px solid var(--line); }
   .nav__hiz .nav__hiz-btn { width: auto; }
   .nav__hiz-note { display: none; }
+  .nav.nav--guide { flex-direction: column; max-height: 45vh; overflow-y: auto; }
   .pane { padding: 16px; }
 }
 
