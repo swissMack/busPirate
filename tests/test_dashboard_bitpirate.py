@@ -90,11 +90,11 @@ def test_a_hidden_action_is_refused_if_asked_for_anyway(client):
     assert "Bus Pirate v3 and v4" in body["error"]
 
 
-def test_the_wiring_is_the_devkit_pins(client):
+def test_the_wiring_is_the_docks_bus_pirate_6_header(client):
     connect(client)
     i2c = panels(client)["i2c"]
     assert [(w["signal"], w["target"]) for w in i2c["wiring"][:2]] == [
-        ("GPIO7", "SCL"), ("GPIO6", "SDA"),
+        ("IO15", "SDA"), ("IO16", "SCL"),
     ]
     board = client.get("/api/state").json()["board"]
     for wire in i2c["wiring"]:

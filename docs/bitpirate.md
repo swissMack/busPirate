@@ -36,9 +36,9 @@ RGB LED shows which mode the board is in:
 | LED | Mode | What it means |
 |-----|------|---------------|
 | off | HiZ | Every pin released; safe to rewire |
-| blue | I2C | SDA 6 / SCL 7 are driven |
-| green | SPI | CS 10 / CLK 12 / MISO 11 / MOSI 13 are driven |
-| yellow | UART or HDUART | RX 17 / TX 18 are in use |
+| blue | I2C | The I2C pins are driven (IO15 / IO16 on the dock) |
+| green | SPI | The SPI pins are driven (IO10–IO13 on the dock) |
+| yellow | UART or HDUART | The UART pins are in use (IO10 / IO11 on the dock) |
 | cyan | 1-Wire | The 1-Wire pin is in use |
 | dim white | any other mode | Pins in use; see the mode's own help |
 
@@ -110,20 +110,25 @@ Hidden actions are not errors to work around. They are things this board
 cannot do through the dashboard. Most can still be done by hand in the
 **Terminal** panel; type `help` there.
 
-## Default pins (s3-devkit build)
+## Pins: the Bit Pirate Dock
 
-All of these are on header J1, the left-hand one with the USB ports at the
-bottom:
+The dashboard expects the DevKit in an
+[ESP32 Bit Pirate Dock](https://github.com/AndreiVladescu/ESP32-Bit-Pirate-Hardware).
+Its 10-pin header follows the Bus Pirate 6, with IO0–IO7 wired to GPIO15,
+16, 17, 18, 10, 11, 12 and 13 (the dock's schematic). Each time the
+dashboard enters a mode it sets the firmware's pins to the Bus Pirate 6
+layout of that header:
 
-| Bus | Signal | GPIO |
-|---|---|---|
-| I2C | SDA / SCL | 6 / 7 |
-| SPI | CS / CLK / MISO / MOSI | 10 / 12 / 11 / 13 |
-| UART | RX / TX | 17 / 18 |
+| Bus | Signal | Dock pin (GPIO) | Bus Pirate 6 |
+|---|---|---|---|
+| I2C | SDA / SCL | IO15 / IO16 | IO0 / IO1 |
+| SPI | MISO / CS / CLK / MOSI | IO10 / IO11 / IO12 / IO13 | IO4 / IO5 / IO6 / IO7 |
+| UART | TX / RX | IO10 / IO11 | IO4 / IO5 |
 
-Pins can be moved: type `config` in the Terminal panel while in that mode,
-and `profile` to keep the change. The dashboard's diagrams always show the
-defaults.
+The firmware's own s3-devkit defaults (I2C 6 / 7, SPI CS 10 / CLK 12 /
+MISO 11 / MOSI 13, UART RX 17 / TX 18) are overridden: GPIO6 and 7 are not on
+the dock's header. The dock's slide switch sets 5V, 3V3 or 1V8 for VIO and
+its level shifters.
 
 ## What happens underneath
 
@@ -131,7 +136,9 @@ The dashboard types commands and reads the replies, the way you would at the
 board's prompt:
 
 - **Entering a mode:** `m i2c`. The first time after boot, the firmware asks
-  its pin and speed questions, which are answered with the current settings.
+  its pin and speed questions. The pins get the dock's layout and the rest
+  keep their settings. On a later entry the pins are set with `config`,
+  once per connection.
 - **Changing speed or baud:** `config`. Only the setting that changed is
   answered; every other question keeps its value.
 - **I2C scan:** `scan`.

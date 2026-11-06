@@ -208,86 +208,75 @@ _BOARD_V4 = {
     ),
 }
 
-# The ESP32-S3-DevKitC-1 the ESP32 Bit Pirate runs on, as drawn in
-# static/img/board-bitpirate.svg (scripts/draw_devkit_board.py draws it from
-# these same lists, so the picture and the pin rings cannot disagree).
-#
-# Both 22-pin headers, pin 1 at the top with the USB ports at the bottom, from
-# Espressif's ESP32-S3-DevKitC-1 v1.1 user guide. TX and RX on J3 are GPIO43
-# and GPIO44. Every pin the firmware's s3-devkit build uses for I2C, SPI and
-# UART sits on J1.
-DEVKIT_J1 = [
-    "3V3", "3V3", "RST", "GPIO4", "GPIO5", "GPIO6", "GPIO7", "GPIO15",
-    "GPIO16", "GPIO17", "GPIO18", "GPIO8", "GPIO3", "GPIO46", "GPIO9",
-    "GPIO10", "GPIO11", "GPIO12", "GPIO13", "GPIO14", "5V", "GND",
-]
-DEVKIT_J3 = [
-    "GND", "GPIO43", "GPIO44", "GPIO1", "GPIO2", "GPIO42", "GPIO41",
-    "GPIO40", "GPIO39", "GPIO38", "GPIO37", "GPIO36", "GPIO35", "GPIO0",
-    "GPIO45", "GPIO48", "GPIO47", "GPIO21", "GPIO20", "GPIO19", "GND", "GND",
-]
-DEVKIT_GEOMETRY = {
-    "width": 700, "height": 525,
-    "j1_x": 225, "j3_x": 475, "first_y": 45, "pitch": 20,
-}
+# The ESP32 Bit Pirate Dock (github.com/AndreiVladescu/ESP32-Bit-Pirate-Hardware)
+# with an ESP32-S3-DevKitC-1 seated in it, photographed as
+# static/img/board-bitpirate-dock.jpg (700x661). Its 10-pin header copies the
+# Bus Pirate 6's: GND, IO0..IO7, then VIO, with IO0..IO7 wired to GPIO15, 16,
+# 17, 18, 10, 11, 12 and 13 (dock schematic, J3/CN1). The silkscreen names
+# them by GPIO, so the diagram does too. The holes sit at x=150 from y=251 in
+# steps of 21.16, measured on the photo with markers drawn over it.
+DOCK_HEADER = ["GND", "IO15", "IO16", "IO17", "IO18", "IO10", "IO11", "IO12", "IO13", "VIO"]
+DOCK_GEOMETRY = {"width": 700, "height": 661, "x": 150, "first_y": 251.2, "pitch": 21.16}
 
 
-def _devkit_pins():
-    """Pin name to position, first occurrence only (3V3 and GND repeat)."""
-    g = DEVKIT_GEOMETRY
-    pins, side = {}, {}
-    for column, x, where in ((DEVKIT_J1, g["j1_x"], "left"), (DEVKIT_J3, g["j3_x"], "right")):
-        for index, name in enumerate(column):
-            if name not in pins:
-                pins[name] = [x, g["first_y"] + index * g["pitch"]]
-                side[name] = where
+def _dock_pins():
+    g = DOCK_GEOMETRY
+    pins = {
+        name: [g["x"], round(g["first_y"] + i * g["pitch"])]
+        for i, name in enumerate(DOCK_HEADER)
+    }
+    # The header is at the photo's left edge, so every callout goes left.
+    side = {name: "left" for name in DOCK_HEADER}
     return pins, side
 
 
-_DEVKIT_PINS, _DEVKIT_SIDE = _devkit_pins()
+_DOCK_PINS, _DOCK_SIDE = _dock_pins()
 
 
 def _wire(signal: str, target: str, note: str = "") -> Dict[str, str]:
-    # No colour: a DevKit is wired with whatever jumper leads are to hand.
+    # No colour: the dock takes any Bus Pirate 5/6 style cable or adapter.
     return {"signal": signal, "colour": "", "target": target, "note": note}
 
 
 _BITPIRATE_GND = _wire("GND", "GND", "always connect this first")
-_BITPIRATE_3V3 = _wire(
-    "3V3", "VCC", "only to power a small target; there is no switch, and it is 3.3V only"
+_BITPIRATE_VIO = _wire(
+    "VIO", "VCC", "the voltage set on the dock's slide switch: 5V, 3V3 or 1V8"
 )
 _BITPIRATE_PINS_NOTE = (
-    "These are the s3-devkit build's default pins. Every pin can be moved: "
-    "type 'config' in the board's terminal, and 'profile' to keep the change. "
-    "The dashboard does not follow a moved pin in this picture."
+    "The dashboard sets these pins itself each time it enters a mode: the Bus "
+    "Pirate 6 layout of the dock's header, not the firmware's own defaults. "
+    "Bus Pirate 5/6 adapters plug straight in."
 )
 _BITPIRATE_VOLTAGE_NOTE = (
-    "The ESP32-S3 is a 3.3V part and its pins are not 5V tolerant. Level-shift "
-    "anything that drives 5V, and never feed a pin more than 3.3V."
+    "Set the dock's slide switch (5V / 3V3 / 1V8) to the target's voltage "
+    "before wiring it: the level shifters and VIO follow it, and its LED "
+    "shows which one is selected."
 )
 
 _BOARD_BITPIRATE = {
-    "image": "/static/img/board-bitpirate.svg",
-    "width": DEVKIT_GEOMETRY["width"],
-    "height": DEVKIT_GEOMETRY["height"],
+    "image": "/static/img/board-bitpirate-dock.jpg",
+    "width": DOCK_GEOMETRY["width"],
+    "height": DOCK_GEOMETRY["height"],
     "gutter": 290,
     "gutter_left": 290,
-    "label": "ESP32 Bit Pirate on an ESP32-S3-DevKitC-1",
-    "pins": _DEVKIT_PINS,
-    "side": _DEVKIT_SIDE,
-    "leds": {"PWR": [250, 497]},
+    "label": "ESP32 Bit Pirate in its dock",
+    "pins": _DOCK_PINS,
+    "side": _DOCK_SIDE,
+    # The DevKit's red power LED, right of the regulator.
+    "leds": {"PWR": [572, 336]},
     #: Not a Bus Pirate: there is no probe cable, so no cable colours and no
     #: Dangerous Prototypes reference cards.
     "cable": False,
     "caveat": (
-        "Drawn from Espressif's pinout for the ESP32-S3-DevKitC-1 v1.1. Other "
-        "S3 boards differ — check the silkscreen next to your own headers."
+        "This is the ESP32 Bit Pirate Dock. Its header follows the Bus Pirate "
+        "6, labelled by GPIO: IO15 is the Bus Pirate's IO0 through to IO13 as "
+        "IO7. Check the silkscreen beside the header if yours differs."
     ),
     #: What replaces a panel's Bus Pirate wording on this board. See
     #: server._panels_json.
     "panels": {
         "terminal": {
-            "blurb": "The Bit Pirate's own command line — the `HIZ>` prompt.",
+            "blurb": "The Bit Pirate's own command line \u2014 the `HIZ>` prompt.",
             "actions": {
                 "open_terminal": {
                     "confirm": "",
@@ -299,16 +288,16 @@ _BOARD_BITPIRATE = {
         },
         "i2c": {
             "wiring": [
-                _wire("GPIO7", "SCL", "clock"),
-                _wire("GPIO6", "SDA", "data, both directions"),
+                _wire("IO15", "SDA", "data, both directions"),
+                _wire("IO16", "SCL", "clock"),
                 _BITPIRATE_GND,
-                _BITPIRATE_3V3,
+                _BITPIRATE_VIO,
             ],
             "notes": [
                 "I2C needs pull-ups on SDA and SCL. The ESP32's internal ones "
-                "(the pull-up switch) are weak — about 45 kΩ — and fine for a "
-                "short bus at 100 kHz; fit 4.7 kΩ to 3.3V for anything longer "
-                "or faster.",
+                "(the pull-up switch) are weak \u2014 about 45 k\u03a9 \u2014 "
+                "and fine for a short bus at 100 kHz; fit 4.7 k\u03a9 to VIO "
+                "for anything longer or faster.",
                 "Writes are checked by pinging the address first: the Bit "
                 "Pirate does not report an ACK for each byte the way a Bus "
                 "Pirate does.",
@@ -318,18 +307,18 @@ _BOARD_BITPIRATE = {
         },
         "spi": {
             "wiring": [
-                _wire("GPIO12", "SCK / CLK", "clock"),
-                _wire("GPIO13", "DI / MOSI", "Bit Pirate out, chip in"),
-                _wire("GPIO11", "DO / MISO", "chip out, Bit Pirate in"),
-                _wire("GPIO10", "CS / SS", "active low"),
+                _wire("IO12", "SCK / CLK", "clock"),
+                _wire("IO13", "DI / MOSI", "Bit Pirate out, chip in"),
+                _wire("IO10", "DO / MISO", "chip out, Bit Pirate in"),
+                _wire("IO11", "CS / SS", "active low"),
                 _BITPIRATE_GND,
-                _BITPIRATE_3V3,
+                _BITPIRATE_VIO,
             ],
             "notes": [
                 "Serial flash chips also have WP and HOLD pins. Tie both high, "
                 "or the chip may never respond.",
                 "Reading and dumping flash work here; writing and erasing are "
-                "left to the Bus Pirates for now — the Bit Pirate's command "
+                "left to the Bus Pirates for now \u2014 the Bit Pirate's command "
                 "line cannot carry a whole 256-byte page in one transfer.",
                 "The clock is set in whole MHz: 1, 2, 4 or 8 MHz from the list.",
                 "A reply of all 0x00 or all 0xFF almost always means MISO is "
@@ -340,13 +329,13 @@ _BOARD_BITPIRATE = {
         },
         "uart": {
             "wiring": [
-                _wire("GPIO17", "TX", "the Bit Pirate's RX listens to the target's transmit pin"),
-                _wire("GPIO18", "RX", "the Bit Pirate's TX drives the target's receive pin"),
+                _wire("IO10", "RX", "the Bit Pirate's TX drives the target's receive pin"),
+                _wire("IO11", "TX", "the Bit Pirate's RX listens to the target's transmit pin"),
                 _BITPIRATE_GND,
             ],
             "notes": [
-                "TX and RX cross over. If you see nothing, swapping GPIO17 and "
-                "GPIO18 is the first thing to try.",
+                "TX and RX cross over. If you see nothing, swapping IO10 and "
+                "IO11 is the first thing to try.",
                 "Garbled characters mean the baud rate is wrong, not the wiring.",
                 _BITPIRATE_VOLTAGE_NOTE,
                 _BITPIRATE_PINS_NOTE,
@@ -546,8 +535,8 @@ LED_NOTES: Dict[str, str] = {
     + " On a v4 both MODE and USB are software-driven, and USB goes dark once "
     "the board has enumerated — dark is the healthy state, not a fault.",
     "bitpirate": "Only the DevKit's power LED is shown, lit while the port is "
-    "open. Its RGB LED (GPIO48) is the firmware's to drive, and the dashboard "
-    "does not know what it is showing.",
+    "open. Its RGB LED is the firmware's to drive, and the dock's 5V / 3V3 / "
+    "1V8 LEDs follow its slide switch; the dashboard knows neither.",
     "bp6": "The Bus Pirate 6's 18 RGB LEDs belong to its firmware, and the "
     "dashboard does not know what they show. Its status bar shows the supply "
     "and current instead.",

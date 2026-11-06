@@ -130,8 +130,15 @@ class BitPirate(SerialLink):
     def _enter_mode(self, mode_cls):
         if self._mode is not None:
             raise ModeError(f"already in {type(self._mode).__name__}; close it first")
-        self.cli.enter_mode(mode_cls.name)
+        # The Bus Pirate 6 pin layout of the ESP32 Bit Pirate Dock, not the
+        # firmware's own defaults (see modes.DOCK_PINS). A first entry asks
+        # the config questions itself; later entries need ``config``.
+        reply = self.cli.enter_mode(mode_cls.name, mode_cls.pins)
         self._mode = mode_cls(self)
+        if set(mode_cls.pins) <= set(reply.questions):
+            self.settings.setdefault(mode_cls.name, {}).update(mode_cls.pins)
+        else:
+            self._mode._configure(mode_cls.pins)
         return self._mode
 
     def _mode_closed(self, mode) -> None:
