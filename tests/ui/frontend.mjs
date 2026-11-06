@@ -77,6 +77,7 @@ check("no HiZ button until a board is connected", $("nav").querySelector(".nav__
 $("connect").click();
 await settle(600);
 check("welcome hidden after connecting", $("welcome").hidden);
+check("a Bus Pirate's menu has no group headings", $("nav").querySelector(".nav__heading") === null);
 check("panel visible after connecting", !$("panel").hidden);
 check("status shows the device", /SIMULATED Bus Pirate v3/.test($("status-text").textContent), $("status-text").textContent);
 check("the top bar holds no buttons or pickers, only status",
@@ -728,8 +729,42 @@ check("the Bit Pirate is named in the status",
   /ESP32 Bit Pirate/.test($("status-text").textContent), $("status-text").textContent);
 const bitNav = [...$("nav").children].map((b) => b.textContent);
 check("panels a Bit Pirate cannot drive are not in the nav",
-  bitNav.includes("I2C") && !bitNav.includes("1-Wire") && !bitNav.includes("Pins & power"),
+  bitNav.includes("I2C") && !bitNav.includes("Pins & power") && !bitNav.includes("2-wire / 3-wire"),
   bitNav.join("|"));
+{
+  // Its own modes sit under headings, in the order the board lists them.
+  const items = [...$("nav").children].map((c) =>
+    c.classList.contains("nav__heading") ? `#${c.textContent}` : c.textContent);
+  const at = (t) => items.indexOf(t);
+  check("the Bit Pirate's menu has Buses and Wireless headings",
+    at("#Buses") > at("UART") && at("#Wireless") > at("#Buses"), items.join("|"));
+  check("1-Wire, DIO and JTAG sit under Buses",
+    at("#Buses") < at("1-Wire") && at("1-Wire") < at("DIO") && at("DIO") < at("JTAG")
+      && at("JTAG") < at("#Wireless"), items.join("|"));
+  check("Wi-Fi and Bluetooth sit under Wireless",
+    at("#Wireless") < at("Wi-Fi") && at("Wi-Fi") < at("Bluetooth"), items.join("|"));
+}
+[...$("nav").children].find((b) => b.textContent === "1-Wire").click();
+await settle(300);
+$("panel").querySelector('[data-action="temp"] button').click();
+await settle(1200);
+{
+  const reply = $("panel").querySelector('[data-action="temp"] pre.console');
+  check("1-Wire's temperature shows the board's own line",
+    reply && reply.textContent.includes("Temperature: 23.50 °C"),
+    reply ? reply.textContent.slice(0, 120) : $("panel").querySelector('[data-action="temp"]').textContent.slice(0, 160));
+}
+[...$("nav").children].find((b) => b.textContent === "Wi-Fi").click();
+await settle(300);
+$("panel").querySelector('[data-action="scan"] button').click();
+await settle(1200);
+{
+  // The UI server's simulator has no Wi-Fi in reach (BUSPIRATE_SIM_WIFI=none).
+  const reply = $("panel").querySelector('[data-action="scan"] pre.console');
+  check("a Wi-Fi scan with nothing in reach says so in the board's words",
+    reply && reply.textContent.includes("WiFi: No networks found."),
+    reply ? reply.textContent.slice(0, 120) : $("panel").querySelector('[data-action="scan"]').textContent.slice(0, 160));
+}
 {
   const rows = [...$("log-lines").children].map((r) => r.textContent);
   check("its traffic reads as text, not hex", rows.some((t) => /HIZ>/.test(t)),
@@ -763,7 +798,8 @@ typeKeys(bitLine, "mode");
 enter(bitLine);
 await settle(1200);
 check("the Bit Pirate's line redraw shows as one clean line",
-  consoleText().includes("HIZ> mode\n") && !consoleText().includes("HIZ> HIZ>")
+  // Whatever mode the checks above left it in: the prompt is the mode's name.
+  /[A-Z0-9]+> mode\n/.test(consoleText()) && !/([A-Z0-9]+)> \1>/.test(consoleText())
     && !consoleText().includes("\ufffd") && !consoleText().includes("[K"),
   JSON.stringify(consoleText().slice(0, 160)));
 check("mode on its own shows the numbered menu",

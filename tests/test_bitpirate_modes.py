@@ -333,3 +333,10 @@ def test_the_i2c_sniff_extra_streams_on_a_bit_pirate(client):
     assert response.status_code == 200, response.text
     assert response.json()["result"]["render"] == "stream"
     assert client.post("/api/stream/stop").status_code == 200
+
+
+def test_the_simulator_can_have_no_wifi_in_reach(monkeypatch):
+    monkeypatch.setenv("BUSPIRATE_SIM_WIFI", "none")
+    assert FakeBitPirateSerial().wifi_networks == []
+    monkeypatch.delenv("BUSPIRATE_SIM_WIFI")
+    assert FakeBitPirateSerial().wifi_networks

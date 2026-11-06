@@ -8,6 +8,7 @@ above each handler; anything else in these modes is ``Unknown command``.
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -70,7 +71,12 @@ class ModesMixin:
         #: 1-Wire parts on the data pin, as 8-byte ROM codes.
         self.onewire_devices = list(onewire_devices) if onewire_devices is not None else [DS18B20]
         self.onewire_celsius = 23.5
-        self.wifi_networks = list(wifi_networks) if wifi_networks is not None else list(WIFI_NETWORKS)
+        if wifi_networks is None:
+            # BUSPIRATE_SIM_WIFI=none: a board with nothing in reach, for the
+            # dashboard's UI checks (Makefile ui-test).
+            empty = os.environ.get("BUSPIRATE_SIM_WIFI") == "none"
+            wifi_networks = [] if empty else WIFI_NETWORKS
+        self.wifi_networks = list(wifi_networks)
         self.wifi_connected: Optional[str] = None
         self.bluetooth_devices = (
             list(bluetooth_devices) if bluetooth_devices is not None else list(BLUETOOTH_DEVICES)
