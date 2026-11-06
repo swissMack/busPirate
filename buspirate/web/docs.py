@@ -11,6 +11,8 @@ import os
 import re
 from typing import Dict, List, Optional
 
+from .. import boards
+
 # docs/ sits next to the package, at the repository root.
 DOCS_DIR = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "docs")
@@ -45,17 +47,10 @@ OFFICIAL = "official"
 BITPIRATE_GROUP = "ESP32 Bit Pirate wiki"
 #: The Bit Pirate's own wiki, imported by scripts/import_bitpirate_wiki.py.
 BITPIRATE_WIKI = "bitpirate-wiki"
-#: Imported manuals by folder: their sidebar heading, and which board
-#: variants list them. The Bit Pirate has far more in its terminal than the
-#: dashboard drives, and its own wiki documents it; the Bus Pirate 5/6 manual
-#: does not apply to it. Every page stays readable by name, so links work.
-MANUALS = {
-    OFFICIAL: {"group": OFFICIAL_GROUP, "for": lambda variant: variant != "bitpirate"},
-    BITPIRATE_WIKI: {"group": BITPIRATE_GROUP, "for": lambda variant: variant == "bitpirate"},
-}
-#: Our page about a board, moved up to just after the user guide when that
-#: board is the one in use.
-BOARD_PAGE = {"bitpirate": "bitpirate", "bp6": "bus-pirate-6", "v4": "bus-pirate-v4"}
+#: Imported manuals by folder, with their sidebar heading. Which one the
+#: guide lists is each board's ``manual`` (buspirate.boards). Every page stays
+#: readable by name whatever the board, so links between them work.
+MANUALS: Dict[str, str] = {OFFICIAL: OFFICIAL_GROUP, BITPIRATE_WIKI: BITPIRATE_GROUP}
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 #: official/<section>/<page> is as deep as a page name goes.
 MAX_DEPTH = 3
@@ -92,7 +87,7 @@ def _page(name: str) -> Optional[Dict[str, str]]:
     except OSError:
         return None
     folder = name.split("/", 1)[0] if "/" in name else None
-    group = MANUALS[folder]["group"] if folder in MANUALS else APP_GROUP
+    group = MANUALS.get(folder, APP_GROUP) if folder else APP_GROUP
     return {"name": name, "title": _title_of(head, name.rsplit("/", 1)[-1]), "group": group}
 
 
@@ -115,13 +110,11 @@ def available(variant: Optional[str] = None) -> List[Dict[str, str]]:
     )
     ordered = [name for name in ORDER if name in names]
     ordered += [name for name in names if name not in ORDER]
-    board_page = BOARD_PAGE.get(variant or "")
-    if board_page in ordered and "user-guide" in ordered:
-        ordered.remove(board_page)
-        ordered.insert(ordered.index("user-guide") + 1, board_page)
-    for folder, manual in MANUALS.items():
-        if manual["for"](variant):
-            ordered += _manual_order(folder)
+    board = boards.get(variant)
+    if board.guide_page in ordered and "user-guide" in ordered:
+        ordered.remove(board.guide_page)
+        ordered.insert(ordered.index("user-guide") + 1, board.guide_page)
+    ordered += _manual_order(board.manual)
     return [page for page in (_page(name) for name in ordered) if page is not None]
 
 

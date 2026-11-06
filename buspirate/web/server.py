@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .. import __version__
+from .. import __version__, boards
 from ..exceptions import BusPirateError
 from . import docs as docs_module
 from .params import ParamError, coerce_all
@@ -145,6 +145,7 @@ def create_app(
             "variant_source": session.variant_source(),
             # Declared order, so the picker reads v3, v4, then the Bit Pirate.
             "variants": list(BOARDS),
+            "variant_labels": {v: b.name for v, b in boards.REGISTRY.items()},
             "led_note": LED_NOTES[variant],
             "led_rules": LED_RULES[variant],
         }

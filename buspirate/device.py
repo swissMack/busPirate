@@ -15,55 +15,12 @@ from typing import Dict, FrozenSet, Optional
 
 from .exceptions import UnsupportedFeatureError
 
-# Capability names. Use the constants, not the strings.
-CAP_SELF_TEST = "self_test"
-CAP_PWM = "pwm"
-CAP_ADC = "adc"
-CAP_FREQUENCY = "frequency_count"
-CAP_PULLUP_VOLTAGE = "pullup_voltage_select"
-CAP_EXTENDED_AUX = "extended_aux"
+# Capability names live in their own module (the board definitions use them
+# too); re-exported here, where the panels have always found them.
+from .capabilities import *  # noqa: E402,F401,F403
+from .capabilities import BUS_PIRATE_ONLY, CAPABILITY_HOME  # noqa: E402
 
-# What every Bus Pirate's binary protocol offers and the ESP32 Bit Pirate's
-# text command line does not. Offered to v3, v4 and unidentified boards alike,
-# so nothing the dashboard showed a Bus Pirate before is hidden from it now.
-CAP_BITBANG_PINS = "bitbang_pins"
-CAP_SUPPLIES = "switchable_supplies"
-CAP_ONEWIRE = "onewire"
-CAP_RAWWIRE = "rawwire"
-CAP_SNIFFER = "sniffer"
-CAP_SPI_MODES = "spi_modes"
-CAP_UART_BUFFERED = "uart_buffered_receive"
-CAP_UART_BRIDGE = "uart_bridge"
-CAP_SPI_FLASH_PROGRAM = "spi_flash_program"
-
-# The Bus Pirate 6's programmable supply: set volts and a current limit, and
-# read back what the target draws.
-CAP_PSU_PROGRAMMABLE = "psu_programmable"
-CAP_PSU_READOUT = "psu_current_readout"
-
-BUS_PIRATE_ONLY = frozenset(
-    {
-        CAP_BITBANG_PINS,
-        CAP_SUPPLIES,
-        CAP_ONEWIRE,
-        CAP_RAWWIRE,
-        CAP_SNIFFER,
-        CAP_SPI_MODES,
-        CAP_UART_BUFFERED,
-        CAP_UART_BRIDGE,
-        CAP_SPI_FLASH_PROGRAM,
-    }
-)
-
-# Which variant to name in an error when a capability is missing.
-_CAPABILITY_HOME = {
-    CAP_SELF_TEST: "Bus Pirate v3 (and v2go)",
-    CAP_PULLUP_VOLTAGE: "Bus Pirate v4",
-    CAP_EXTENDED_AUX: "Bus Pirate v3 with firmware v6.1 or newer",
-    CAP_PSU_PROGRAMMABLE: "Bus Pirate 6",
-    CAP_PSU_READOUT: "Bus Pirate 6",
-    **{capability: "Bus Pirate v3 and v4" for capability in BUS_PIRATE_ONLY},
-}
+_CAPABILITY_HOME = CAPABILITY_HOME
 
 # I2C speed tables. Firmware v4.2 widened this from two speeds to four.
 I2C_SPEEDS_MODERN = {0: 5_000, 1: 50_000, 2: 100_000, 3: 400_000}
@@ -113,11 +70,10 @@ class DeviceProfile:
                 "Bus Pirate 5 (untested)" if (self.devid or "").startswith("hw 5.") else "Bus Pirate 6"
             )
         else:
-            parts = {
-                "v3": "Bus Pirate v3",
-                "v4": "Bus Pirate v4",
-                "bitpirate": "ESP32 Bit Pirate",
-            }.get(self.variant, "unidentified Bus Pirate")
+            from . import boards
+
+            board = boards.REGISTRY.get(self.variant)
+            parts = board.name if board is not None else "unidentified Bus Pirate"
         if self.firmware:
             parts += f", firmware {self.firmware}"
         return parts
@@ -147,34 +103,10 @@ def _firmware_tuple(firmware: Optional[str]) -> tuple:
 
 
 def capabilities_for(variant: str) -> FrozenSet[str]:
-    if variant == "bitpirate":
-        # A text command line, not the binary protocol: none of the binary
-        # extras, and no supplies to switch. What it can do is I2C, SPI and
-        # UART through its own commands — see buspirate.bitpirate.
-        return frozenset()
-    if variant == "bp6":
-        # BPIO2: I2C, SPI (any mode, page writes fit in 512 bytes), UART with
-        # its async receive, 1-Wire, and the programmable supply. No bitbang,
-        # raw-wire, sniffers or bridge — see buspirate.bp6.
-        return frozenset(
-            {CAP_SUPPLIES, CAP_ONEWIRE, CAP_SPI_MODES, CAP_UART_BUFFERED,
-             CAP_SPI_FLASH_PROGRAM, CAP_PSU_PROGRAMMABLE, CAP_PSU_READOUT}
-        )
-    if variant == "v4":
-        # The wiki notes binary self-tests are v2go/v3 hardware only.
-        # No extended AUX: the firmware reads its sub-command from the PIC's
-        # hardware UART, which on a v4 is not the host link — it waits
-        # forever. Found on a real v4 on firmware 7.0, 2026-09-28.
-        return BUS_PIRATE_ONLY | frozenset(
-            {CAP_PWM, CAP_ADC, CAP_FREQUENCY, CAP_PULLUP_VOLTAGE}
-        )
-    if variant == "v3":
-        # On a v3 that UART is the FT232R link, so extended AUX works.
-        return BUS_PIRATE_ONLY | frozenset(
-            {CAP_PWM, CAP_ADC, CAP_FREQUENCY, CAP_SELF_TEST, CAP_EXTENDED_AUX}
-        )
-    # Unidentified: offer only what every documented variant shares.
-    return BUS_PIRATE_ONLY | frozenset({CAP_PWM, CAP_ADC, CAP_FREQUENCY})
+    """What ``variant``'s firmware offers; see buspirate.boards."""
+    from . import boards
+
+    return boards.capabilities_for(variant)
 
 
 # The firmware's 'i' banner looks like:
