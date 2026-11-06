@@ -7,7 +7,7 @@ import contextlib
 import logging
 import sys
 
-from . import BusPirateError, discover, resolve
+from . import BusPirateError, boards, discover, resolve
 from .connect import open_device
 from .ports import usb_id_for
 from .exceptions import GuiUnavailableError
@@ -77,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     dash.add_argument(
         "--variant",
         default="v3",
-        choices=["v3", "v4", "bitpirate", "bp6"],
+        choices=list(boards.REGISTRY),
         help="which device the demo simulates: a Bus Pirate v3 or v4, an "
         "ESP32 Bit Pirate, or a Bus Pirate 6 (default: v3)",
     )
@@ -100,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     appcmd.add_argument(
         "--variant",
         default="v3",
-        choices=["v3", "v4", "bitpirate", "bp6"],
+        choices=list(boards.REGISTRY),
         help="which device the demo simulates: a Bus Pirate v3 or v4, an "
         "ESP32 Bit Pirate, or a Bus Pirate 6 (default: v3)",
     )

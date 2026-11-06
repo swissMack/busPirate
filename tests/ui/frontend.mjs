@@ -99,6 +99,9 @@ check("USB is not steadily lit — it only flashes on traffic", /USB:off/.test(l
 check("variant selector offers every board",
   $("variant") && [...$("variant").options].map((o) => o.value).join(",") === "auto,v3,v4,bitpirate,bp6",
   $("variant") ? [...$("variant").options].map((o) => o.value).join(",") : "no #variant");
+check("its options carry the board names from buspirate.boards",
+  $("variant") && [...$("variant").options].some((o) => o.textContent === "ESP32 Bit Pirate"),
+  $("variant") ? [...$("variant").options].map((o) => o.textContent).join("|") : "no #variant");
 check("no mismatch warning while following detection", $("variant-warning").hidden);
 
 // --- I2C panel

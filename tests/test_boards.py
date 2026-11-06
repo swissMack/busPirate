@@ -84,3 +84,54 @@ def test_wiring_is_served_from_the_boards():
         assert wiring.BOARDS[variant] is board.wiring
         assert wiring.LED_RULES[variant] is board.led_rules
         assert wiring.LED_NOTES[variant] == board.led_note
+
+
+# -- everything else reads the registry ---------------------------------------
+
+
+@pytest.fixture
+def client():
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    from buspirate.web.server import create_app
+
+    with fastapi_testclient.TestClient(create_app(use_fake=True)) as c:
+        yield c
+
+
+def test_the_guide_follows_each_boards_manual_and_page():
+    from buspirate.web import docs
+
+    assert boards.get(None).manual == "official"  # nothing connected
+    assert boards.REGISTRY["bitpirate"].manual == "bitpirate-wiki"
+    assert not hasattr(docs, "BOARD_PAGE")
+    assert set(docs.MANUALS) == {b.manual for b in boards.REGISTRY.values()}
+
+
+def test_simulators_and_terminal_captions_come_from_the_boards():
+    from buspirate.web import session
+
+    assert session.SIMULATED_VARIANTS == tuple(boards.REGISTRY)
+    assert session.SIMULATED_NAMES == {v: b.simulated_name for v, b in boards.REGISTRY.items()}
+
+
+def test_the_cli_offers_every_board(monkeypatch):
+    from buspirate import cli
+
+    parser = cli.build_parser()
+    for action in parser._subparsers._group_actions[0].choices.values():
+        for option in action._actions:
+            if option.dest in ("variant", "fake_variant"):
+                assert list(option.choices) == list(boards.REGISTRY)
+
+
+def test_state_carries_the_board_names(client):
+    labels = client.get("/api/state").json()["variant_labels"]
+    assert labels == {v: b.name for v, b in boards.REGISTRY.items()}
+
+
+def test_an_override_outside_the_registry_is_refused(client):
+    response = client.post(
+        "/api/run",
+        json={"panel": "connection", "action": "set_variant", "params": {"variant": "v9"}},
+    )
+    assert response.status_code == 400

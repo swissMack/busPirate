@@ -124,6 +124,8 @@ function applyState(data) {
   state.variantDetected = data.variant_detected;
   state.variantSource = data.variant_source;
   state.variants = data.variants || [];
+  // Board names, from buspirate.boards.
+  state.variantLabels = data.variant_labels || {};
   state.ledRules = data.led_rules || {};
   if (!state.panels.some((p) => p.id === state.current)) {
     state.current = state.panels.length ? state.panels[0].id : null;
@@ -174,12 +176,6 @@ function ledMeans(name) {
   return (state.ledRules[name] || {}).means || "";
 }
 
-const VARIANT_LABELS = {
-  v3: "Bus Pirate v3",
-  v4: "Bus Pirate v4",
-  bitpirate: "ESP32 Bit Pirate",
-  bp6: "Bus Pirate 6",
-};
 
 function renderVariant() {
   const select = $("variant");
@@ -188,7 +184,7 @@ function renderVariant() {
   if ([...select.options].map((o) => o.value).join() !== wanted.join()) {
     select.replaceChildren(
       el("option", { value: "auto" }, "Follow the board"),
-      ...state.variants.map((v) => el("option", { value: v }, VARIANT_LABELS[v] || v))
+      ...state.variants.map((v) => el("option", { value: v }, state.variantLabels[v] || v))
     );
   }
   select.value = state.variantSource === "override" ? state.variant : "auto";
@@ -1235,7 +1231,7 @@ function hookupDiagram(panel) {
   // this page are drawn from. state.status.variant is the raw detected
   // hardware and disagrees with the photo whenever an override is active or
   // nothing is connected, so it must not drive the caption.
-  const board = VARIANT_LABELS[state.variant] || "Bus Pirate v3";
+  const board = state.variantLabels[state.variant] || "Bus Pirate v3";
   const pinsCaption = panel.wiring.length
     ? el("p", {
         class: "caption",

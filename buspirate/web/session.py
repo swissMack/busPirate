@@ -17,6 +17,7 @@ import time
 from collections import deque
 from typing import Any, Dict, List, Optional, Set
 
+from .. import boards
 from .. import device as device_module
 from ..connect import open_device
 from ..exceptions import BusPirateError, ConnectionError, ModeError
@@ -46,15 +47,10 @@ STREAM_STOP_TIMEOUT_SECONDS = 15.0
 #: Port names that mean "a simulated board", offered in every port list so
 #: the dashboard can be tried without hardware, whatever it was launched with.
 SIMULATED_PREFIX = "simulated-"
-SIMULATED_VARIANTS = ("v3", "v4", "bitpirate", "bp6")
+SIMULATED_VARIANTS = tuple(boards.REGISTRY)
 
 #: How each simulated board is named in the port list.
-SIMULATED_NAMES = {
-    "v3": "simulated Bus Pirate v3",
-    "v4": "simulated Bus Pirate v4",
-    "bitpirate": "simulated ESP32 Bit Pirate",
-    "bp6": "simulated Bus Pirate 6",
-}
+SIMULATED_NAMES = {v: b.simulated_name for v, b in boards.REGISTRY.items()}
 
 
 def simulated_variant(port: Optional[str]) -> Optional[str]:
@@ -961,14 +957,7 @@ class DeviceSession:
                 "the board was sent out of binary mode but its terminal "
                 f"could not be opened: {exc}"
             ) from exc
-        variant = self.bp.profile.variant
-        if variant == "bitpirate":
-            caption = "The Bit Pirate's own command line. Type a command; 'help' lists them."
-        elif variant == "bp6":
-            caption = ("The Bus Pirate 6's own terminal. Type a command; '?' lists them. "
-                       "If it asks 'VT100 compatible color mode?', answer n.")
-        else:
-            caption = "The Bus Pirate's own terminal. Type a command; '?' lists them."
+        caption = boards.get(self.bp.profile.variant).terminal_caption
         return live("Board terminal", decoder="console", caption=caption, input=True)
 
     def send_terminal_keys(self, keys: str) -> None:
