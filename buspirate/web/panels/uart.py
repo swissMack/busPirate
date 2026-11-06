@@ -8,6 +8,7 @@ from ... import device as device_module
 from ...uart import UART
 from ..registry import Action, Panel, Param, Wire, hexdump, live, table, text
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, colour
+from .cli_modes import extra_actions
 
 BAUD_CHOICES = [
     {"value": UART.BAUD_300, "label": "300"},
@@ -228,5 +229,7 @@ PANEL = Panel(
             "Only a power cycle ends it.",
             handler=_bridge,
         ),
-    ],
+    ]
+    # The ESP32 Bit Pirate's own extra commands; no other board sees them.
+    + extra_actions("uart"),
 )

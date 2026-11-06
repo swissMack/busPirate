@@ -207,3 +207,129 @@ def test_a_streaming_command_stops_and_the_next_command_works(bp, fake):
     bp.stop_stream()  # what Stop, HiZ and Disconnect all call
     assert not bp.streaming and fake._state == "prompt"
     assert bp.cli_mode(_BY_ID["onewire_cli"]).run("ping") == ["OneWire Ping: Device present."]
+
+
+# -- the panels (Task 3) ------------------------------------------------------------
+
+MODE_IDS = {"onewire_cli", "dio", "jtag", "wifi", "bluetooth"}
+
+
+@pytest.fixture
+def client():
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    from buspirate.web.server import create_app
+
+    with fastapi_testclient.TestClient(create_app(use_fake=True)) as c:
+        yield c
+
+
+def _connect(client, port):
+    response = client.post("/api/run", json={
+        "panel": "connection", "action": "connect", "params": {"port": port}})
+    assert response.status_code == 200, response.text
+
+
+def _panels(client):
+    return {p["id"]: p for p in client.get("/api/state").json()["panels"]}
+
+
+def _run(client, panel, action, **params):
+    return client.post("/api/run", json={"panel": panel, "action": action, "params": params})
+
+
+def test_a_bit_pirate_sees_its_mode_panels(client):
+    _connect(client, "simulated-bitpirate")
+    panels = _panels(client)
+    assert MODE_IDS <= set(panels)
+    assert {i: panels[i]["group"] for i in MODE_IDS} == {
+        "onewire_cli": "Buses", "dio": "Buses", "jtag": "Buses",
+        "wifi": "Wireless", "bluetooth": "Wireless",
+    }
+    assert panels["i2c"]["group"] == ""
+    order = [p["id"] for p in client.get("/api/state").json()["panels"]]
+    assert order.index("uart") < order.index("onewire_cli") < order.index("bluetooth")
+    assert panels["onewire_cli"]["doc"] == "bitpirate-wiki/02-1wire"
+    onewire_wires = {w["signal"]: w["target"] for w in panels["onewire_cli"]["wiring"]}
+    assert "IO15" in onewire_wires and "GND" in onewire_wires
+
+
+def test_a_bus_pirate_sees_none_of_them(client):
+    _connect(client, "simulated-v3")
+    panels = _panels(client)
+    assert not (MODE_IDS & set(panels))
+    assert "identify" not in {a["name"] for a in panels["i2c"]["actions"]}
+    assert "autobaud" not in {a["name"] for a in panels["uart"]["actions"]}
+
+
+def test_nothing_connected_shows_none_of_them(client):
+    panels = _panels(client)
+    assert not (MODE_IDS & set(panels))
+    assert "identify" not in {a["name"] for a in panels["i2c"]["actions"]}
+
+
+def test_running_a_mode_action_returns_lines(client):
+    _connect(client, "simulated-bitpirate")
+    response = _run(client, "onewire_cli", "temp")
+    assert response.status_code == 200, response.text
+    result = response.json()["result"]
+    assert result["render"] == "lines"
+    assert "Temperature: 23.50 °C" in result["lines"]
+
+
+def test_a_refusal_is_an_error_in_the_boards_words(client):
+    _connect(client, "simulated-bitpirate")
+    response = _run(client, "wifi", "ping", host="8.8.8.8")
+    assert response.status_code == 200, response.text  # the board's own answer
+    assert any("Use 'connect' first" in line for line in response.json()["result"]["lines"])
+
+
+def test_out_of_range_input_is_refused_before_sending(client):
+    _connect(client, "simulated-bitpirate")
+    response = _run(client, "dio", "pwm", pin=15, freq=1000, duty=150)
+    assert response.status_code == 400
+    assert "at most 100" in response.json()["error"]
+    response = _run(client, "i2c", "identify", address="90")
+    assert response.status_code == 400
+
+
+def test_an_empty_text_field_is_refused_before_sending(client):
+    _connect(client, "simulated-bitpirate")
+    response = _run(client, "wifi", "connect", ssid="", password="secret")
+    assert response.status_code == 400
+    assert "Network (SSID)" in response.json()["error"]
+
+
+def test_the_i2c_panel_gains_identify_on_a_bit_pirate(client):
+    _connect(client, "simulated-bitpirate")
+    actions = {a["name"] for a in _panels(client)["i2c"]["actions"]}
+    assert {"identify", "discovery", "dump", "recover", "sniff_traffic"} <= actions
+    response = _run(client, "i2c", "identify", address="50")
+    assert response.status_code == 200, response.text
+    assert any("[EEPROM] AT24Cxx" in line for line in response.json()["result"]["lines"])
+
+
+def test_a_mode_stream_stops_on_hiz_and_the_next_command_works(client):
+    _connect(client, "simulated-bitpirate")
+    response = _run(client, "onewire_cli", "sniff")
+    assert response.status_code == 200, response.text
+    assert response.json()["result"]["render"] == "stream"
+    assert _run(client, "connection", "hiz").status_code == 200
+    response = _run(client, "onewire_cli", "ping")
+    assert response.status_code == 200, response.text
+    assert response.json()["result"]["lines"] == ["OneWire Ping: Device present."]
+
+
+def test_extra_actions_never_reuse_a_name_on_their_panel():
+    from buspirate.web.registry import load_panels
+
+    for panel in load_panels():
+        names = [a.name for a in panel.actions]
+        assert len(names) == len(set(names)), (panel.id, names)
+
+
+def test_the_i2c_sniff_extra_streams_on_a_bit_pirate(client):
+    _connect(client, "simulated-bitpirate")
+    response = _run(client, "i2c", "sniff_traffic")
+    assert response.status_code == 200, response.text
+    assert response.json()["result"]["render"] == "stream"
+    assert client.post("/api/stream/stop").status_code == 200

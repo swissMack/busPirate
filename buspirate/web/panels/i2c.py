@@ -33,6 +33,7 @@ from ..registry import (
     with_meaning,
 )
 from ..wiring import CABLE_CAVEAT, POWER_NOTE, PULLUP_RAIL_NOTE, colour
+from .cli_modes import extra_actions
 
 # Addresses common enough to be worth naming in the scan results.
 
@@ -446,5 +447,7 @@ PANEL = Panel(
             ],
             handler=_extended_aux,
         ),
-    ],
+    ]
+    # The ESP32 Bit Pirate's own extra commands; no other board sees them.
+    + extra_actions("i2c"),
 )

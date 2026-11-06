@@ -26,6 +26,8 @@ class CliParam:
     minimum: Optional[int] = None
     maximum: Optional[int] = None
     help: str = ""
+    #: False for a word the firmware splits on spaces (a Wi-Fi password).
+    spaces: bool = True
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,9 @@ class CliMode:
     pins: Dict[str, str] = field(default_factory=dict)
     #: A line on extra hardware it needs; empty when none.
     needs: str = ""
+    #: Its wiring rows on the dock header, as (signal, target, note); the
+    #: panel adds GND before and VIO after. Empty for a radio mode.
+    wires: Tuple[Tuple[str, str, str], ...] = ()
 
 
 def cli_mode_capability(mode_id: str) -> str:

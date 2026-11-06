@@ -44,6 +44,7 @@ ONEWIRE = CliMode(
     blurb="Find 1-Wire parts on IO15, read their ROM codes and a DS18B20's temperature.",
     doc="bitpirate-wiki/02-1wire",
     pins={"Data GPIO": "15"},
+    wires=(("IO15", "DATA", "with a 4k7 pull-up to VIO; most parts need one"),),
     commands=(
         CliCommand("scan", "Find devices", "scan",
                    help="Searches the bus and lists every ROM code"),
@@ -65,6 +66,7 @@ DIO = CliMode(
     group="Buses",
     blurb="Drive, read and time the header pins one at a time: levels, PWM, pulses, servos.",
     doc="bitpirate-wiki/09-dio",
+    wires=(("IO15 … IO13", "the target pin", "whichever header pin you pick in each action"),),
     commands=(
         CliCommand("read", "Read a pin", "read {pin}", (_PIN,)),
         CliCommand("set", "Set a pin", "set {pin} {level}", (
@@ -107,6 +109,8 @@ JTAG = CliMode(
     blurb="Find which header pins a target's SWD or JTAG port is on, and its IDCODE.",
     doc="bitpirate-wiki/15-jtag",
     pins={"GPIOs to scan (SWD/JTAG)": " ".join(str(g) for g in DOCK_GPIOS)},
+    wires=(("IO15 … IO13", "SWDIO, SWCLK or TDI, TDO, TCK, TMS",
+            "any order on any header pins: the scan finds which is which"),),
     commands=(
         CliCommand("scan_swd", "Find SWD pins", "scan swd", timeout=60.0),
         CliCommand("scan_jtag", "Find JTAG pins", "scan jtag", timeout=120.0),
@@ -128,11 +132,11 @@ WIFI = CliMode(
         # the password may not.
         CliCommand("connect", "Connect", "connect {ssid} {password}", (
             CliParam("ssid", "text", "Network (SSID)"),
-            CliParam("password", "text", "Password", help="No spaces"),
+            CliParam("password", "text", "Password", help="No spaces", spaces=False),
         ), timeout=25.0, help="The board remembers it for next time"),
         CliCommand("disconnect", "Disconnect", "disconnect"),
         CliCommand("ping", "Ping a host", "ping {host}", (
-            CliParam("host", "text", "Host", default="8.8.8.8"),
+            CliParam("host", "text", "Host", default="8.8.8.8", spaces=False),
         ), timeout=15.0),
     ),
 )
@@ -171,7 +175,8 @@ EXTRA_ACTIONS: Dict[str, Tuple[CliCommand, ...]] = {
         ), timeout=15.0),
         CliCommand("recover", "Recover the bus", "recover",
                    help="16 clocks and a STOP, to free a part holding SDA low"),
-        CliCommand("sniff", "Sniff", "sniff", streams=True,
+        # Named apart from the Bus Pirate's own I2C "sniff" action.
+        CliCommand("sniff_traffic", "Sniff", "sniff", streams=True,
                    help="Watches traffic between other controllers and parts"),
     ),
     # Controllers/UartController.cpp handleAutoBaud: listens until it finds a
