@@ -22,6 +22,7 @@ from .. import __version__, boards
 from ..capabilities import CAP_CLI_EXTRAS
 from ..exceptions import BusPirateError
 from . import docs as docs_module
+from .about import about
 from .params import ParamError, coerce_all
 from .session import DeviceSession
 from .wiring import (
@@ -132,6 +133,7 @@ def create_app(
         }
         return {
             "version": __version__,
+            "about": about(),
             "status": session.status(),
             "panels": _panels_json(),
             "traffic": list(session.traffic),
