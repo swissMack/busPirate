@@ -813,6 +813,18 @@ await settle(900);
 $("panel").querySelector(".stream button").click();  // Stop
 await settle(1500);
 
+// The Web CLI address: this demo's board has no Wi-Fi in reach, so only the
+// remembered one can show (joining Wi-Fi is tested in tests/test_web_cli.py).
+check("no Web CLI address before the board has given one", $("webcli").hidden, $("webcli").textContent);
+window.localStorage.setItem("bp.webcli", JSON.stringify({ ip: "192.168.1.50", seen: Date.now() }));
+[...$("nav").children].find((b) => b.textContent === "Wi-Fi").click();
+await settle(300);
+check("a remembered Web CLI address shows at the top, marked last seen",
+  !$("webcli").hidden && /last seen/.test($("webcli").textContent)
+    && $("webcli").querySelector("a")?.href === "http://192.168.1.50/",
+  $("webcli").textContent);
+check("and says how to reach it", /short-press/.test($("webcli").title), $("webcli").title);
+
 // --- connecting a v4 from a window opened with nothing connected
 // Reported on real hardware 2026-09-29: the I2C hook-up showed the v3 photo
 // (10 pins) for a v4 (12 pins), because connecting refreshed only the status
@@ -847,6 +859,7 @@ check("connecting a BP6 shows its header drawing",
 check("and rings its ten pins",
   bp6Board && bp6Board.querySelectorAll("circle").length === 10,
   bp6Board ? `${bp6Board.querySelectorAll("circle").length} rings` : "no board");
+check("a Bus Pirate shows no Web CLI address", $("webcli").hidden, $("webcli").textContent);
 check("the LED strip shows no v3/v4 LEDs on a BP6", $("leds").children.length === 0,
   [...$("leds").children].map((l) => l.textContent).join(","));
 check("the status bar shows the BP6's measured supply",

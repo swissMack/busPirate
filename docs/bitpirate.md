@@ -170,6 +170,30 @@ Bluetooth and USB need no header pins.
 The dock's slide switch still sets the voltage on the header. A module wired
 to the DevKit directly gets 3.3V logic with no protection.
 
+## The Web CLI (its browser terminal)
+
+The firmware can serve its terminal to a browser over Wi-Fi. It runs that
+**instead of** the USB terminal, choosing at power-up, so while you use the
+Web CLI this app cannot drive the board.
+
+1. **Save your Wi-Fi once, from this app.** Open **Wi-Fi → Connect** and give
+   the network name and password. The firmware keeps them, and the address
+   it was given appears at the top of the app as **Web CLI: http://…**.
+2. **Reset into Web CLI mode.** Press reset without holding the button, then
+   within 3 seconds **short-press** it to join your Wi-Fi, or **hold** it for
+   the board's own hotspot.
+3. **Watch the LED:** white is connecting, green is ready, blue means no
+   Wi-Fi is saved, red means it failed.
+4. **Open the address.** It's the one at the top of the app, now marked
+   *last seen*, because the board has left USB. On the hotspot it's always
+   http://192.168.4.1.
+5. **Back to this app:** reset without pressing the button.
+
+The address is the one your router gave the board last time. If the router
+hands out a different one, Wi-Fi → Status (back on USB) shows the new one,
+and the top of the app follows. Avoid the Wi-Fi commands (scan, connect,
+disconnect) from inside the Web CLI: they drop its own connection.
+
 ## Pins: the Bit Pirate Dock
 
 The dashboard expects the DevKit in an

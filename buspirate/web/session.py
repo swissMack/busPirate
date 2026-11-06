@@ -26,6 +26,7 @@ from ..exceptions import BusPirateError, ConnectionError, ModeError
 from ..ports import discover, resolve
 from .decoders import make_decoder
 from .registry import Action, Panel, live, load_panels
+from .webcli import reply_drops_wifi, web_cli_address
 from .wiring import BOARDS, DEFAULT_VARIANT, LED_RULES
 
 TRAFFIC_HISTORY = 500
@@ -261,6 +262,12 @@ class DeviceSession:
             "miso": False,
             "cs": False,
         }
+        #: A Bit Pirate's Web CLI address, from its last reply that gave one
+        #: ({"ip", "on_wifi", "simulated"}). Kept after the board leaves Wi-Fi
+        #: or USB: that is when it is wanted (see buspirate.web.webcli).
+        self.web_cli: Optional[Dict[str, Any]] = None
+        #: The connection that reply came over; on_wifi holds only while it lasts.
+        self._web_cli_bp = None
         #: PWM on AUX survives a mode change, so it has to be remembered.
         self.pwm_running = False
         #: Manual override of the variant the UI presents. None = follow
@@ -669,6 +676,22 @@ class DeviceSession:
             return "detected"
         return "default"
 
+    def note_reply(self, lines: List[str]) -> None:
+        """Pick a Web CLI address (or its loss) out of a board's own reply."""
+        ip = web_cli_address(lines)
+        if ip is not None:
+            self.web_cli = {"ip": ip, "on_wifi": True, "simulated": self.simulated}
+            self._web_cli_bp = self.bp
+        elif self.web_cli is not None and reply_drops_wifi(lines):
+            self.web_cli = dict(self.web_cli, on_wifi=False)
+
+    def _web_cli_status(self) -> Optional[Dict[str, Any]]:
+        if self.web_cli is None:
+            return None
+        live = (self.bp is not None and self.bp is self._web_cli_bp
+                and self.bp.is_open)
+        return dict(self.web_cli, on_wifi=self.web_cli["on_wifi"] and live)
+
     def status(self) -> Dict[str, Any]:
         if self.bp is None or not self.bp.is_open:
             return {
@@ -677,6 +700,7 @@ class DeviceSession:
                 "usb": {"attached": False},
                 "stream": None,
                 "leds": self.leds(),
+                "web_cli": self._web_cli_status(),
             }
         profile = self.bp.profile
         return {
@@ -701,6 +725,7 @@ class DeviceSession:
             "description": profile.describe(),
             "capabilities": sorted(profile.capabilities),
             "banner": profile.banner,
+            "web_cli": self._web_cli_status(),
         }
 
     def ports(self) -> List[Dict[str, Any]]:

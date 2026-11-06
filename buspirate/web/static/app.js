@@ -171,6 +171,7 @@ function renderStatus() {
       power
     : "Not connected";
   renderUsb(s.usb || { attached: false });
+  renderWebCli(s);
   renderLeds(s.leds || {});
   renderVariant();
 }
@@ -271,6 +272,43 @@ function renderUsb(usb) {
     box.className = "usb usb--gone";
     box.textContent = `USB: ${usb.device} has gone away — unplugged?`;
   }
+}
+
+/* A Bit Pirate's Web CLI: the browser terminal it runs *instead of* USB, so
+   its address is learned while on USB (the server reads it from the board's
+   Wi-Fi replies) and shown on, marked "last seen", once the board has left
+   USB or Wi-Fi — which is when it is wanted. A real board's address is kept
+   in this browser so it survives a restart; a simulator's never is. */
+const WEB_CLI_HOW =
+  "The Bit Pirate's browser terminal. It runs instead of USB: reset the board, " +
+  "short-press its button within 3 seconds, wait for the green LED, then open this.";
+
+function renderWebCli(s) {
+  const box = $("webcli");
+  let info = s.web_cli;
+  if (info && !info.simulated) {
+    try {
+      localStorage.setItem("bp.webcli", JSON.stringify({ ip: info.ip, seen: Date.now() }));
+    } catch (error) { /* storage off: shown for this session only */ }
+  }
+  if (!info) {
+    try {
+      const kept = JSON.parse(localStorage.getItem("bp.webcli") || "null");
+      if (kept && kept.ip) info = { ip: kept.ip, on_wifi: false, seen: kept.seen };
+    } catch (error) { info = null; }
+  }
+  // Not on a Bus Pirate: its board has no Web CLI.
+  const show = info && (!s.connected || s.variant === "bitpirate");
+  box.hidden = !show;
+  if (!show) return box.replaceChildren();
+  const url = `http://${info.ip}`;
+  const live = info.on_wifi && s.connected;
+  const seen = info.seen ? ` (${new Date(info.seen).toLocaleString()})` : "";
+  box.title = live ? WEB_CLI_HOW : `${WEB_CLI_HOW} Last seen over USB${seen}.`;
+  box.replaceChildren(
+    live ? "Web CLI: " : "Web CLI (last seen): ",
+    el("a", { href: url, target: "_blank", rel: "noopener", text: url })
+  );
 }
 
 function renderNav() {

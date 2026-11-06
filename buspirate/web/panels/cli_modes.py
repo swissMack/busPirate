@@ -60,6 +60,7 @@ def action_for(cmd: CliCommand, requires: Optional[str] = None) -> Action:
                         caption="What the board prints, as it prints it. Stop ends it.")
         try:
             said = ctx.mode.run(line, timeout=cmd.timeout, shown=shown)
+            ctx.session.note_reply(said)
         finally:
             # Even a stopped command may have changed them (autobaud leaves
             # the UART at the last rate it tried).

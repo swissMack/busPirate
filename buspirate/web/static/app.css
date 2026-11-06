@@ -364,3 +364,7 @@ pre.console { margin: 0; padding: 9px 11px; background: var(--bg); border: 1px s
 .about__credits { margin: 0; padding-left: 18px; font-size: 14px; }
 .about__credits li { margin-bottom: 4px; }
 .about__note { margin-left: 10px; color: var(--muted); font-size: 13px; }
+
+/* the Bit Pirate's Web CLI address, under the USB line */
+.webcli { font-size: 12px; }
+.webcli a { color: var(--accent); }
