@@ -27,6 +27,10 @@ const state = {
   current: localStorage.getItem("bp.panel") || null,
   // `from` is the panel the guide was opened from, which Back returns to.
   guide: { open: false, pages: [], page: null, from: null },
+  /** The About page is showing (the guide, when open, wins). */
+  about: false,
+  /** /api/state's `about`: this app's name, version, Python, repo, credits. */
+  aboutInfo: null,
   busy: false,
 };
 
@@ -101,6 +105,7 @@ async function reloadBoard() {
    replayed once, on first load. */
 function applyState(data) {
   $("app-version").textContent = data.version ? `v${data.version}` : "";
+  state.aboutInfo = data.about || null;
   state.status = data.status;
   state.panels = data.panels;
   state.cable = data.cable || [];
@@ -139,10 +144,13 @@ function render() {
   renderNav();
   const connected = state.status.connected;
   const guiding = state.guide.open;
-  $("welcome").hidden = connected || guiding;
-  $("panel").hidden = !connected || guiding;
+  const about = state.about && !guiding;
+  $("welcome").hidden = connected || guiding || about;
+  $("panel").hidden = !connected || guiding || about;
   $("guide").hidden = !guiding;
+  $("about").hidden = !about;
   if (guiding) renderGuide();
+  else if (about) renderAbout();
   else if (connected) renderPanel();
 }
 
@@ -280,10 +288,11 @@ function renderNav() {
         : []),
       el("button", {
         text: panel.title,
-        "aria-current": panel.id === state.current ? "true" : "false",
+        "aria-current": panel.id === state.current && !state.about ? "true" : "false",
         onclick: () => {
           state.current = panel.id;
           state.guide.open = false;
+          state.about = false;
           state.hizNote = "";
           localStorage.setItem("bp.panel", panel.id);
           render();
@@ -296,9 +305,80 @@ function renderNav() {
     el("button", {
       text: "Guide",
       "aria-current": state.guide.open ? "true" : "false",
-      onclick: () => openGuide(panelDoc() || "user-guide"),
+      onclick: () => {
+        state.about = false;
+        openGuide(panelDoc() || "user-guide");
+      },
+    }),
+    el("button", {
+      text: "About",
+      "aria-current": state.about ? "true" : "false",
+      onclick: () => {
+        state.about = true;
+        state.guide.open = false;
+        state.hizNote = "";
+        render();
+      },
     })
   );
+}
+
+/* ------------------------------------------------------------------ about */
+
+/* The About page as label/value rows: this app, then the board in use. The
+   same rows are what Copy details puts on the clipboard, so a bug report
+   says exactly what the page does. */
+function aboutRows() {
+  const info = state.aboutInfo || {};
+  const s = state.status;
+  const app = [
+    ["App", `${info.name || "busPirate"} ${info.version ? "v" + info.version : ""}`.trim()],
+    ["Python", info.python || "unknown"],
+  ];
+  if (!s.connected) return { app, board: [["Board", "No board connected"]] };
+  const board = [
+    // The plain name: the status description already has the firmware in it.
+    ["Board", state.variantLabels[state.variant] || s.description || "unknown"],
+    ["Firmware", s.firmware || "not reported"],
+    ...(s.bootloader ? [["Bootloader", s.bootloader]] : []),
+    ["Port", s.simulated ? `${s.port || "simulated"} (the simulator, not a real board)` : s.port || "unknown"],
+  ];
+  return { app, board };
+}
+
+function renderAbout() {
+  const info = state.aboutInfo || {};
+  const { app, board } = aboutRows();
+  const table = (rows) => el("table", { class: "about__rows" },
+    ...rows.map(([label, value]) => el("tr", {}, el("th", { text: label }), el("td", { text: value }))));
+  const link = (url, text = url) => el("a", { href: url, target: "_blank", rel: "noopener", text });
+  const note = el("span", { class: "about__note", role: "status" });
+  const copy = el("button", {
+    class: "btn about__copy",
+    text: "Copy details",
+    onclick: async () => {
+      const text = [...app, ...board].map(([label, value]) => `${label}: ${value}`).join("\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        note.textContent = "Copied.";
+      } catch (error) {
+        note.textContent = "Could not copy. Select the rows above and copy them instead.";
+      }
+    },
+  });
+  $("about").replaceChildren(...[
+    el("h1", { text: "About" }),
+    el("div", { class: "card" },
+      el("h2", { text: "This app" }), table(app),
+      info.repo ? el("p", {}, "Source: ", link(info.repo)) : null),
+    el("div", { class: "card" }, el("h2", { text: "Your board" }), table(board)),
+    el("div", { class: "card" },
+      el("h2", { text: "Credits" }),
+      el("ul", { class: "about__credits" },
+        ...(info.credits || []).map((c) =>
+          el("li", {}, link(c.url, c.name), ` by ${c.by}: ${c.what}.`)))),
+    el("p", {}, copy, note),
+  ].filter(Boolean));
 }
 
 /* While the guide is open the column is its contents: Back, a search box,

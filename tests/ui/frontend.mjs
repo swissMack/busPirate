@@ -70,7 +70,7 @@ check("status reads not connected", $("status-text").textContent === "Not connec
 const options = [...$("port-select").options].map((o) => o.textContent);
 check("port picker offers the simulated device", options.some((o) => o.includes("simulated-v3")), options.join("|"));
 check("welcome offers a simulated board", !!$("connect-simulated"));
-check("nav lists every panel plus the guide", $("nav").children.length === 10, `${$("nav").children.length}`);
+check("nav lists every panel plus the guide and About", $("nav").children.length === 11, `${$("nav").children.length}`);
 check("no HiZ button until a board is connected", $("nav").querySelector(".nav__hiz-btn") === null);
 
 // --- connect
@@ -851,6 +851,53 @@ check("the LED strip shows no v3/v4 LEDs on a BP6", $("leds").children.length ==
   [...$("leds").children].map((l) => l.textContent).join(","));
 check("the status bar shows the BP6's measured supply",
   / V \/ \d+ mA/.test($("status-text").textContent), $("status-text").textContent);
+
+// --- About: the last item in the column, this app and the board in use
+{
+  const navButtons = [...$("nav").querySelectorAll(":scope > button")];
+  check("About is the last item in the column",
+    navButtons.length && navButtons[navButtons.length - 1].textContent === "About",
+    navButtons.map((b) => b.textContent).join("|"));
+  let copied = null;
+  Object.defineProperty(window.navigator, "clipboard", {
+    configurable: true, value: { writeText: async (text) => { copied = text; } },
+  });
+  navButtons[navButtons.length - 1].click();
+  await settle(300);
+  const about = $("about");
+  const text = about.textContent;
+  check("About replaces the panel", !about.hidden && $("panel").hidden && $("guide").hidden,
+    `about ${about.hidden} panel ${$("panel").hidden}`);
+  check("About names the app, its version and Python",
+    /busPirate/.test(text) && text.includes(probe.version)
+      && [...about.querySelectorAll("tr")].some((r) => /^Python\d+\.\d+/.test(r.textContent)), text.slice(0, 200));
+  check("About shows the connected board and its firmware",
+    /Bus Pirate 6/.test(text) && /Firmware/.test(text) && /simulator/i.test(text)
+      && !/Bus Pirate 6, firmware/.test(text), text.slice(0, 400));
+  const links = [...about.querySelectorAll("a")].map((a) => a.href);
+  check("About links the repo and credits both firmwares",
+    links.includes("https://github.com/swissMack/busPirate")
+      && links.includes("https://buspirate.com/")
+      && links.includes("https://github.com/geo-tp/ESP32-Bit-Pirate"), links.join(" "));
+  about.querySelector(".about__copy").click();
+  await settle(100);
+  check("Copy details copies the app and board as plain text",
+    copied && copied.includes(probe.version) && /Bus Pirate 6/.test(copied) && !/<|>/.test(copied),
+    String(copied));
+  check("About is marked current in the column",
+    [...$("nav").children].find((b) => b.textContent === "About").getAttribute("aria-current") === "true");
+  [...$("nav").children].find((b) => b.textContent === "I2C").click();
+  await settle(300);
+  check("picking a panel leaves About", $("about").hidden && !$("panel").hidden);
+
+  await serverSide("disconnect");
+  await settle(6000);
+  [...$("nav").children].find((b) => b.textContent === "About").click();
+  await settle(300);
+  check("About with nothing connected says so",
+    !$("about").hidden && $("welcome").hidden && /No board connected/.test($("about").textContent),
+    $("about").textContent.slice(0, 300));
+}
 
 console.log(failures.length ? `\n${failures.length} FAILED` : "\nall frontend checks passed");
 process.exit(failures.length ? 1 : 0);
