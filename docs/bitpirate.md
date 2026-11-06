@@ -86,6 +86,22 @@ python3 -m esptool --chip esp32s3 --port /dev/cu.usbmodemXXXX \
 On the USB TTL (CH340) port, use the default reset and `--baud 460800`:
 921600 fails there.
 
+**Dock pins as the firmware's own default.** Stock v1.8 starts I2C on
+GPIO 6 / 7, which the Bit Pirate Dock does not bring out. This app answers
+SDA 15 / SCL 16 each time it enters I2C, but the firmware keeps that only
+until a reset, so the Web CLI (which starts after one) was back on 6 / 7.
+`firmware/bitpirate-1.8-dock-pins.patch` moves the DevKit builds' default to
+**IO15 = SDA, IO16 = SCL**, so both terminals agree from power-up. Apply it
+after the mode-LED patch, before `pio run`:
+
+```sh
+git apply /path/to/busPirate/firmware/bitpirate-1.8-dock-pins.patch
+```
+
+To keep the Wi-Fi network the board has saved, flash only the app
+(`$B/firmware.bin` at `0x10000`) rather than the merged image: the merged
+image also blanks the settings area at `0x9000`.
+
 To go back to stock, flash the release `.bin` from
 [geo-tp's releases](https://github.com/geo-tp/ESP32-Bit-Pirate/releases/tag/v1.8)
 at `0x0` the same way.
