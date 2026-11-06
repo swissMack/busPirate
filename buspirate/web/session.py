@@ -754,12 +754,24 @@ class DeviceSession:
             self.mode_name = None
         if mode_name is None:
             return None
+        if mode_name.startswith("cli:"):
+            self._mode = self._enter_cli_mode(mode_name[len("cli:"):])
+            self.mode_name = mode_name
+            return self._mode
         enter = getattr(self.bp, mode_name, None)
         if enter is None:
             raise ModeError(f"this build has no {mode_name!r} mode")
         self._mode = enter()
         self.mode_name = mode_name
         return self._mode
+
+    def _enter_cli_mode(self, mode_id: str):
+        """One of the connected board's own modes (boards: Board.modes)."""
+        board = boards.get(self.bp.profile.variant)
+        spec = next((m for m in board.modes if m.id == mode_id), None)
+        if spec is None or not hasattr(self.bp, "cli_mode"):
+            raise ModeError(f"the {board.name} has no Bit Pirate mode {mode_id!r}")
+        return self.bp.cli_mode(spec)
 
     # -- running actions ---------------------------------------------------
 

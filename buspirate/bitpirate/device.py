@@ -127,19 +127,22 @@ class BitPirate(SerialLink):
     def mode(self):
         return self._mode
 
-    def _enter_mode(self, mode_cls):
+    def _enter_mode(self, mode_cls, make=None):
+        """Enter a mode; ``make(self)`` builds it when it is not ``mode_cls(self)``."""
         if self._mode is not None:
             raise ModeError(f"already in {type(self._mode).__name__}; close it first")
+        mode = (make or mode_cls)(self)
         # The Bus Pirate 6 pin layout of the ESP32 Bit Pirate Dock, not the
         # firmware's own defaults (see modes.DOCK_PINS). A first entry asks
-        # the config questions itself; later entries need ``config``.
-        reply = self.cli.enter_mode(mode_cls.name, mode_cls.pins)
-        self._mode = mode_cls(self)
-        if set(mode_cls.pins) <= set(reply.questions):
-            self.settings.setdefault(mode_cls.name, {}).update(mode_cls.pins)
+        # the config questions itself; later entries need ``config``. A mode
+        # with no pins to set (DIO, Wi-Fi) needs neither.
+        reply = self.cli.enter_mode(mode.name, mode.pins)
+        self._mode = mode
+        if set(mode.pins) <= set(reply.questions):
+            self.settings.setdefault(mode.name, {}).update(mode.pins)
         else:
-            self._mode._configure(mode_cls.pins)
-        return self._mode
+            mode._configure(mode.pins)
+        return mode
 
     def _mode_closed(self, mode) -> None:
         if self._mode is mode:
@@ -160,13 +163,22 @@ class BitPirate(SerialLink):
 
         return self._enter_mode(CliUART)
 
+    def cli_mode(self, spec):
+        """Enter one of the board's own modes, described by a boards CliMode."""
+        from .modes import CliModeSession
+
+        return self._enter_mode(CliModeSession, lambda bp: CliModeSession(bp, spec))
+
     # -- streams and the terminal -----------------------------------------
 
-    def start_text_stream(self, command: str, header: str, timeout: float = 2.0) -> None:
+    def start_text_stream(
+        self, command: str, header: Optional[str] = None, timeout: float = 2.0
+    ) -> None:
         """Run a command that streams until Enter, and hand over the port.
 
-        Everything up to the end of the line starting with ``header`` is
-        consumed, one byte at a time so that none of the stream is.
+        Everything up to the end of the line holding ``header`` is consumed,
+        one byte at a time so that none of the stream is. With no header,
+        only the echo of the command is: the stream starts on the next line.
         """
         self.flush_input()
         self.write((command + "\r").encode("ascii"))
@@ -179,7 +191,7 @@ class BitPirate(SerialLink):
                 continue
             seen += byte
             text = seen.decode("utf-8", "replace")
-            if byte == b"\n" and header in text.rsplit("\n", 2)[-2]:
+            if byte == b"\n" and (header is None or header in text.rsplit("\n", 2)[-2]):
                 self._notify("rx", bytes(seen))
                 self.streaming = True
                 return

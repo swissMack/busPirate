@@ -18,10 +18,11 @@ differ from a Bus Pirate's and are handled here, not left to the caller
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List
+from typing import TYPE_CHECKING, Dict, Iterable, List, Optional
 
 from ..device import I2C_SPEEDS_MODERN, SPI_SPEEDS
 from ..exceptions import (
+    BusPirateError,
     ModeError,
     NackError,
     ProtocolError,
@@ -29,7 +30,10 @@ from ..exceptions import (
 )
 from ..i2c import SCAN_RANGE
 from ..uart import UART
-from .cli import Reply, parse_hex_after, parse_scan
+from .cli import CliTimeout, Reply, parse_hex_after, parse_scan
+
+if TYPE_CHECKING:  # pragma: no cover
+    from ..boards._modes import CliMode
 
 #: Bytes one ``r:N`` can ask for — the firmware keeps N in a uint8_t.
 MAX_REPEAT = 255
@@ -143,6 +147,60 @@ class _CliMode:
             return
         self._check(self.cli.command("config", answers))
         known.update(answers)
+
+    def forget(self, labels: Iterable[str]) -> None:
+        """Drop what we last told ``config`` for these questions.
+
+        For a command that changes them on the board itself (``autobaud``
+        saves the rate it found), so the next ``_configure`` sets them again.
+        """
+        known = self.bp.settings.get(self.name, {})
+        for label in labels:
+            known.pop(label, None)
+
+    # -- any command -------------------------------------------------------
+
+    def run(self, line: str, timeout: float = 5.0) -> List[str]:
+        """Run one command line; return what the board said, nothing else.
+
+        The echo and the prompt are left out, and blank lines at either end.
+        A refusal (``Unknown command``, ``Cannot execute``, a usage line) is
+        raised with the board's own words. A command still running when the
+        board has been quiet for ``timeout`` seconds — one waiting for a part
+        that never answers — is stopped with Enter, which ends every loop the
+        firmware has, and reported.
+        """
+        self._check_active()
+        try:
+            reply = self.cli.command(line, timeout=timeout)
+        except CliTimeout as exc:
+            try:
+                self.cli.sync()
+            except BusPirateError:
+                pass
+            raise ModeError(
+                f"the Bit Pirate was still busy with {line!r} after {timeout:g} s "
+                "without a word, so it was stopped. Is the part connected?"
+            ) from exc
+        self._check(reply)
+        lines = list(reply.lines)
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if lines and lines[0].startswith("Usage:"):
+            raise ModeError(f"the Bit Pirate said: {lines[0].strip()}")
+        return lines
+
+    def start_stream(self, line: str) -> None:
+        """Start a command that runs until Enter and hand the port to a stream.
+
+        Everything after the echoed line is the stream's, its first line
+        (what the command says it is doing) included. Stopped with
+        :meth:`BitPirate.stop_stream`.
+        """
+        self._check_active()
+        self.bp.start_text_stream(line)
 
     def _check(self, reply: Reply) -> Reply:
         """Refuse a reply given in some other mode, or to a refused command."""
@@ -352,6 +410,17 @@ class CliUART(_CliMode):
         """
         self._check_active()
         self.bp.start_text_stream("read", "UART Read: Streaming")
+
+
+class CliModeSession(_CliMode):
+    """Any Bit Pirate mode described as data (a boards._modes.CliMode)."""
+
+    def __init__(self, bp, spec: "CliMode") -> None:
+        super().__init__(bp)
+        self.spec = spec
+        self.title = spec.title
+        self.name = spec.cli_name.upper()
+        self.pins = dict(spec.pins)
 
 
 def _address(address: int) -> int:
