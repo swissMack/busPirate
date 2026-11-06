@@ -274,60 +274,48 @@ Two differences to expect rather than fix:
 
 ### Wiring it
 
-There is no probe cable; wire GPIOs with jumper leads. The dashboard draws
-the DevKit with the pins each panel needs ringed and labelled. These are the
-defaults:
+The dashboard assumes the DevKit sits in an
+[ESP32 Bit Pirate Dock](https://github.com/AndreiVladescu/ESP32-Bit-Pirate-Hardware),
+whose black 10-pin header copies the Bus Pirate 6's. It draws the dock with
+the pins each panel needs ringed and labelled, and sets the firmware's pins to
+match every time it enters a mode, so Bus Pirate 5/6 cables and adapters plug
+straight in.
 
-| Bus | Wire this GPIO | To the target's |
-|-----|----------------|-----------------|
-| I2C | GPIO7 | SCL |
-| | GPIO6 | SDA |
-| SPI | GPIO12 | SCK / CLK |
-| | GPIO13 | DI / MOSI |
-| | GPIO11 | DO / MISO |
-| | GPIO10 | CS |
-| UART | GPIO17 (its RX) | TX |
-| | GPIO18 (its TX) | RX |
-| all | GND | GND — connect it first |
-| if needed | 3V3 | VCC, for a small target only |
+| Bus | Wire this dock pin | Bus Pirate 6 name | To the target's |
+|-----|--------------------|-------------------|-----------------|
+| I2C | IO15 | IO0 | SDA |
+| | IO16 | IO1 | SCL |
+| SPI | IO10 | IO4 | DO / MISO |
+| | IO11 | IO5 | CS |
+| | IO12 | IO6 | SCK / CLK |
+| | IO13 | IO7 | DI / MOSI |
+| UART | IO10 (its TX) | IO4 | RX |
+| | IO11 (its RX) | IO5 | TX |
+| all | GND | GND | GND — connect it first |
+| if needed | VIO | VOUT | VCC |
 
-To move a pin, open the Terminal, enter the mode (`m i2c`), type `config` and
-answer its questions. Then type `profile` to keep the change.
-
-All of them are on header **J1**, the left one when the USB sockets point
-down. Pin 1 is at the top:
+The header, top to bottom as printed beside it:
 
 ```
-   J1 (left)                     J3 (right)
-   ┌──────────────────────────────────────┐
-   │  3V3    ●                  ●  GND    │
-   │  3V3    ●                  ●  GPIO43 │
-   │  RST    ●                  ●  GPIO44 │
-   │  GPIO4  ●                  ●  GPIO1  │
-   │  GPIO5  ●                  ●  GPIO2  │
-   │  GPIO6  ●  I2C SDA         ●  GPIO42 │
-   │  GPIO7  ●  I2C SCL         ●  GPIO41 │
-   │  GPIO15 ●                  ●  GPIO40 │
-   │  GPIO16 ●                  ●  GPIO39 │
-   │  GPIO17 ●  UART RX         ●  GPIO38 │
-   │  GPIO18 ●  UART TX         ●  GPIO37 │
-   │  GPIO8  ●                  ●  GPIO36 │
-   │  GPIO3  ●                  ●  GPIO35 │
-   │  GPIO46 ●                  ●  GPIO0  │
-   │  GPIO9  ●                  ●  GPIO45 │
-   │  GPIO10 ●  SPI CS          ●  GPIO48 │
-   │  GPIO11 ●  SPI MISO        ●  GPIO47 │
-   │  GPIO12 ●  SPI CLK         ●  GPIO21 │
-   │  GPIO13 ●  SPI MOSI        ●  GPIO20 │
-   │  GPIO14 ●                  ●  GPIO19 │
-   │  5V     ●                  ●  GND    │
-   │  GND    ●                  ●  GND    │
-   └──────────[ USB ]──[ UART ]───────────┘
+   GND  ●
+   IO15 ●  I2C SDA
+   IO16 ●  I2C SCL
+   IO17 ●
+   IO18 ●
+   IO10 ●  SPI MISO / UART TX
+   IO11 ●  SPI CS   / UART RX
+   IO12 ●  SPI CLK
+   IO13 ●  SPI MOSI
+   VIO  ●  the switched supply
 ```
 
-This is Espressif's v1.1 pinout. The order of the two USB sockets varies
-between revisions, so go by the **USB** and **UART** printed next to them,
-and check your own silkscreen before trusting this picture.
+**Set the voltage first.** The slide switch at the top of the dock picks 5V,
+3V3 or 1V8 for VIO and for the level shifters on every IO line. Match it to
+the target before wiring it up.
+
+The firmware's own defaults (I2C on GPIO6/7, UART on GPIO17/18) are not used:
+GPIO6 and GPIO7 are not on the dock's header. Moving a pin by hand in the
+Terminal with `config` lasts only until the dashboard next enters that mode.
 
 ### Everyday jobs
 

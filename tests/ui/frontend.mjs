@@ -685,11 +685,11 @@ check("panels a Bit Pirate cannot drive are not in the nav",
 [...$("nav").children].find((b) => b.textContent === "I2C").click();
 await settle(300);
 const bitBoard = $("panel").querySelector(".card-img--board");
-check("the I2C diagram is the DevKit",
-  bitBoard && bitBoard.querySelector("image").getAttribute("href") === "/static/img/board-bitpirate.svg",
+check("the I2C diagram is the dock",
+  bitBoard && bitBoard.querySelector("image").getAttribute("href") === "/static/img/board-bitpirate-dock.jpg",
   bitBoard ? bitBoard.querySelector("image").getAttribute("href") : "no board");
 const bitCallouts = bitBoard ? [...bitBoard.querySelectorAll(".boardlabel")].map((t) => t.textContent) : [];
-check("its callouts name the GPIOs", bitCallouts.includes("GPIO7 → SCL") && bitCallouts.includes("GPIO6 → SDA"),
+check("its callouts name the dock header pins", bitCallouts.includes("IO16 → SCL") && bitCallouts.includes("IO15 → SDA"),
   bitCallouts.join("|"));
 check("no Bus Pirate reference cards or cable caveat for it",
   $("panel").querySelectorAll(".card-img").length === 1 && !$("panel").textContent.includes("SparkFun"),

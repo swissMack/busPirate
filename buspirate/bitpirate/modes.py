@@ -39,6 +39,19 @@ I2C_MAX_READ = 128
 MAX_WRITE = 96
 
 
+#: Pins each mode is set to, as answers to its ``config`` questions: the
+#: ESP32 Bit Pirate Dock's 10-pin header, which copies the Bus Pirate 6's.
+#: Header IO0..IO7 are GPIO15, 16, 17, 18, 10, 11, 12, 13 (the dock's
+#: schematic), so I2C sits on IO0/IO1, SPI on IO4..IO7 and UART on IO4/IO5,
+#: as on a Bus Pirate 6. The firmware's own s3-devkit defaults put I2C on
+#: GPIO6/7, which the dock's header does not carry.
+DOCK_PINS: Dict[str, Dict[str, str]] = {
+    "I2C": {"SDA GPIO": "15", "SCL GPIO": "16"},
+    "SPI": {"MISO GPIO": "10", "CS GPIO": "11", "SCLK GPIO": "12", "MOSI GPIO": "13"},
+    "UART": {"TX GPIO number": "10", "RX GPIO number": "11"},
+}
+
+
 def _hex_tokens(data: bytes) -> List[str]:
     return [f"0x{byte:02X}" for byte in data]
 
@@ -58,6 +71,8 @@ class _CliMode:
     title = ""
     #: The mode's name on the command line and in its prompt.
     name = ""
+    #: Its pins, as config answers. See DOCK_PINS.
+    pins: Dict[str, str] = {}
 
     def __init__(self, bp) -> None:
         self.bp = bp
@@ -151,6 +166,7 @@ class CliI2C(_CliMode):
 
     title = "I2C"
     name = "I2C"
+    pins = DOCK_PINS["I2C"]
     #: A Bus Pirate reports an ACK for every byte written; this board cannot.
     reports_byte_acks = False
 
@@ -236,6 +252,7 @@ class CliSPI(_CliMode):
 
     title = "SPI"
     name = "SPI"
+    pins = DOCK_PINS["SPI"]
 
     def set_speed(self, speed: int) -> None:
         """Speed indices as a Bus Pirate's, where the firmware can do them.
@@ -287,6 +304,7 @@ class CliUART(_CliMode):
 
     title = "UART"
     name = "UART"
+    pins = DOCK_PINS["UART"]
 
     #: The panel's framing choices the firmware can do: data bits and parity.
     FRAMING = {0: ("8", "N"), 1: ("8", "E"), 2: ("8", "O")}

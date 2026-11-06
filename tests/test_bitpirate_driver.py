@@ -91,10 +91,36 @@ def test_closing_releases_every_pin(fake):
 # -- I2C -----------------------------------------------------------------
 
 
-def test_the_first_i2c_entry_answers_the_config_questions_with_defaults(bp, fake):
+def test_the_first_i2c_entry_sets_the_dock_pins(bp, fake):
     bp.i2c()
     assert fake.mode == "I2C"
-    assert fake.settings["I2C"]["SDA GPIO"] == "6"
+    assert fake.settings["I2C"]["SDA GPIO"] == "15"
+    assert fake.settings["I2C"]["SCL GPIO"] == "16"
+    assert fake.settings["I2C"]["Frequency"] == "100000"  # left at its default
+    assert "config" not in fake.commands  # the entry's own questions did it
+
+
+@pytest.mark.parametrize(
+    "enter, mode, expected",
+    [
+        ("spi", "SPI", {"MISO GPIO": "10", "CS GPIO": "11", "SCLK GPIO": "12", "MOSI GPIO": "13"}),
+        ("uart", "UART", {"TX GPIO number": "10", "RX GPIO number": "11"}),
+    ],
+)
+def test_every_mode_gets_the_bus_pirate_6_layout_of_the_dock(bp, fake, enter, mode, expected):
+    getattr(bp, enter)()
+    for label, value in expected.items():
+        assert fake.settings[mode][label] == value
+
+
+def test_a_mode_the_board_already_knows_is_given_the_dock_pins_with_config(bp, fake):
+    fake.configured.add("I2C")  # entered before, so m i2c asks nothing
+    bp.i2c()
+    assert fake.commands[-1] == "config"
+    assert fake.settings["I2C"]["SDA GPIO"] == "15"
+    bp.mode.close()
+    bp.i2c()
+    assert fake.commands.count("config") == 1  # cached for the session
 
 
 def test_scan_lists_what_answers(bp, fake):
