@@ -42,6 +42,20 @@ APP_GROUP = "This app"
 OFFICIAL_GROUP = "Official Bus Pirate 5/6 manual"
 #: The official manual, imported by scripts/import_official_docs.py.
 OFFICIAL = "official"
+BITPIRATE_GROUP = "ESP32 Bit Pirate wiki"
+#: The Bit Pirate's own wiki, imported by scripts/import_bitpirate_wiki.py.
+BITPIRATE_WIKI = "bitpirate-wiki"
+#: Imported manuals by folder: their sidebar heading, and which board
+#: variants list them. The Bit Pirate has far more in its terminal than the
+#: dashboard drives, and its own wiki documents it; the Bus Pirate 5/6 manual
+#: does not apply to it. Every page stays readable by name, so links work.
+MANUALS = {
+    OFFICIAL: {"group": OFFICIAL_GROUP, "for": lambda variant: variant != "bitpirate"},
+    BITPIRATE_WIKI: {"group": BITPIRATE_GROUP, "for": lambda variant: variant == "bitpirate"},
+}
+#: Our page about a board, moved up to just after the user guide when that
+#: board is the one in use.
+BOARD_PAGE = {"bitpirate": "bitpirate", "bp6": "bus-pirate-6", "v4": "bus-pirate-v4"}
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 #: official/<section>/<page> is as deep as a page name goes.
 MAX_DEPTH = 3
@@ -77,20 +91,21 @@ def _page(name: str) -> Optional[Dict[str, str]]:
             head = handle.read(600)
     except OSError:
         return None
-    group = OFFICIAL_GROUP if name.startswith(OFFICIAL + "/") else APP_GROUP
+    folder = name.split("/", 1)[0] if "/" in name else None
+    group = MANUALS[folder]["group"] if folder in MANUALS else APP_GROUP
     return {"name": name, "title": _title_of(head, name.rsplit("/", 1)[-1]), "group": group}
 
 
-def _official_order() -> List[str]:
+def _manual_order(folder: str) -> List[str]:
     try:
-        with open(os.path.join(DOCS_DIR, OFFICIAL, "order.json"), encoding="utf-8") as handle:
+        with open(os.path.join(DOCS_DIR, folder, "order.json"), encoding="utf-8") as handle:
             return [n for n in json.load(handle) if isinstance(n, str) and _segments(n)]
     except (OSError, ValueError):
         return []
 
 
-def available() -> List[Dict[str, str]]:
-    """Our pages in reading order, then the official manual in its own order."""
+def available(variant: Optional[str] = None) -> List[Dict[str, str]]:
+    """Our pages in reading order, then the manuals for ``variant``, each in its own order."""
     if not os.path.isdir(DOCS_DIR):
         return []
     names = sorted(
@@ -100,7 +115,13 @@ def available() -> List[Dict[str, str]]:
     )
     ordered = [name for name in ORDER if name in names]
     ordered += [name for name in names if name not in ORDER]
-    ordered += _official_order()
+    board_page = BOARD_PAGE.get(variant or "")
+    if board_page in ordered and "user-guide" in ordered:
+        ordered.remove(board_page)
+        ordered.insert(ordered.index("user-guide") + 1, board_page)
+    for folder, manual in MANUALS.items():
+        if manual["for"](variant):
+            ordered += _manual_order(folder)
     return [page for page in (_page(name) for name in ordered) if page is not None]
 
 
@@ -136,13 +157,13 @@ def file_path(relative: str) -> Optional[str]:
     return path
 
 
-def search(query: str, limit: int = 20) -> List[Dict[str, str]]:
+def search(query: str, limit: int = 20, variant: Optional[str] = None) -> List[Dict[str, str]]:
     """Pages matching every word of ``query``: title matches first, then by how often."""
     words = query.lower().split()
     if not words:
         return []
     scored = []
-    for page in available():
+    for page in available(variant):
         text = read(page["name"]) or ""
         lower = text.lower()
         hits = sum(lower.count(word) for word in words)

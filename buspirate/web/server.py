@@ -165,7 +165,7 @@ def create_app(
 
     @app.get("/api/docs")
     async def doc_index() -> Dict[str, Any]:
-        return {"pages": docs_module.available()}
+        return {"pages": docs_module.available(session.effective_variant())}
 
     @app.get("/api/docs-file/{path:path}")
     async def doc_file(path: str):
@@ -176,7 +176,7 @@ def create_app(
 
     @app.get("/api/docs-search")
     async def doc_search(q: str = "") -> Dict[str, Any]:
-        return {"results": docs_module.search(q)}
+        return {"results": docs_module.search(q, variant=session.effective_variant())}
 
     @app.get("/api/docs/{name:path}")
     async def doc_page(name: str) -> JSONResponse:

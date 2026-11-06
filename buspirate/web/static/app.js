@@ -110,6 +110,16 @@ function applyState(data) {
   state.boardCaveat = data.board_caveat || "";
   state.boardPinNotes = data.board_pin_notes || {};
   state.ledNote = data.led_note || "";
+  // The guide lists the manuals for the board in use: re-read it on a change.
+  if (state.variant !== data.variant) {
+    state.guide.pages = [];
+    if (state.guide.open) {
+      api("/api/docs").then((body) => {
+        state.guide.pages = body.pages;
+        renderGuide();
+      }).catch(() => {});
+    }
+  }
   state.variant = data.variant;
   state.variantDetected = data.variant_detected;
   state.variantSource = data.variant_source;
