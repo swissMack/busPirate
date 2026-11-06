@@ -313,6 +313,7 @@ class ModesMixin:
             if any(net[0] == ssid for net in self.wifi_networks):
                 self.wifi_connected = ssid
                 self._println("\nWiFi: ✅ Connected successfully.")
+                self._wifi_web_ui()
             else:
                 self._println("WiFi: Connection failed.")
         elif root == "disconnect":
@@ -328,6 +329,22 @@ class ModesMixin:
                        "5 packets transmitted, 5 received, 0% packet loss, time 14 ms\r\n")
         else:
             self._unknown()
+
+    def _wifi_web_ui(self) -> None:
+        """handleWebUi over USB, connected: how to start the Web CLI, and where."""
+        for line in ("", " [⚠️  WARNING] ", " If you're connected via serial,",
+                     " the web UI will not be active.", " Reset the device and choose WiFi Connect.",
+                     "", "[BAREBONE] To launch the WebUI without a screen:",
+                     "  1. Reset the device (don’t hold the board button during boot)",
+                     "  2. Once powered, press the board button within 3 seconds:",
+                     "     • Short press = WiFi Connect", "     • Hold press  = WiFi Hotspot",
+                     "  3. The built-in LED shows the following status:",
+                     "     • Blue  = No Wi-Fi credentials saved.",
+                     "     • White = Connecting in progress",
+                     "     • Green = Connected, open the WebUI in your browser.",
+                     "     • Red   = Connection failed, try connect again with serial", "",
+                     "WiFi Web UI: http://192.168.1.77 (reset and select WiFi Connect)"):
+            self._println(line)
 
     def _wifi_status(self) -> None:
         net = next((n for n in self.wifi_networks if n[0] == self.wifi_connected), None)
