@@ -202,7 +202,8 @@ class BitPirate(SerialLink):
         seen = bytearray()
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            byte = self.serial.read(1)
+            with self._port_alive():
+                byte = self.serial.read(1)
             if not byte:
                 time.sleep(0.002)
                 continue

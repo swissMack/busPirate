@@ -281,7 +281,8 @@ function renderUsb(usb) {
    in this browser so it survives a restart; a simulator's never is. */
 const WEB_CLI_HOW =
   "The Bit Pirate's browser terminal. It runs instead of USB: reset the board, " +
-  "short-press its button within 3 seconds, wait for the green LED, then open this.";
+  "short-press its button within 3 seconds, wait for the green LED, then open this. " +
+  "Give it about 10 seconds: until then it answers \"Nothing matches the given URI\"; reload.";
 
 function renderWebCli(s) {
   const box = $("webcli");
@@ -305,10 +306,11 @@ function renderWebCli(s) {
   const live = info.on_wifi && s.connected;
   const seen = info.seen ? ` (${new Date(info.seen).toLocaleString()})` : "";
   box.title = live ? WEB_CLI_HOW : `${WEB_CLI_HOW} Last seen over USB${seen}.`;
-  box.replaceChildren(
-    live ? "Web CLI: " : "Web CLI (last seen): ",
-    el("a", { href: url, target: "_blank", rel: "noopener", text: url })
-  );
+  // On USB the board's web page is not running yet, so a link would only
+  // open an error page: plain text until the board has left USB.
+  box.replaceChildren(...(live
+    ? [`Web CLI after a reset: ${info.ip}`]
+    : ["Web CLI (last seen): ", el("a", { href: url, target: "_blank", rel: "noopener", text: url })]));
 }
 
 function renderNav() {

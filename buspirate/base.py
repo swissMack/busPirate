@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
@@ -10,7 +11,14 @@ from typing import Callable, List, Optional
 
 from . import device as device_module
 from .device import UNKNOWN_PROFILE, DeviceProfile, parse_banner
-from .exceptions import ConnectionError, ModeError, ProtocolError
+from .exceptions import ConnectionError, ModeError, PortGoneError, ProtocolError
+
+try:  # POSIX only: a dead handle's tcflush raises this, not an OSError
+    import termios
+
+    _DEAD_PORT_ERRORS: tuple = (OSError, termios.error)
+except ImportError:  # Windows
+    _DEAD_PORT_ERRORS = (OSError,)
 from .protocol import BANNER_BITBANG, banner_length, match_banner
 
 log = logging.getLogger(__name__)
@@ -149,21 +157,42 @@ class SerialLink:
 
     # -- primitives --------------------------------------------------------
 
+    @contextlib.contextmanager
+    def _port_alive(self):
+        """Turn a dead handle's OS errors into one plain board error.
+
+        A board that resets or is unplugged mid-session leaves this handle
+        dead even when it comes back under the same name (seen on a real
+        ESP32 Bit Pirate). macOS then raises termios.error, which is not an
+        OSError and used to reach the dashboard as a bare 500.
+        """
+        try:
+            yield
+        except PortGoneError:
+            raise
+        except _DEAD_PORT_ERRORS as exc:
+            raise PortGoneError(
+                f"the {self.device_name} is no longer answering on {self.port} "
+                f"({exc}). It may have reset or been unplugged. Connect again."
+            ) from exc
+
     def write(self, data: bytes) -> None:
         if self.serial is None:
             raise ConnectionError("port is not open")
         log.debug("-> %s", data.hex(" "))
-        self.serial.write(data)
-        flush = getattr(self.serial, "flush", None)
-        if flush is not None:
-            flush()
+        with self._port_alive():
+            self.serial.write(data)
+            flush = getattr(self.serial, "flush", None)
+            if flush is not None:
+                flush()
         self._notify("tx", data)
 
     def read(self, count: int) -> bytes:
         """Read exactly ``count`` bytes or raise :class:`ProtocolError`."""
         if self.serial is None:
             raise ConnectionError("port is not open")
-        data = self.serial.read(count)
+        with self._port_alive():
+            data = self.serial.read(count)
         log.debug("<- %s", data.hex(" "))
         if data:
             self._notify("rx", data)
@@ -180,7 +209,8 @@ class SerialLink:
         collected = bytearray()
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
-            chunk = self.serial.read(256)
+            with self._port_alive():
+                chunk = self.serial.read(256)
             if chunk:
                 collected += chunk
             else:
@@ -196,7 +226,8 @@ class SerialLink:
         collected = bytearray()
         deadline = time.monotonic() + settle
         while time.monotonic() < deadline and len(collected) < limit:
-            chunk = self.serial.read(256)
+            with self._port_alive():
+                chunk = self.serial.read(256)
             if chunk:
                 collected += chunk
                 deadline = time.monotonic() + settle
@@ -211,11 +242,12 @@ class SerialLink:
         if self.serial is None:
             return
         reset = getattr(self.serial, "reset_input_buffer", None)
-        if reset is not None:
-            reset()
-        else:  # minimal fakes and older pyserial
-            while self.serial.read(256):
-                pass
+        with self._port_alive():
+            if reset is not None:
+                reset()
+            else:  # minimal fakes and older pyserial
+                while self.serial.read(256):
+                    pass
 
 
 class BusPirate(SerialLink):

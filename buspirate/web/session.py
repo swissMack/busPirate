@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import contextlib
 import os
 import queue
 import re
@@ -22,7 +23,7 @@ from typing import Any, Dict, List, Optional, Set
 from .. import boards
 from .. import device as device_module
 from ..connect import open_device
-from ..exceptions import BusPirateError, ConnectionError, ModeError
+from ..exceptions import BusPirateError, ConnectionError, ModeError, PortGoneError
 from ..ports import discover, resolve
 from .decoders import make_decoder
 from .registry import Action, Panel, live, load_panels
@@ -268,6 +269,8 @@ class DeviceSession:
         self.web_cli: Optional[Dict[str, Any]] = None
         #: The connection that reply came over; on_wifi holds only while it lasts.
         self._web_cli_bp = None
+        #: Set while a command carrying a password runs (traffic_hidden).
+        self._hiding_traffic = False
         #: PWM on AUX survives a mode change, so it has to be remembered.
         self.pwm_running = False
         #: Manual override of the variant the UI presents. None = follow
@@ -315,7 +318,35 @@ class DeviceSession:
             except asyncio.QueueFull:
                 self.subscribers.discard(queue)
 
+    @contextlib.contextmanager
+    def traffic_hidden(self, shown: str):
+        """Keep a command that carries a password out of the Traffic log.
+
+        Its bytes, and the board's echo of them (a Bit Pirate redraws the
+        line at every key, so the password arrives a prefix at a time), are
+        never logged; one line stands in for them: ``shown``, the command as
+        it may be shown, with the password masked. The reply is in the
+        action's own result.
+        """
+        self._log_entry("tx", {"hex": "(hidden: it carries a password)", "text": shown + "⏎"})
+        self._hiding_traffic = True
+        try:
+            yield
+        finally:
+            self._hiding_traffic = False
+            # Whatever the decoders held came from the hidden bytes.
+            self._text_decoders = {"rx": TextTraffic(), "tx": TextTraffic()}
+
+    def _log_entry(self, direction: str, fields: Dict[str, Any]) -> None:
+        self._seq += 1
+        entry = {"type": "traffic", "seq": self._seq, "at": time.strftime("%H:%M:%S"),
+                 "direction": direction, **fields}
+        self.traffic.append(entry)
+        self.emit(entry)
+
     def _on_traffic(self, direction: str, data: bytes) -> None:
+        if self._hiding_traffic:
+            return
         self._seq += 1
         entry = {
             "type": "traffic",
@@ -821,9 +852,15 @@ class DeviceSession:
                     self.bp.profile.require(required)
         if action.check is not None:
             action.check(params)  # refuse bad input before anything is sent
-        mode = self.ensure_mode(panel.mode)
-        context = ActionContext(self, mode)
-        result = action.handler(context, **params)
+        try:
+            mode = self.ensure_mode(panel.mode)
+            result = action.handler(ActionContext(self, mode), **params)
+        except PortGoneError:
+            # The handle is dead even if the board is back under the same
+            # name; keeping it would fail every click the same way. Dropped,
+            # the Connect page is one click from a working session again.
+            self._drop_connection()
+            raise
         if action.stream:
             self._begin_stream(panel, action, result)
         return result

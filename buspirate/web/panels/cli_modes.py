@@ -9,6 +9,8 @@ the Bit Pirate's extra commands, so the two can never differ.
 
 from __future__ import annotations
 
+import contextlib
+
 from typing import Any, Dict, List, Optional
 
 from ... import boards
@@ -58,8 +60,10 @@ def action_for(cmd: CliCommand, requires: Optional[str] = None) -> Action:
             ctx.mode.start_stream(line)
             return live(cmd.label, decoder="console",
                         caption="What the board prints, as it prints it. Stop ends it.")
+        secret = any(p.secret for p in cmd.params)
         try:
-            said = ctx.mode.run(line, timeout=cmd.timeout, shown=shown)
+            with ctx.session.traffic_hidden(shown) if secret else contextlib.nullcontext():
+                said = ctx.mode.run(line, timeout=cmd.timeout, shown=shown)
             ctx.session.note_reply(said)
         finally:
             # Even a stopped command may have changed them (autobaud leaves
