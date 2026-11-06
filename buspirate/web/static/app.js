@@ -301,7 +301,8 @@ function renderNav() {
    re-marked after that, so a status update never wipes what is being typed. */
 function renderGuideNav(nav) {
   const current = state.guide.page ? state.guide.page.name : null;
-  const key = `${state.variant}:${state.guide.pages.length}`;
+  // Connection is part of the key: HiZ shows only while connected.
+  const key = `${state.variant}:${state.guide.pages.length}:${state.status.connected}`;
   if (nav.dataset.key === key) {
     nav.querySelectorAll("button[data-doc]").forEach((b) =>
       b.setAttribute("aria-current", b.dataset.doc === current ? "true" : "false"));
@@ -346,6 +347,8 @@ function renderGuideNav(nav) {
   }
   nav.replaceChildren(
     el("button", { class: "nav__back", text: "← Back", onclick: closeGuide }),
+    // HiZ stays one click away from any page, the guide included.
+    ...(state.status.connected ? [hizBox()] : []),
     search,
     results,
     ...groups.map((g) =>

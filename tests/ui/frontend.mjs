@@ -630,6 +630,8 @@ check("guide shows the corrected cable colours",
   $("guide").textContent.slice(0, 80));
 // The guide's contents live in the left column, not a drop-down.
 check("the guide has no drop-down", $("guide").querySelector("select") === null);
+check("HiZ stays one click away while the guide is open",
+  $("nav").querySelector(".nav__hiz-btn") !== null);
 check("the column turns into the guide's contents",
   $("nav").querySelector(".nav__back") !== null && $("nav").querySelector(".nav__search") !== null &&
   $("nav").querySelectorAll("details.nav__group").length >= 2,

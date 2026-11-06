@@ -204,3 +204,29 @@ def test_a_bit_pirate_panel_links_to_its_own_reference(client_bitpirate):
 def test_bus_pirate_panel_docs_are_unchanged(client):
     panels = {p["id"]: p for p in client.get("/api/state").json()["panels"]}
     assert panels["i2c"]["doc"] == "i2c"
+
+
+# -- review fixes ---------------------------------------------------------------
+
+
+def test_text_traffic_keeps_an_escape_split_across_reads_out():
+    from buspirate.web.session import TextTraffic
+
+    t = TextTraffic()
+    assert t.feed(b"OK\x1b") == "OK"
+    assert t.feed(b"[32mgreen") == "green"
+
+
+def test_text_traffic_joins_a_character_split_across_reads():
+    from buspirate.web.session import TextTraffic
+
+    t = TextTraffic()
+    assert t.feed(b"21.5 \xc2") == "21.5 "
+    assert t.feed(b"\xb0C") == "°C"
+
+
+@pytest.mark.parametrize("raw", [b"\x1b(Bx", b"\x1b[2~x", b"\x1b]0;title\x07x", b"\x1b7x"])
+def test_text_traffic_drops_other_escape_forms(raw):
+    from buspirate.web.session import TextTraffic
+
+    assert TextTraffic().feed(raw) == "x"

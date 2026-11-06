@@ -65,9 +65,11 @@ body {
 /* HiZ sits under the Connection tab, so it is in the same place on every
    page. */
 /* The guide's contents, when the guide is open. */
-.nav__back { margin: 0 12px 8px; padding: 7px 10px; text-align: left; background: none;
+/* `.nav > .nav__back`, not `.nav__back`: the general `.nav > button` rule
+   would otherwise win, strip the border and stretch it past the column. */
+.nav > .nav__back { width: auto; margin: 0 12px 8px; padding: 7px 10px; text-align: left; background: none;
   border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: inherit; cursor: pointer; }
-.nav__back:hover { border-color: var(--accent); }
+.nav > .nav__back:hover { border-color: var(--accent); }
 .nav__search { margin: 0 12px 8px; padding: 7px 10px; background: var(--bg); color: var(--text);
   border: 1px solid var(--line); border-radius: 6px; font: inherit; }
 .nav__results { margin: 0 12px; }
