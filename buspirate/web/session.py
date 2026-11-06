@@ -487,11 +487,10 @@ class DeviceSession:
             self.bp.set_pins()
             if device_module.CAP_PWM in capabilities:
                 self.bp.pwm_clear()
-        elif hasattr(self.bp, "hiz"):
-            self.bp.hiz()  # a Bus Pirate 6: one BPIO2 request releases everything
         else:
-            # A Bit Pirate has no bitbang: its own HiZ mode releases the pins.
-            self.bp.cli.command("m hiz")
+            # A Bus Pirate 6: one BPIO2 request releases everything. A Bit
+            # Pirate: its own HiZ mode, after resetting what DIO drove.
+            self.bp.hiz()
         self.last_pins = dict.fromkeys(self.last_pins, False)
         self.pwm_running = False
 
@@ -754,12 +753,24 @@ class DeviceSession:
             self.mode_name = None
         if mode_name is None:
             return None
+        if mode_name.startswith("cli:"):
+            self._mode = self._enter_cli_mode(mode_name[len("cli:"):])
+            self.mode_name = mode_name
+            return self._mode
         enter = getattr(self.bp, mode_name, None)
         if enter is None:
             raise ModeError(f"this build has no {mode_name!r} mode")
         self._mode = enter()
         self.mode_name = mode_name
         return self._mode
+
+    def _enter_cli_mode(self, mode_id: str):
+        """One of the connected board's own modes (boards: Board.modes)."""
+        board = boards.get(self.bp.profile.variant)
+        spec = next((m for m in board.modes if m.id == mode_id), None)
+        if spec is None or not hasattr(self.bp, "cli_mode"):
+            raise ModeError(f"the {board.name} has no Bit Pirate mode {mode_id!r}")
+        return self.bp.cli_mode(spec)
 
     # -- running actions ---------------------------------------------------
 
@@ -783,6 +794,8 @@ class DeviceSession:
             for required in (panel.requires, action.requires):
                 if required:
                     self.bp.profile.require(required)
+        if action.check is not None:
+            action.check(params)  # refuse bad input before anything is sent
         mode = self.ensure_mode(panel.mode)
         context = ActionContext(self, mode)
         result = action.handler(context, **params)

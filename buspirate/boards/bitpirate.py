@@ -2,8 +2,11 @@
 
 from typing import Dict
 
+from ..capabilities import CAP_CLI_EXTRAS
 from ._board import Board
+from ._modes import cli_mode_capability
 from ._wiring import wire
+from .bitpirate_modes import MODES
 
 # The ESP32 Bit Pirate Dock (github.com/AndreiVladescu/ESP32-Bit-Pirate-Hardware)
 # with an ESP32-S3-DevKitC-1 seated in it, photographed as
@@ -157,8 +160,12 @@ BOARD = Board(
     name="ESP32 Bit Pirate",
     # A text command line, not the binary protocol: none of the binary
     # extras, and no supplies to switch. What it can do is I2C, SPI and
-    # UART through its own commands — see buspirate.bitpirate.
-    capabilities=frozenset(),
+    # UART through its own commands — see buspirate.bitpirate — plus its
+    # own modes and the extra I2C and UART commands of bitpirate_modes.
+    capabilities=frozenset(
+        {CAP_CLI_EXTRAS} | {cli_mode_capability(mode.id) for mode in MODES}
+    ),
+    modes=MODES,
     simulated_name="simulated ESP32 Bit Pirate",
     terminal_caption="The Bit Pirate's own command line. Type a command; 'help' lists them.",
     guide_page="bitpirate",

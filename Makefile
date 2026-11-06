@@ -34,7 +34,7 @@ ports: $(PY)  ## list serial ports and flag the likely Bus Pirate
 ui-test: $(PY)  ## drive the real frontend in jsdom (needs node, jsdom, ws)
 	@node -e "require.resolve('jsdom')" 2>/dev/null || \
 	  { echo "install first:  npm install jsdom ws"; exit 1; }
-	@$(PY) -m buspirate dashboard --demo --no-browser --port-number $(UI_PORT) & \
+	@BUSPIRATE_SIM_WIFI=none $(PY) -m buspirate dashboard --demo --no-browser --port-number $(UI_PORT) & \
 	  sleep 4; \
 	  BUSPIRATE_UI_BASE=http://127.0.0.1:$(UI_PORT) node tests/ui/frontend.mjs; \
 	  status=$$?; pkill -f "port-number $(UI_PORT)"; exit $$status

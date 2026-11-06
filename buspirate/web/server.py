@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .. import __version__, boards
+from ..capabilities import CAP_CLI_EXTRAS
 from ..exceptions import BusPirateError
 from . import docs as docs_module
 from .params import ParamError, coerce_all
@@ -72,10 +73,19 @@ def create_app(
 
     def _panels_json() -> list:
         capabilities = session.available_capabilities()
+        shown_board = boards.get(session.effective_variant())
 
         def offered(item: dict) -> bool:
             required = item.get("requires")
-            return capabilities is None or not required or required in capabilities
+            if not required:
+                return True
+            if capabilities is None:
+                # Nothing connected: offer what any Bus Pirate might do, but a
+                # board's own modes and commands only when that board is the
+                # one being shown.
+                own = required == CAP_CLI_EXTRAS or required.startswith("cli_mode:")
+                return not own or required in shown_board.capabilities
+            return required in capabilities
 
         # A board that is not a Bus Pirate (the ESP32 Bit Pirate) has its own
         # pins and caveats; it replaces a panel's wiring, notes and wording

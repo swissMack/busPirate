@@ -9,7 +9,9 @@ import pytest
 from buspirate import device as d
 
 EXPECTED_CAPS = {
-    "bitpirate": frozenset(),
+    # Its own modes and extra commands (step 3); none of the binary extras.
+    "bitpirate": frozenset({d.CAP_CLI_EXTRAS, "cli_mode:onewire_cli", "cli_mode:dio",
+                            "cli_mode:jtag", "cli_mode:wifi", "cli_mode:bluetooth"}),
     "bp6": frozenset({d.CAP_SUPPLIES, d.CAP_ONEWIRE, d.CAP_SPI_MODES, d.CAP_UART_BUFFERED,
                       d.CAP_SPI_FLASH_PROGRAM, d.CAP_PSU_PROGRAMMABLE, d.CAP_PSU_READOUT}),
     "v4": d.BUS_PIRATE_ONLY | {d.CAP_PWM, d.CAP_ADC, d.CAP_FREQUENCY, d.CAP_PULLUP_VOLTAGE},

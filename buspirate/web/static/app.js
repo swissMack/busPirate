@@ -270,8 +270,14 @@ function renderNav() {
   if (state.guide.open) return renderGuideNav(nav);
   nav.classList.remove("nav--guide");
   delete nav.dataset.key;
+  // A board's own modes sit under headings ("Buses", "Wireless"): one before
+  // the first panel of each group. The panels every board has have none.
+  let group = "";
   nav.replaceChildren(
     ...state.panels.flatMap((panel) => [
+      ...(panel.group && panel.group !== group
+        ? [el("div", { class: "nav__heading", role: "heading", "aria-level": "2", text: (group = panel.group) })]
+        : []),
       el("button", {
         text: panel.title,
         "aria-current": panel.id === state.current ? "true" : "false",
@@ -727,6 +733,8 @@ function renderResult(result) {
         ...result.pairs.map(([k, v]) => el("tr", {}, el("th", { text: k }), el("td", { text: String(v) })))
       ),
     stream: () => streamPane(result),
+    // What a board printed, as it printed it.
+    lines: () => el("pre", { class: "console", text: result.lines.join("\n") || "(the board printed nothing)" }),
     pins: () =>
       el(
         "div",

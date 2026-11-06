@@ -34,6 +34,11 @@ CAP_SPI_FLASH_PROGRAM = "spi_flash_program"
 CAP_PSU_PROGRAMMABLE = "psu_programmable"
 CAP_PSU_READOUT = "psu_current_readout"
 
+# The ESP32 Bit Pirate's extra commands on the panels every board has
+# (boards/bitpirate_modes.py EXTRA_ACTIONS). Its own modes each have a
+# capability of their own, boards._modes.cli_mode_capability.
+CAP_CLI_EXTRAS = "cli_extras"
+
 BUS_PIRATE_ONLY = frozenset(
     {
         CAP_BITBANG_PINS,
@@ -55,6 +60,7 @@ CAPABILITY_HOME: Dict[str, str] = {
     CAP_EXTENDED_AUX: "Bus Pirate v3 with firmware v6.1 or newer",
     CAP_PSU_PROGRAMMABLE: "Bus Pirate 6",
     CAP_PSU_READOUT: "Bus Pirate 6",
+    CAP_CLI_EXTRAS: "ESP32 Bit Pirate",
     **{capability: "Bus Pirate v3 and v4" for capability in BUS_PIRATE_ONLY},
 }
 

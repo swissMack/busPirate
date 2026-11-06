@@ -113,6 +113,9 @@ class Action:
     switch: str = ""
     #: The button's text, when it should differ from the card's title.
     button: str = ""
+    #: Called with the coerced params before the device is touched; raises
+    #: ParamError to refuse them, so nothing (not even a mode change) is sent.
+    check: Optional[Callable[[Dict[str, Any]], None]] = None
 
     def to_json(self) -> dict:
         return {
@@ -174,6 +177,8 @@ class Panel:
     refcard_rows: List[str] = field(default_factory=list)
     #: Capability the whole panel needs. Without it the panel is not offered.
     requires: Optional[str] = None
+    #: The menu heading it sits under; empty for the panels every board has.
+    group: str = ""
 
     def action(self, name: str) -> Action:
         for action in self.actions:
@@ -193,6 +198,7 @@ class Panel:
             "refcard_column": self.refcard_column,
             "refcard_rows": self.refcard_rows,
             "requires": self.requires,
+            "group": self.group,
             "actions": [a.to_json() for a in self.actions],
         }
 
@@ -295,6 +301,11 @@ def pins(state: Dict[str, bool]) -> dict:
     return {"render": "pins", "state": state}
 
 
+def lines(lines: List[str], *, caption: str = "") -> dict:
+    """What a board printed, line by line, shown as it printed it."""
+    return {"render": "lines", "lines": list(lines), "caption": caption}
+
+
 def live(kind: str, *, decoder: str, caption: str = "", warning: str = "",
          input: bool = False) -> dict:
     """A live stream: the device now talks until it is told to stop.
@@ -319,7 +330,8 @@ def live(kind: str, *, decoder: str, caption: str = "", warning: str = "",
 
 
 def load_panels() -> List[Panel]:
-    """Import every module in :mod:`buspirate.web.panels` and collect PANELs."""
+    """Import every module in :mod:`buspirate.web.panels` and collect its
+    ``PANEL``, or its ``PANELS`` when it builds several from data."""
     import importlib
     import pkgutil
 
@@ -331,5 +343,6 @@ def load_panels() -> List[Panel]:
         panel = getattr(module, "PANEL", None)
         if panel is not None:
             found.append(panel)
+        found.extend(getattr(module, "PANELS", []))
     found.sort(key=lambda p: (p.order, p.title))
     return found

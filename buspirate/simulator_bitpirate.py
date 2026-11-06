@@ -27,6 +27,7 @@ import re
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .simulator import FakeFlash
+from .simulator_bitpirate_modes import ModesMixin
 
 CRLF = "\r\n"
 
@@ -77,8 +78,13 @@ SYSTEM_ACTIONS = (
 Question = Tuple[str, str, Callable[[str], None]]
 
 
-class FakeBitPirateSerial:
-    """A pyserial stand-in that behaves like an ESP32 Bit Pirate on USB."""
+class FakeBitPirateSerial(ModesMixin):
+    """A pyserial stand-in that behaves like an ESP32 Bit Pirate on USB.
+
+    Its own modes (1-Wire, DIO, JTAG, Wi-Fi, Bluetooth) and their options
+    — ``onewire_devices``, ``wifi_networks``, ``bluetooth_devices``,
+    ``swd_target`` — are in :mod:`buspirate.simulator_bitpirate_modes`.
+    """
 
     def __init__(
         self,
@@ -86,6 +92,7 @@ class FakeBitPirateSerial:
         flash: Optional[FakeFlash] = None,
         uart_rx: bytes = b"",
         booting: bool = False,
+        **modes,
     ) -> None:
         #: 7-bit address to a 256-byte register file.
         self.i2c_devices = (
@@ -123,6 +130,7 @@ class FakeBitPirateSerial:
                 "Stop bits (1 or 2)": "1", "Inverted?": "n",
             },
         }
+        self._init_modes(**modes)
         self.closed = False
         self.is_open = True
         self._out = bytearray()
@@ -186,12 +194,8 @@ class FakeBitPirateSerial:
             self._state = "prompt"
             self._prompt()
             return
-        if self._state == "uart_read":
-            if char in "\r\n":
-                self._println()
-                self._println("UART Read: Stopped by user.")
-                self._state = "prompt"
-                self._prompt()
+        if self._state == "stream":
+            self._stream_key(char)
             return
         if self._state == "question":
             self._question_key(char)
@@ -252,10 +256,23 @@ class FakeBitPirateSerial:
         ]
 
     def _configure(self, mode: str) -> None:
-        self._println(f"{mode} Configuration:")
-        after = {"I2C": ["I2C configured.\n"], "SPI": ["SPI configured.\n"],
-                 "UART": ["UART configured.", ""]}[mode]
-        self._ask(self._config_questions(mode), after)
+        # OneWireController / JtagController handleConfig name themselves.
+        title = {"1WIRE": "OneWire", "JTAG": "JTAG/SWD"}.get(mode, mode)
+        self._println(f"{title} Configuration:")
+        fixed = {"I2C": ["I2C configured.\n"], "SPI": ["SPI configured.\n"],
+                 "UART": ["UART configured.", ""]}
+        if mode in fixed:
+            self._ask(self._config_questions(mode), fixed[mode])
+        else:
+            # What it prints depends on the answers, so it is worked out after.
+            questions = self._config_questions(mode)
+            label, default, store = questions[-1]
+
+            def store_then_report(value, store=store, mode=mode):
+                store(value)
+                self._after_questions = self._config_after(mode)
+
+            self._ask(questions[:-1] + [(label, default, store_then_report)], [])
 
     # -- commands ----------------------------------------------------------
 
@@ -284,6 +301,8 @@ class FakeBitPirateSerial:
             self._println(message or "Pull-ups not applicable for this mode.")
         elif self.mode == "HIZ":
             self._println("Type 'help' or 'mode'")
+        elif self._mode_command(root, rest):
+            pass
         elif root == "config" and self.mode in self.settings:
             self._configure(self.mode)
         elif self.mode == "I2C" and root == "scan":
@@ -294,7 +313,7 @@ class FakeBitPirateSerial:
             self._println("UART Read: Streaming until [ENTER] is pressed...")
             self._emit(self.uart_rx.decode("latin-1"))
             self.uart_rx = b""
-            self._state = "uart_read"
+            self._stream(["", "UART Read: Stopped by user."])
         else:
             self._println(f"\nUnknown command. Available {self.mode} commands:")
 
