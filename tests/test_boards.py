@@ -182,3 +182,25 @@ def test_a_bit_pirate_reads_as_text_from_its_first_byte(client_bitpirate):
     # The banner and prompt come before the board is identified.
     traffic = client_bitpirate.get("/api/state").json()["traffic"]
     assert traffic and all("text" in entry for entry in traffic)
+
+
+def test_every_board_panel_doc_exists():
+    from buspirate.web import docs
+
+    for board in boards.REGISTRY.values():
+        for page in board.panel_docs.values():
+            assert docs.read(page) is not None, (board.variant, page)
+
+
+def test_a_bit_pirate_panel_links_to_its_own_reference(client_bitpirate):
+    panels = {p["id"]: p for p in client_bitpirate.get("/api/state").json()["panels"]}
+    assert panels["i2c"]["doc"] == "bitpirate-wiki/05-i2c"
+    assert panels["spi"]["doc"] == "bitpirate-wiki/06-spi"
+    assert panels["uart"]["doc"] == "bitpirate-wiki/03-uart"
+    assert panels["terminal"]["doc"] == "bitpirate-wiki/99-general"
+    assert panels["connection"]["doc"] == "bitpirate"
+
+
+def test_bus_pirate_panel_docs_are_unchanged(client):
+    panels = {p["id"]: p for p in client.get("/api/state").json()["panels"]}
+    assert panels["i2c"]["doc"] == "i2c"

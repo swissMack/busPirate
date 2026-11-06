@@ -34,3 +34,6 @@ class Board:
     #: Whether it talks text (a command line), so the Traffic panel can show
     #: what was said rather than hex.
     traffic_text: bool = False
+    #: Guide page by panel id, where this board has its own reference for
+    #: that job; other panels keep their own page.
+    panel_docs: Dict[str, str] = field(default_factory=dict)
