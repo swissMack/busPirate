@@ -42,3 +42,35 @@ def test_the_constants_are_also_in_their_own_module():
     assert c.CAP_ONEWIRE == d.CAP_ONEWIRE
     assert c.BUS_PIRATE_ONLY == d.BUS_PIRATE_ONLY
     assert c.CAPABILITY_HOME[c.CAP_SELF_TEST] == "Bus Pirate v3 (and v2go)"
+
+
+# -- the registry -------------------------------------------------------------
+
+from buspirate import boards  # noqa: E402
+
+
+def test_the_registry_holds_the_four_boards_in_order():
+    assert list(boards.REGISTRY) == ["v3", "v4", "bitpirate", "bp6"]
+    assert all(b.variant == v for v, b in boards.REGISTRY.items())
+
+
+def test_an_unknown_variant_gets_the_default_board_and_fallback_capabilities():
+    assert boards.get("unknown").variant == "v3"
+    assert boards.get(None).variant == "v3"
+    assert boards.capabilities_for("unknown") == EXPECTED_CAPS["unknown"]
+
+
+def test_device_reads_capabilities_from_the_registry(monkeypatch):
+    import dataclasses
+
+    fake = dataclasses.replace(boards.REGISTRY["v4"], capabilities=frozenset({"x"}))
+    monkeypatch.setitem(boards.REGISTRY, "v4", fake)
+    assert d.capabilities_for("v4") == frozenset({"x"})
+
+
+def test_device_reads_board_names_from_the_registry(monkeypatch):
+    import dataclasses
+
+    fake = dataclasses.replace(boards.REGISTRY["v4"], name="Renamed")
+    monkeypatch.setitem(boards.REGISTRY, "v4", fake)
+    assert d.DeviceProfile(variant="v4").describe() == "Renamed"

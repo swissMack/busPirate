@@ -28,6 +28,7 @@ datas = [
 
 hiddenimports = (
     collect_submodules("buspirate.web.panels")
+    + collect_submodules("buspirate.boards")
     + collect_submodules("uvicorn")
     + [
         "webview.platforms.cocoa",
