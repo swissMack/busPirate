@@ -789,6 +789,9 @@ function fieldFor(param) {
     const hex = param.type === "hex";
     input = el("input", {
       name: param.name,
+      // A password shows as dots; the browser's password tools stay out.
+      type: param.secret ? "password" : "text",
+      autocomplete: param.secret ? "off" : null,
       value: formatDefault(param),
       placeholder: param.placeholder || (hex ? "0x00" : ""),
       "data-mono": param.type === "bytes" || hex ? true : null,

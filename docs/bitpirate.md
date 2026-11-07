@@ -203,7 +203,10 @@ Web CLI this app cannot drive the board.
 
 1. **Save your Wi-Fi once, from this app.** Open **Wi-Fi → Connect** and give
    the network name and password. The firmware keeps them, and the address
-   it was given appears at the top of the app as **Web CLI: http://…**.
+   it was given appears at the top of the app as **Web CLI after a reset: …**.
+   After that, **Connect to the saved network** joins it again with no typing.
+   If a connect says "Connection failed", try once more: the firmware gives
+   no reason, and a second try often works.
 2. **Reset into Web CLI mode.** Press reset without holding the button, then
    within 3 seconds **short-press** it to join your Wi-Fi, or **hold** it for
    the board's own hotspot.

@@ -160,7 +160,8 @@ class _CliMode:
 
     # -- any command -------------------------------------------------------
 
-    def run(self, line: str, timeout: float = 5.0, shown: Optional[str] = None) -> List[str]:
+    def run(self, line: str, timeout: float = 5.0, shown: Optional[str] = None,
+            picks: Optional[List[str]] = None) -> List[str]:
         """Run one command line; return what the board said, nothing else.
 
         The echo and the prompt are left out, and blank lines at either end.
@@ -169,11 +170,12 @@ class _CliMode:
         board has been quiet for ``timeout`` seconds — one waiting for a part
         that never answers — is stopped with Enter, which ends every loop the
         firmware has, and reported. ``shown`` is the line as it may be shown
-        in that report, with any password masked.
+        in that report, with any password masked. ``picks`` are the menu
+        items to choose, by label, should the firmware show a menu.
         """
         self._check_active()
         try:
-            reply = self.cli.command(line, timeout=timeout)
+            reply = self.cli.command(line, timeout=timeout, picks=picks)
         except CliTimeout as exc:
             try:
                 self.cli.sync()

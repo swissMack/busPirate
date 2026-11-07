@@ -53,6 +53,8 @@ class Param:
     #: the handler receives the default — the power switch on a board that
     #: has no supplies to switch.
     requires: Optional[str] = None
+    #: A password: the page shows dots, not the text.
+    secret: bool = False
 
     def __post_init__(self) -> None:
         if self.type not in PARAM_TYPES:
@@ -72,6 +74,7 @@ class Param:
             "maximum": self.maximum,
             "placeholder": self.placeholder,
             "requires": self.requires,
+            "secret": self.secret,
         }
 
 

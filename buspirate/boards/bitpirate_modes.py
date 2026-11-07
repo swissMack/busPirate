@@ -138,6 +138,16 @@ WIFI = CliMode(
             CliParam("password", "text", "Password", help="No spaces", spaces=False,
                      secret=True),
         ), timeout=25.0, help="The board remembers it for next time"),
+        # handleConnect with no network: "Use saved credentials for X?" takes
+        # its default, yes. With nothing saved it scans and shows a menu;
+        # Exit leaves it without joining anything.
+        CliCommand("connect_saved", "Connect to the saved network", "connect",
+                   timeout=25.0, picks=("Exit",),
+                   explains=(("Exiting network selection",
+                              "No network is saved on the board yet. Use Connect "
+                              "below with its name and password once; the board "
+                              "remembers it."),),
+                   help="The network the board joined last time, no typing"),
         CliCommand("disconnect", "Disconnect", "disconnect"),
         CliCommand("ping", "Ping a host", "ping {host}", (
             CliParam("host", "text", "Host", default="8.8.8.8", spaces=False),

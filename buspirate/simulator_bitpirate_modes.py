@@ -78,6 +78,9 @@ class ModesMixin:
             wifi_networks = [] if empty else WIFI_NETWORKS
         self.wifi_networks = list(wifi_networks)
         self.wifi_connected: Optional[str] = None
+        #: What handleConnect saved to NVS: the last network joined.
+        self.wifi_saved: Optional[str] = None
+        self._wifi_choices: List[str] = []
         self.bluetooth_devices = (
             list(bluetooth_devices) if bluetooth_devices is not None else list(BLUETOOTH_DEVICES)
         )
@@ -302,6 +305,8 @@ class ModesMixin:
                 self._println("WiFi: No networks found.")
         elif root == "status":
             self._wifi_status()
+        elif root == "connect" and not rest.strip():
+            self._wifi_connect_saved()
         elif root == "connect":
             full = rest.strip()
             pos = full.rfind(" ")
@@ -310,12 +315,7 @@ class ModesMixin:
                 return
             ssid = full[:pos]
             self._println(f"WiFi: Connecting to {ssid}...")
-            if any(net[0] == ssid for net in self.wifi_networks):
-                self.wifi_connected = ssid
-                self._println("\nWiFi: ✅ Connected successfully.")
-                self._wifi_web_ui()
-            else:
-                self._println("WiFi: Connection failed.")
+            self._wifi_join(ssid)
         elif root == "disconnect":
             self.wifi_connected = None
             self._println("WiFi: Disconnected.")
@@ -329,6 +329,63 @@ class ModesMixin:
                        "5 packets transmitted, 5 received, 0% packet loss, time 14 ms\r\n")
         else:
             self._unknown()
+
+    def _wifi_join(self, ssid: str) -> None:
+        if any(net[0] == ssid for net in self.wifi_networks):
+            self.wifi_connected = ssid
+            self.wifi_saved = ssid  # handleConnect saves it to NVS
+            self._println("\nWiFi: ✅ Connected successfully.")
+            self._wifi_web_ui()
+        else:
+            self._println("WiFi: Connection failed.")
+
+    def _wifi_connect_saved(self) -> None:
+        """handleConnect with no arguments: the saved network, or a menu."""
+        saved = self.wifi_saved
+
+        def answer(value: str) -> None:
+            if value.lower().startswith("y"):
+                self._println(f"WiFi: Connecting to {saved}...")
+                self._wifi_join(saved)
+            else:
+                self._wifi_pick_menu()
+
+        if saved:
+            self._ask([(f"WiFi: Use saved credentials for {saved}? (Y/n)", "y", answer)], [])
+        else:
+            self._wifi_pick_menu()
+
+    def _wifi_pick_menu(self) -> None:
+        # readValidatedChoiceIndex: the networks, then Exit; default the first.
+        self._println("Wifi: Scanning for available networks...")
+        self._wifi_choices = [net[0] for net in self.wifi_networks] + ["Exit"]
+        self._println("\nSelect Wi-Fi network:")
+        for index, name in enumerate(self._wifi_choices):
+            self._println(f"  [{index + 1}] {'*' if index == 0 else ' '}{name}")
+        self._emit("Enter index (default 1): ")
+        self._answer = ""
+        self._state = "wifi_menu"
+
+    def _wifi_menu_key(self, char: str) -> None:
+        if char.isdigit():
+            self._answer += char
+            self._emit(char)
+            return
+        if char not in "\r\n":
+            return
+        self._println()
+        number, self._answer = self._answer, ""
+        index = int(number) - 1 if number.isdigit() else 0
+        if not 0 <= index < len(self._wifi_choices):
+            index = 0
+        self._state = "prompt"
+        if self._wifi_choices[index] == "Exit":
+            self._println("Exiting network selection....\n")
+        else:
+            # The firmware would ask for a password here; nothing to give it.
+            self._println(f"Selected SSID: {self._wifi_choices[index]}")
+            self._println("WiFi: Connection failed.")
+        self._prompt()
 
     def _wifi_web_ui(self) -> None:
         """handleWebUi over USB, connected: how to start the Web CLI, and where."""

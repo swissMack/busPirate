@@ -206,6 +206,9 @@ class FakeBitPirateSerial(ModesMixin):
         if self._state == "system_menu":
             self._system_key(char)
             return
+        if self._state == "wifi_menu":
+            self._wifi_menu_key(char)
+            return
         # The command line.
         if char in "\r\n":
             self._println()
