@@ -56,7 +56,9 @@ LED the DevKit's display (`RgbLedView`): each mode change lights it, and the
 **Screen brightness** setting in the board's `system` menu sets how bright it
 is (default 9 %). It changes nothing the dashboard relies on; the board still
 reports version `1.8`. It also adds pin 48 (the LED) to the protected pins,
-and puts the colour key in the board's own `help`.
+and puts the colour key in the board's own `help`. When the board starts in
+Web CLI mode, its Wi-Fi status colours (white, blue, green, red) go through
+the same driver, so the mode colours keep working there too.
 
 Build it with [PlatformIO](https://platformio.org), then merge the parts
 into one image:
@@ -87,12 +89,19 @@ On the USB TTL (CH340) port, use the default reset and `--baud 460800`:
 921600 fails there.
 
 **Dock pins as the firmware's own default.** Stock v1.8 starts I2C on
-GPIO 6 / 7, which the Bit Pirate Dock does not bring out. This app answers
-SDA 15 / SCL 16 each time it enters I2C, but the firmware keeps that only
-until a reset, so the Web CLI (which starts after one) was back on 6 / 7.
-`firmware/bitpirate-1.8-dock-pins.patch` moves the DevKit builds' default to
-**IO15 = SDA, IO16 = SCL**, so both terminals agree from power-up. Apply it
-after the mode-LED patch, before `pio run`:
+GPIO 6 / 7, which the Bit Pirate Dock does not bring out, and SPI with CS
+and MISO the other way round from the Dock. This app answers the Dock's pins
+each time it enters a mode, but the firmware keeps them only until a reset,
+so the Web CLI (which starts after one) was back on its own.
+`firmware/bitpirate-1.8-dock-pins.patch` moves the DevKit builds' defaults
+to the Dock's, so both terminals agree from power-up:
+
+| Mode | Pins |
+|------|------|
+| I2C | IO15 = SDA, IO16 = SCL |
+| SPI | IO12 = CLK, IO13 = MOSI, IO10 = MISO, IO11 = CS |
+
+Apply it after the mode-LED patch, before `pio run`:
 
 ```sh
 git apply /path/to/busPirate/firmware/bitpirate-1.8-dock-pins.patch

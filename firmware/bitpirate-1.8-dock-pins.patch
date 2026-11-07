@@ -1,8 +1,8 @@
 diff --git a/platformio.ini b/platformio.ini
-index a7ecac0b..773c3f00 100644
+index a7ecac0b..c8e6cd6c 100644
 --- a/platformio.ini
 +++ b/platformio.ini
-@@ -471,7 +471,8 @@ build_flags =
+@@ -471,11 +471,13 @@ build_flags =
    -DHDUART_PIN=17
  
    ; --- I2C ---
@@ -12,7 +12,13 @@ index a7ecac0b..773c3f00 100644
    -DI2C_FREQ=100000
  
    ; --- SPI ---
-@@ -549,7 +550,8 @@ build_flags =
+-  -DSPI_CS_PIN=10 -DSPI_CLK_PIN=12 -DSPI_MISO_PIN=11 -DSPI_MOSI_PIN=13
++  ; The Dock wires CS to IO11 and MISO to IO10.
++  -DSPI_CS_PIN=11 -DSPI_CLK_PIN=12 -DSPI_MISO_PIN=10 -DSPI_MOSI_PIN=13
+ 
+   ; --- LoRa SX1262 ---
+   -DLORA_SCK_PIN=12 -DLORA_MISO_PIN=11 -DLORA_MOSI_PIN=13 -DLORA_CS_PIN=10
+@@ -549,11 +551,13 @@ build_flags =
    -DHDUART_PIN=17
  
    ; --- I2C ---
@@ -22,3 +28,9 @@ index a7ecac0b..773c3f00 100644
    -DI2C_FREQ=100000
  
    ; --- SPI ---
+-  -DSPI_CS_PIN=10 -DSPI_CLK_PIN=12 -DSPI_MISO_PIN=11 -DSPI_MOSI_PIN=13
++  ; The Dock wires CS to IO11 and MISO to IO10.
++  -DSPI_CS_PIN=11 -DSPI_CLK_PIN=12 -DSPI_MISO_PIN=10 -DSPI_MOSI_PIN=13
+ 
+   ; --- LoRa SX1262 ---
+   -DLORA_SCK_PIN=12 -DLORA_MISO_PIN=11 -DLORA_MOSI_PIN=13 -DLORA_CS_PIN=10

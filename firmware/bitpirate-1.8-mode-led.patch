@@ -10,17 +10,13 @@ HIZ is dark, I2C blue, SPI green, UART/HDUART yellow, 1WIRE cyan, any
 other mode dim white. GPIO48 is added to the protected pins so no mode
 can drive it, and the help lists the colours.
 
+The Wi-Fi Connect boot (Web CLI) shows its white/blue/green/red status
+through rgbLedWrite too, on the DevKit: through FastLED it kept the pin's
+RMT channel, and no mode colour reached the LED for the rest of the
+session.
+
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
 ---
- platformio.ini                         |  6 ++--
- src/Boards/Common/Views/RgbLedView.cpp | 45 ++++++++++++++++++++++++++
- src/Boards/Common/Views/RgbLedView.h   | 28 ++++++++++++++++
- src/Boards/S3DevKit/S3DevKitBoard.h    |  4 +--
- src/Shells/HelpShell.cpp               |  5 +++
- 5 files changed, 83 insertions(+), 5 deletions(-)
- create mode 100644 src/Boards/Common/Views/RgbLedView.cpp
- create mode 100644 src/Boards/Common/Views/RgbLedView.h
-
 diff --git a/platformio.ini b/platformio.ini
 index 29dbea84..a7ecac0b 100644
 --- a/platformio.ini
@@ -175,6 +171,73 @@ index e42af478..a4fff3c6 100644
          "Tip: use 'mode' (or 'm')."
      };
  
--- 
-2.54.0 (Apple Git-157)
-
+diff --git a/src/Boards/Common/Wifi/DefaultWifiSetup.cpp b/src/Boards/Common/Wifi/DefaultWifiSetup.cpp
+index b79fe379..d4ac67ae 100644
+--- a/src/Boards/Common/Wifi/DefaultWifiSetup.cpp
++++ b/src/Boards/Common/Wifi/DefaultWifiSetup.cpp
+@@ -12,6 +12,18 @@
+ #define NUM_LEDS 1
+ #if LED_TYPE_RGB
+ CRGB leds[NUM_LEDS];
++#if defined(DEVICE_S3DEVKIT)
++// The DevKit's LED is its device view (RgbLedView), written through the
++// core's rgbLedWrite. FastLED here would keep the pin's RMT channel for the
++// whole session, and the mode colours could no longer reach the LED.
++#define WIFI_LED_BEGIN()
++#define WIFI_LED_SHOW() rgbLedWrite(LED_PIN, leds[0].r, leds[0].g, leds[0].b)
++#define WIFI_LED_CLEAR() rgbLedWrite(LED_PIN, 0, 0, 0)
++#else
++#define WIFI_LED_BEGIN() FastLED.addLeds<WS2812, LED_PIN, GRB>(leds, NUM_LEDS)
++#define WIFI_LED_SHOW() FastLED.show()
++#define WIFI_LED_CLEAR() FastLED.clear(true)
++#endif
+ #endif
+ 
+ Preferences& getPreferences() {
+@@ -30,18 +42,18 @@ bool loadWifiCredentials(String& ssid, String& password) {
+ 
+ bool setupDefaultWifi() {
+     #if LED_TYPE_RGB
+-    FastLED.addLeds<WS2812, LED_PIN, GRB>(leds, NUM_LEDS);
++    WIFI_LED_BEGIN();
+     leds[0] = CRGB::White;
+-    FastLED.show();
++    WIFI_LED_SHOW();
+     #endif
+ 
+     String ssid, password;
+     if (!loadWifiCredentials(ssid, password)) {
+         #if LED_TYPE_RGB
+         leds[0] = CRGB::Blue;
+-        FastLED.show();
++        WIFI_LED_SHOW();
+         delay(2000);
+-        FastLED.clear(true);
++        WIFI_LED_CLEAR();
+         #endif
+         return false;
+     }
+@@ -52,9 +64,9 @@ bool setupDefaultWifi() {
+         if (WiFi.status() == WL_CONNECTED) {
+             #if LED_TYPE_RGB
+             leds[0] = CRGB::Green;
+-            FastLED.show();
++            WIFI_LED_SHOW();
+             delay(1000);
+-            FastLED.clear(true);
++            WIFI_LED_CLEAR();
+             #endif
+             return true;
+         }
+@@ -63,9 +75,9 @@ bool setupDefaultWifi() {
+ 
+     #if LED_TYPE_RGB
+       leds[0] = CRGB::Red;
+-      FastLED.show();
++      WIFI_LED_SHOW();
+       delay(1000);
+-      FastLED.clear(true);
++      WIFI_LED_CLEAR();
+     #endif
+     
+     return false;
