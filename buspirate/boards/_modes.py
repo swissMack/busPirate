@@ -49,6 +49,11 @@ class CliCommand:
     #: Config answers (by question label) the command changes on the board,
     #: so the driver's record of them is dropped afterwards.
     forgets: Tuple[str, ...] = ()
+    #: Menu items to pick, by label, should the firmware show a menu.
+    picks: Tuple[str, ...] = ()
+    #: (words in the reply, what to say instead): a reply holding those words
+    #: is refused with the plain message, e.g. a connect with nothing saved.
+    explains: Tuple[Tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

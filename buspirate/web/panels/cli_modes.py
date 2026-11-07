@@ -41,7 +41,7 @@ def _word(param: CliParam, value: Any) -> str:
 
 def _param(p: CliParam) -> Param:
     return Param(p.name, p.type, p.label, default=p.default, help=p.help,
-                 choices=p.choices, minimum=p.minimum, maximum=p.maximum)
+                 choices=p.choices, minimum=p.minimum, maximum=p.maximum, secret=p.secret)
 
 
 def action_for(cmd: CliCommand, requires: Optional[str] = None) -> Action:
@@ -63,8 +63,12 @@ def action_for(cmd: CliCommand, requires: Optional[str] = None) -> Action:
         secret = any(p.secret for p in cmd.params)
         try:
             with ctx.session.traffic_hidden(shown) if secret else contextlib.nullcontext():
-                said = ctx.mode.run(line, timeout=cmd.timeout, shown=shown)
+                said = ctx.mode.run(line, timeout=cmd.timeout, shown=shown,
+                                    picks=list(cmd.picks) or None)
             ctx.session.note_reply(said)
+            for phrase, message in cmd.explains:
+                if any(phrase in said_line for said_line in said):
+                    raise ParamError(message)
         finally:
             # Even a stopped command may have changed them (autobaud leaves
             # the UART at the last rate it tried).

@@ -813,6 +813,16 @@ await settle(900);
 $("panel").querySelector(".stream button").click();  // Stop
 await settle(1500);
 
+[...$("nav").children].find((b) => b.textContent === "Wi-Fi").click();
+await settle(300);
+{
+  const pw = $("panel").querySelector('[data-action="connect"] input[name="password"]');
+  check("the Wi-Fi password box shows dots", pw && pw.type === "password", pw ? pw.type : "no field");
+  const ssid = $("panel").querySelector('[data-action="connect"] input[name="ssid"]');
+  check("the network name box shows its text", ssid && ssid.type === "text", ssid ? ssid.type : "no field");
+  check("Wi-Fi offers the saved network, no typing",
+    !!$("panel").querySelector('[data-action="connect_saved"] button'));
+}
 // The Web CLI address: this demo's board has no Wi-Fi in reach, and a demo
 // never shows a real one, so the remembered case is fed in as the server
 // would send it (remembering is tested in tests/test_web_cli.py).
