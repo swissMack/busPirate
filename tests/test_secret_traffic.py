@@ -27,7 +27,7 @@ def _traffic(client):
 
 def test_the_password_is_in_no_traffic_entry(client):
     _run(client, "connection", "connect", port="simulated-bitpirate")
-    _run(client, "wifi", "connect", ssid="HomeNet", password=PASSWORD)
+    _run(client, "wifi", "connect", network="new", ssid="HomeNet", password=PASSWORD)
     for entry in _traffic(client):
         assert "hunt" not in entry.get("text", ""), entry  # nor the echo's prefixes
         assert PASSWORD.encode().hex(" ") not in entry["hex"], entry
@@ -36,14 +36,14 @@ def test_the_password_is_in_no_traffic_entry(client):
 
 def test_the_command_is_logged_with_the_password_masked(client):
     _run(client, "connection", "connect", port="simulated-bitpirate")
-    _run(client, "wifi", "connect", ssid="HomeNet", password=PASSWORD)
+    _run(client, "wifi", "connect", network="new", ssid="HomeNet", password=PASSWORD)
     texts = [e.get("text", "") for e in _traffic(client) if e["direction"] == "tx"]
     assert any("connect HomeNet ****" in t for t in texts), texts
 
 
 def test_traffic_is_logged_again_after_the_password_command(client):
     _run(client, "connection", "connect", port="simulated-bitpirate")
-    _run(client, "wifi", "connect", ssid="HomeNet", password=PASSWORD)
+    _run(client, "wifi", "connect", network="new", ssid="HomeNet", password=PASSWORD)
     before = len(_traffic(client))
     _run(client, "wifi", "status")
     after = _traffic(client)[before:]

@@ -55,6 +55,9 @@ class Param:
     requires: Optional[str] = None
     #: A password: the page shows dots, not the text.
     secret: bool = False
+    #: {field: value}: the page shows this input only while that field has
+    #: that value.
+    shown_when: Optional[Dict[str, str]] = None
 
     def __post_init__(self) -> None:
         if self.type not in PARAM_TYPES:
@@ -75,6 +78,7 @@ class Param:
             "placeholder": self.placeholder,
             "requires": self.requires,
             "secret": self.secret,
+            "shown_when": self.shown_when,
         }
 
 

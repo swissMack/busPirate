@@ -76,13 +76,13 @@ def test_no_address_until_the_board_has_joined_wifi(client):
 
 def test_joining_wifi_shows_the_address(client):
     _run(client, "connection", "connect", port="simulated-bitpirate")
-    _run(client, "wifi", "connect", ssid="HomeNet", password="hunter2")
+    _run(client, "wifi", "connect", network="new", ssid="HomeNet", password="hunter2")
     assert _without_seen(_web_cli(client)) == {"ip": "192.168.1.77", "on_wifi": True, "simulated": True}
 
 
 def test_wifi_status_shows_the_address_too(client):
     _run(client, "connection", "connect", port="simulated-bitpirate")
-    _run(client, "wifi", "connect", ssid="HomeNet", password="hunter2")
+    _run(client, "wifi", "connect", network="new", ssid="HomeNet", password="hunter2")
     client.app.state.session.web_cli = None
     _run(client, "wifi", "status")
     assert _web_cli(client)["ip"] == "192.168.1.77"
@@ -90,14 +90,14 @@ def test_wifi_status_shows_the_address_too(client):
 
 def test_leaving_wifi_keeps_the_address_as_last_seen(client):
     _run(client, "connection", "connect", port="simulated-bitpirate")
-    _run(client, "wifi", "connect", ssid="HomeNet", password="hunter2")
+    _run(client, "wifi", "connect", network="new", ssid="HomeNet", password="hunter2")
     _run(client, "wifi", "disconnect")
     assert _without_seen(_web_cli(client)) == {"ip": "192.168.1.77", "on_wifi": False, "simulated": True}
 
 
 def test_unplugging_keeps_the_address_as_last_seen(client):
     _run(client, "connection", "connect", port="simulated-bitpirate")
-    _run(client, "wifi", "connect", ssid="HomeNet", password="hunter2")
+    _run(client, "wifi", "connect", network="new", ssid="HomeNet", password="hunter2")
     _run(client, "connection", "disconnect")
     assert _without_seen(_web_cli(client)) == {"ip": "192.168.1.77", "on_wifi": False, "simulated": True}
 

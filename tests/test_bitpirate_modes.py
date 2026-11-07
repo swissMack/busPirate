@@ -31,7 +31,12 @@ def test_the_first_batch_is_these_modes_in_menu_order():
 
 def test_every_command_line_uses_only_its_own_params():
     for owner, cmd in _all_commands():
-        names = {n for _, n, _, _ in string.Formatter().parse(cmd.line) if n}
+        # A command with a choice of lines: those lines and the field that
+        # chooses between them use the fields, between them.
+        lines = [cmd.line] + [line for _, line in cmd.lines]
+        names = {n for line in lines for _, n, _, _ in string.Formatter().parse(line) if n}
+        if cmd.choose_by:
+            names.add(cmd.choose_by)
         assert names == {p.name for p in cmd.params}, (owner, cmd.name)
 
 
@@ -294,7 +299,7 @@ def test_out_of_range_input_is_refused_before_sending(client):
 
 def test_an_empty_text_field_is_refused_before_sending(client):
     _connect(client, "simulated-bitpirate")
-    response = _run(client, "wifi", "connect", ssid="", password="secret")
+    response = _run(client, "wifi", "connect", network="new", ssid="", password="secret")
     assert response.status_code == 400
     assert "Network (SSID)" in response.json()["error"]
 
@@ -347,7 +352,7 @@ def test_the_simulator_can_have_no_wifi_in_reach(monkeypatch):
 
 def test_the_wifi_password_is_never_shown(client):
     _connect(client, "simulated-bitpirate")
-    response = _run(client, "wifi", "connect", ssid="HomeNet", password="hunter2")
+    response = _run(client, "wifi", "connect", network="new", ssid="HomeNet", password="hunter2")
     assert response.status_code == 200, response.text
     assert "hunter2" not in response.text
 
@@ -391,7 +396,7 @@ def test_a_bad_field_is_refused_before_the_mode_changes(client):
     _connect(client, "simulated-bitpirate")
     assert _run(client, "i2c", "scan").status_code == 200
     fake = _session(client).bp.serial
-    response = _run(client, "wifi", "connect", ssid="", password="x")
+    response = _run(client, "wifi", "connect", network="new", ssid="", password="x")
     assert response.status_code == 400
     assert fake.mode == "I2C"
     assert not any(c.lower() == "m wifi" for c in fake.commands)

@@ -638,9 +638,24 @@ function cssColour(value) {
   return value || "transparent";
 }
 
+/* Inputs that only matter for one choice (Wi-Fi's name and password, for "A
+   new network"): shown while the field they follow has that value. */
+function showWhen(fields, params) {
+  const follows = params.filter((p) => p.shown_when);
+  if (!follows.length) return;
+  const update = () => follows.forEach((p) => {
+    const box = fields.querySelector(`[name="${p.name}"]`).closest("label");
+    box.hidden = !Object.entries(p.shown_when).every(([name, value]) =>
+      fields.querySelector(`[name="${name}"]`).value === value);
+  });
+  fields.addEventListener("change", update);
+  update();
+}
+
 function actionBlock(panel, action) {
   if (action.switch) return switchBlock(panel, action);
   const fields = el("div", { class: "fields" }, ...action.params.map(fieldFor));
+  showWhen(fields, action.params);
   const output = el("div", { class: "result" });
   const button = el("button", {
     class: action.primary ? "btn btn--primary" : "btn",
