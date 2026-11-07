@@ -813,12 +813,12 @@ await settle(900);
 $("panel").querySelector(".stream button").click();  // Stop
 await settle(1500);
 
-// The Web CLI address: this demo's board has no Wi-Fi in reach, so only the
-// remembered one can show (joining Wi-Fi is tested in tests/test_web_cli.py).
+// The Web CLI address: this demo's board has no Wi-Fi in reach, and a demo
+// never shows a real one, so the remembered case is fed in as the server
+// would send it (remembering is tested in tests/test_web_cli.py).
 check("no Web CLI address before the board has given one", $("webcli").hidden, $("webcli").textContent);
-window.localStorage.setItem("bp.webcli", JSON.stringify({ ip: "192.168.1.50", seen: Date.now() }));
-[...$("nav").children].find((b) => b.textContent === "Wi-Fi").click();
-await settle(300);
+window.renderWebCli({ connected: true, variant: "bitpirate",
+  web_cli: { ip: "192.168.1.50", on_wifi: false, simulated: false, seen: Date.now() } });
 check("a remembered Web CLI address shows at the top, marked last seen",
   !$("webcli").hidden && /last seen/.test($("webcli").textContent)
     && $("webcli").querySelector("a")?.href === "http://192.168.1.50/",
@@ -831,6 +831,10 @@ window.renderWebCli({ connected: true, variant: "bitpirate",
 check("on USB the address is plain text, to use after a reset",
   !$("webcli").querySelector("a") && /after a reset: 192\.168\.1\.77/.test($("webcli").textContent),
   $("webcli").innerHTML);
+// The app remembers the address, not the page: the app's window keeps no
+// browser storage, so a copy here would differ between the app and a browser.
+window.renderWebCli({ connected: true, variant: "bitpirate", web_cli: null });
+check("the page keeps no copy of its own", $("webcli").hidden, $("webcli").textContent);
 
 // --- connecting a v4 from a window opened with nothing connected
 // Reported on real hardware 2026-09-29: the I2C hook-up showed the v3 photo

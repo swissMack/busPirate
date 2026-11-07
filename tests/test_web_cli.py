@@ -63,6 +63,11 @@ def _web_cli(client):
     return client.get("/api/state").json()["status"]["web_cli"]
 
 
+def _without_seen(info):
+    assert info["seen"] > 0
+    return {k: v for k, v in info.items() if k != "seen"}
+
+
 def test_no_address_until_the_board_has_joined_wifi(client):
     assert _web_cli(client) is None
     _run(client, "connection", "connect", port="simulated-bitpirate")
@@ -72,7 +77,7 @@ def test_no_address_until_the_board_has_joined_wifi(client):
 def test_joining_wifi_shows_the_address(client):
     _run(client, "connection", "connect", port="simulated-bitpirate")
     _run(client, "wifi", "connect", ssid="HomeNet", password="hunter2")
-    assert _web_cli(client) == {"ip": "192.168.1.77", "on_wifi": True, "simulated": True}
+    assert _without_seen(_web_cli(client)) == {"ip": "192.168.1.77", "on_wifi": True, "simulated": True}
 
 
 def test_wifi_status_shows_the_address_too(client):
@@ -87,11 +92,44 @@ def test_leaving_wifi_keeps_the_address_as_last_seen(client):
     _run(client, "connection", "connect", port="simulated-bitpirate")
     _run(client, "wifi", "connect", ssid="HomeNet", password="hunter2")
     _run(client, "wifi", "disconnect")
-    assert _web_cli(client) == {"ip": "192.168.1.77", "on_wifi": False, "simulated": True}
+    assert _without_seen(_web_cli(client)) == {"ip": "192.168.1.77", "on_wifi": False, "simulated": True}
 
 
 def test_unplugging_keeps_the_address_as_last_seen(client):
     _run(client, "connection", "connect", port="simulated-bitpirate")
     _run(client, "wifi", "connect", ssid="HomeNet", password="hunter2")
     _run(client, "connection", "disconnect")
-    assert _web_cli(client) == {"ip": "192.168.1.77", "on_wifi": False, "simulated": True}
+    assert _without_seen(_web_cli(client)) == {"ip": "192.168.1.77", "on_wifi": False, "simulated": True}
+
+
+# -- remembered across restarts ---------------------------------------------
+# The app's window keeps no browser storage between launches, so the address
+# is kept by the app itself, in BUSPIRATE_STATE_DIR (~/BusPirate by default).
+
+from buspirate.web.session import DeviceSession  # noqa: E402
+
+REPLY = ["WiFi Web UI: http://10.0.0.5 (reset and select WiFi Connect)"]
+
+
+def test_a_real_boards_address_is_remembered_by_the_next_launch():
+    DeviceSession().note_reply(REPLY)
+    remembered = DeviceSession().status()["web_cli"]
+    assert remembered["ip"] == "10.0.0.5"
+    assert remembered["on_wifi"] is False  # last seen, not live
+    assert remembered["seen"] > 0
+
+
+def test_a_simulators_address_is_never_remembered():
+    DeviceSession(use_fake=True).note_reply(REPLY)
+    assert DeviceSession().status()["web_cli"] is None
+
+
+def test_a_demo_launch_does_not_show_the_real_boards_address():
+    DeviceSession().note_reply(REPLY)
+    assert DeviceSession(use_fake=True).status()["web_cli"] is None
+
+
+def test_an_unreadable_memory_is_ignored(tmp_path, monkeypatch):
+    monkeypatch.setenv("BUSPIRATE_STATE_DIR", str(tmp_path))
+    (tmp_path / "web-cli.json").write_text("{not json")
+    assert DeviceSession().status()["web_cli"] is None

@@ -277,8 +277,9 @@ function renderUsb(usb) {
 /* A Bit Pirate's Web CLI: the browser terminal it runs *instead of* USB, so
    its address is learned while on USB (the server reads it from the board's
    Wi-Fi replies) and shown on, marked "last seen", once the board has left
-   USB or Wi-Fi — which is when it is wanted. A real board's address is kept
-   in this browser so it survives a restart; a simulator's never is. */
+   USB or Wi-Fi — which is when it is wanted. The app remembers a real
+   board's address across restarts (buspirate.web.webcli), not this page:
+   the app's window keeps no browser storage. */
 const WEB_CLI_HOW =
   "The Bit Pirate's browser terminal. It runs instead of USB: reset the board, " +
   "short-press its button within 3 seconds, wait for the green LED, then open this. " +
@@ -286,18 +287,7 @@ const WEB_CLI_HOW =
 
 function renderWebCli(s) {
   const box = $("webcli");
-  let info = s.web_cli;
-  if (info && !info.simulated) {
-    try {
-      localStorage.setItem("bp.webcli", JSON.stringify({ ip: info.ip, seen: Date.now() }));
-    } catch (error) { /* storage off: shown for this session only */ }
-  }
-  if (!info) {
-    try {
-      const kept = JSON.parse(localStorage.getItem("bp.webcli") || "null");
-      if (kept && kept.ip) info = { ip: kept.ip, on_wifi: false, seen: kept.seen };
-    } catch (error) { info = null; }
-  }
+  const info = s.web_cli;
   // Not on a Bus Pirate: its board has no Web CLI.
   const show = info && (!s.connected || s.variant === "bitpirate");
   box.hidden = !show;

@@ -31,3 +31,9 @@ def bp(fake):
     device = make_device(fake)
     with device:
         yield device
+
+
+@pytest.fixture(autouse=True)
+def _state_dir(tmp_path, monkeypatch):
+    """Keep what the app remembers between runs (buspirate.web.webcli) out of ~."""
+    monkeypatch.setenv("BUSPIRATE_STATE_DIR", str(tmp_path / "state"))
