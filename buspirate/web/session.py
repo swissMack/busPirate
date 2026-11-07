@@ -27,7 +27,7 @@ from ..exceptions import BusPirateError, ConnectionError, ModeError, PortGoneErr
 from ..ports import discover, resolve
 from .decoders import make_decoder
 from .registry import Action, Panel, live, load_panels
-from .webcli import reply_drops_wifi, web_cli_address
+from .webcli import load_last, reply_drops_wifi, save_last, web_cli_address
 from .wiring import BOARDS, DEFAULT_VARIANT, LED_RULES
 
 TRAFFIC_HISTORY = 500
@@ -267,6 +267,12 @@ class DeviceSession:
         #: ({"ip", "on_wifi", "simulated"}). Kept after the board leaves Wi-Fi
         #: or USB: that is when it is wanted (see buspirate.web.webcli).
         self.web_cli: Optional[Dict[str, Any]] = None
+        # A hardware launch starts from the last real board's address, so it
+        # survives a restart; a demo launch never shows a real one.
+        last = None if use_fake else load_last()
+        if last is not None:
+            self.web_cli = {"ip": last["ip"], "on_wifi": False, "simulated": False,
+                            "seen": last["seen"]}
         #: The connection that reply came over; on_wifi holds only while it lasts.
         self._web_cli_bp = None
         #: Set while a command carrying a password runs (traffic_hidden).
@@ -711,8 +717,12 @@ class DeviceSession:
         """Pick a Web CLI address (or its loss) out of a board's own reply."""
         ip = web_cli_address(lines)
         if ip is not None:
-            self.web_cli = {"ip": ip, "on_wifi": True, "simulated": self.simulated}
+            seen = time.time() * 1000
+            self.web_cli = {"ip": ip, "on_wifi": True, "simulated": self.simulated,
+                            "seen": seen}
             self._web_cli_bp = self.bp
+            if not self.simulated and not self.use_fake:
+                save_last(ip, seen)
         elif self.web_cli is not None and reply_drops_wifi(lines):
             self.web_cli = dict(self.web_cli, on_wifi=False)
 

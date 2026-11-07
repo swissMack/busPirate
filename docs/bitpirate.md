@@ -217,7 +217,8 @@ Web CLI this app cannot drive the board.
    until then it answers "Nothing matches the given URI". Reload.
 5. **Back to this app:** reset without pressing the button.
 
-The address is the one your router gave the board last time. If the router
+The app remembers that address across restarts, in `~/BusPirate/web-cli.json`,
+so it is still there the next time you open it. The address is the one your router gave the board last time. If the router
 hands out a different one, Wi-Fi → Status (back on USB) shows the new one,
 and the top of the app follows. Avoid the Wi-Fi commands (scan, connect,
 disconnect) from inside the Web CLI: they drop its own connection.
