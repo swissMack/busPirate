@@ -30,6 +30,8 @@ class CliParam:
     spaces: bool = True
     #: Never shown back: replaced by **** in captions and errors.
     secret: bool = False
+    #: (field, value): shown, and used, only while that field has that value.
+    shown_when: Optional[Tuple[str, str]] = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,10 @@ class CliCommand:
     #: (words in the reply, what to say instead): a reply holding those words
     #: is refused with the plain message, e.g. a connect with nothing saved.
     explains: Tuple[Tuple[str, str], ...] = ()
+    #: A choice of lines: the value of the field ``choose_by`` picks one of
+    #: ``lines`` ((value, line), ...); ``line`` is used for any other value.
+    choose_by: str = ""
+    lines: Tuple[Tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

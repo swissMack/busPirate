@@ -820,8 +820,16 @@ await settle(300);
   check("the Wi-Fi password box shows dots", pw && pw.type === "password", pw ? pw.type : "no field");
   const ssid = $("panel").querySelector('[data-action="connect"] input[name="ssid"]');
   check("the network name box shows its text", ssid && ssid.type === "text", ssid ? ssid.type : "no field");
-  check("Wi-Fi offers the saved network, no typing",
-    !!$("panel").querySelector('[data-action="connect_saved"] button'));
+  const choice = $("panel").querySelector('[data-action="connect"] select[name="network"]');
+  const box = (name) => $("panel").querySelector(`[data-action="connect"] input[name="${name}"]`).closest("label");
+  check("Connect offers the saved network by default",
+    choice && choice.value === "saved", choice ? choice.value : "no choice");
+  check("with the saved network, no name or password boxes",
+    box("ssid").hidden && box("password").hidden, `${box("ssid").hidden} ${box("password").hidden}`);
+  choice.value = "new";
+  choice.dispatchEvent(new window.Event("change", { bubbles: true }));
+  check("a new network shows the name and password boxes",
+    !box("ssid").hidden && !box("password").hidden, `${box("ssid").hidden} ${box("password").hidden}`);
 }
 // The Web CLI address: this demo's board has no Wi-Fi in reach, and a demo
 // never shows a real one, so the remembered case is fed in as the server

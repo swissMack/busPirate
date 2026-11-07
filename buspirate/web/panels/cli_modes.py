@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 
+import string
 from typing import Any, Dict, List, Optional
 
 from ... import boards
@@ -41,17 +42,29 @@ def _word(param: CliParam, value: Any) -> str:
 
 def _param(p: CliParam) -> Param:
     return Param(p.name, p.type, p.label, default=p.default, help=p.help,
-                 choices=p.choices, minimum=p.minimum, maximum=p.maximum, secret=p.secret)
+                 choices=p.choices, minimum=p.minimum, maximum=p.maximum, secret=p.secret,
+                 shown_when=dict([p.shown_when]) if p.shown_when else None)
 
 
 def action_for(cmd: CliCommand, requires: Optional[str] = None) -> Action:
     """The button for one command: fill in its line, run it, show the reply."""
     by_name = {p.name: p for p in cmd.params}
+    by_value = dict(cmd.lines)
+
+    def template(values: Dict[str, Any]) -> str:
+        if cmd.choose_by:
+            return by_value.get(values.get(cmd.choose_by), cmd.line)
+        return cmd.line
+
+    def used(values: Dict[str, Any]) -> List[str]:
+        return [n for _, n, _, _ in string.Formatter().parse(template(values)) if n]
 
     def words(values: Dict[str, Any], mask: bool = False) -> str:
-        return cmd.line.format(**{
-            name: "****" if mask and by_name[name].secret else _word(by_name[name], v)
-            for name, v in values.items()
+        # Only the fields this line uses: a hidden box (the new network's
+        # name, while the saved one is chosen) is neither checked nor sent.
+        return template(values).format(**{
+            name: "****" if mask and by_name[name].secret else _word(by_name[name], values[name])
+            for name in used(values)
         })
 
     def handler(ctx, **values):
@@ -60,7 +73,7 @@ def action_for(cmd: CliCommand, requires: Optional[str] = None) -> Action:
             ctx.mode.start_stream(line)
             return live(cmd.label, decoder="console",
                         caption="What the board prints, as it prints it. Stop ends it.")
-        secret = any(p.secret for p in cmd.params)
+        secret = any(by_name[name].secret for name in used(values))
         try:
             with ctx.session.traffic_hidden(shown) if secret else contextlib.nullcontext():
                 said = ctx.mode.run(line, timeout=cmd.timeout, shown=shown,

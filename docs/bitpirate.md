@@ -201,10 +201,11 @@ The firmware can serve its terminal to a browser over Wi-Fi. It runs that
 **instead of** the USB terminal, choosing at power-up, so while you use the
 Web CLI this app cannot drive the board.
 
-1. **Save your Wi-Fi once, from this app.** Open **Wi-Fi → Connect** and give
-   the network name and password. The firmware keeps them, and the address
-   it was given appears at the top of the app as **Web CLI after a reset: …**.
-   After that, **Connect to the saved network** joins it again with no typing.
+1. **Save your Wi-Fi once, from this app.** Open **Wi-Fi → Connect**, choose
+   **A new network**, and give its name and password. The firmware keeps them,
+   and the address it was given appears at the top of the app as **Web CLI
+   after a reset: …**. After that, Connect with **The saved network** (the
+   default) joins it again with no typing.
    If a connect says "Connection failed", try once more: the firmware gives
    no reason, and a second try often works.
 2. **Reset into Web CLI mode.** Press reset without holding the button, then
