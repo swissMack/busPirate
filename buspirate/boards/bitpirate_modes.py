@@ -131,23 +131,27 @@ WIFI = CliMode(
     commands=(
         CliCommand("scan", "Scan for networks", "scan", timeout=15.0),
         CliCommand("status", "Status", "status"),
-        # handleConnect splits at the last space: the SSID may hold spaces,
-        # the password may not.
-        CliCommand("connect", "Connect", "connect {ssid} {password}", (
-            CliParam("ssid", "text", "Network (SSID)"),
+        # One Connect, two lines. The saved network: handleConnect with no
+        # arguments asks "Use saved credentials for X?", whose default is
+        # yes; with nothing saved it scans and shows a menu, and Exit leaves
+        # it without joining anything. A new network: handleConnect splits at
+        # the last space, so the SSID may hold spaces and the password not;
+        # the board saves it for next time.
+        CliCommand("connect", "Connect", "connect", (
+            CliParam("network", "enum", "Network", default="saved", choices=[
+                {"value": "saved", "label": "The saved network"},
+                {"value": "new", "label": "A new network"},
+            ]),
+            CliParam("ssid", "text", "Network (SSID)", shown_when=("network", "new")),
             CliParam("password", "text", "Password", help="No spaces", spaces=False,
-                     secret=True),
-        ), timeout=25.0, help="The board remembers it for next time"),
-        # handleConnect with no network: "Use saved credentials for X?" takes
-        # its default, yes. With nothing saved it scans and shows a menu;
-        # Exit leaves it without joining anything.
-        CliCommand("connect_saved", "Connect to the saved network", "connect",
-                   timeout=25.0, picks=("Exit",),
-                   explains=(("Exiting network selection",
-                              "No network is saved on the board yet. Use Connect "
-                              "below with its name and password once; the board "
-                              "remembers it."),),
-                   help="The network the board joined last time, no typing"),
+                     secret=True, shown_when=("network", "new")),
+        ), timeout=25.0, choose_by="network",
+            lines=(("saved", "connect"), ("new", "connect {ssid} {password}")),
+            picks=("Exit",),
+            explains=(("Exiting network selection",
+                       "No network is saved on the board yet. Choose A new network "
+                       "and give its name and password once; the board remembers it."),),
+            help="The saved network is the one the board joined last time"),
         CliCommand("disconnect", "Disconnect", "disconnect"),
         CliCommand("ping", "Ping a host", "ping {host}", (
             CliParam("host", "text", "Host", default="8.8.8.8", spaces=False),
