@@ -8,14 +8,19 @@ on:
 jobs:
   python-tests:
     name: "Python tests (py${{ matrix.python-version }})"
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         # requires-python in pyproject.toml is ">=3.8"; test the declared
         # floor alongside a current release so a claim nothing verifies
-        # actually gets checked.
-        python-version: ["3.8", "3.13"]
+        # actually gets checked. ubuntu-latest (26.04) has no Python 3.8 to
+        # set up, so the floor runs on the newest image that still has it.
+        include:
+          - python-version: "3.8"
+            os: ubuntu-22.04
+          - python-version: "3.13"
+            os: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -69,6 +74,10 @@ jobs:
         run: npm install
 
       - name: Start the dashboard server (demo mode)
+        # As `make ui-test` starts it: the simulated Bit Pirate has no Wi-Fi
+        # in reach, which one check relies on.
+        env:
+          BUSPIRATE_SIM_WIFI: none
         run: |
           nohup python -m buspirate dashboard --demo --no-browser > server.log 2>&1 &
           echo $! > server.pid
