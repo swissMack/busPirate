@@ -23,9 +23,9 @@ import contextlib
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
-from ..exceptions import BusPirateError, ModeError
+from ..exceptions import BusPirateError, ModeError, PortGoneError
 
 #: The firmware ignores keys past this many on one line.
 MAX_LINE = 512
@@ -180,6 +180,46 @@ class CliTransport:
         if lines and lines[0].endswith(line):
             lines.pop(0)  # the echo of what was typed
         return Reply(lines=lines, mode=self.mode, questions=questions)
+
+    def command_until_gone(self, line: str, timeout: Optional[float] = None) -> Tuple[List[str], bool]:
+        """Run a line that may restart the board; return what it said and whether it went.
+
+        ``webui start`` restarts the board, which takes its USB port away
+        part way through: what it printed first is still wanted, so a port
+        that disappears ends the reply here instead of failing it. A prompt
+        means the board stayed (it refused, or its firmware has no such
+        command); so does silence, which is left to the caller to judge
+        from the words.
+        """
+        self.link.flush_input()
+        self.link.write((line + "\r").encode("ascii"))
+        buffer = bytearray()
+        deadline = time.monotonic() + (timeout or self.timeout)
+        gone = False
+        try:
+            while True:
+                with self._alive():
+                    chunk = self.link.serial.read(256)
+                if chunk:
+                    buffer += chunk
+                    self.link._notify("rx", bytes(chunk))
+                    deadline = time.monotonic() + (timeout or self.timeout)
+                    continue
+                lines = screen_lines(buffer.decode("utf-8", "replace"))
+                if len(lines) > 1 and _PROMPT.match(lines[-1]):
+                    self.mode = _PROMPT.match(lines.pop()).group(1)
+                    break
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.002)
+        except PortGoneError:
+            gone = True
+        lines = screen_lines(buffer.decode("utf-8", "replace"))
+        if lines and _PROMPT.match(lines[-1]):
+            lines.pop()
+        if lines and lines[0].endswith(line):
+            lines.pop(0)  # the echo of what was typed
+        return lines, gone
 
     def enter_mode(self, name: str, answers: Optional[Dict[str, str]] = None) -> Reply:
         """``m <name>``, answering the questions a first entry asks."""

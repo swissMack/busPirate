@@ -107,6 +107,12 @@ Apply it after the mode-LED patch, before `pio run`:
 git apply /path/to/busPirate/firmware/bitpirate-1.8-dock-pins.patch
 ```
 
+`firmware/bitpirate-1.8-webui-start.patch` adds the Wi-Fi command
+`webui start`, which the app's **Switch to Web CLI** button uses: it saves a
+one-shot flag and restarts, and the next boot goes straight to WiFi Connect
+without the button. It suits every board, Dock or not; apply it the same way
+(`git am` keeps its commit message).
+
 To keep the Wi-Fi network the board has saved, flash only the app
 (`$B/firmware.bin` at `0x10000`) rather than the merged image: the merged
 image also blanks the settings area at `0x9000`.
@@ -208,9 +214,15 @@ Web CLI this app cannot drive the board.
    default) joins it again with no typing.
    If a connect says "Connection failed", try once more: the firmware gives
    no reason, and a second try often works.
-2. **Reset into Web CLI mode.** Press reset without holding the button, then
-   within 3 seconds **short-press** it to join your Wi-Fi, or **hold** it for
-   the board's own hotspot.
+2. **Switch to Web CLI mode.** In **Wi-Fi**, press **Switch to Web CLI**.
+   The board restarts on the saved network, the app lets go of USB, and
+   once the board's page answers (about 15 seconds) the top of the app shows
+   **Web CLI: http://…** as a link. This needs the firmware with
+   `webui start` (`firmware/bitpirate-1.8-webui-start.patch`, built into the
+   app's firmware release); on other firmware the app says so.
+   Without it, or for the hotspot: press reset without holding the button,
+   then within 3 seconds **short-press** it to join your Wi-Fi, or **hold**
+   it for the board's own hotspot.
 3. **Watch the LED:** white is connecting, green is ready, blue means no
    Wi-Fi is saved, red means it failed.
 4. **Open the address.** It's the one at the top of the app. While the
@@ -219,7 +231,8 @@ Web CLI this app cannot drive the board.
    hotspot it's always http://192.168.4.1. Give it about 10 seconds after
    the green LED: the board starts its web server before its page, and
    until then it answers "Nothing matches the given URI". Reload.
-5. **Back to this app:** reset without pressing the button.
+5. **Back to this app:** reset without pressing the button, then Connect.
+   Switch to Web CLI lasts one boot only, so a reset always comes back to USB.
 
 The app remembers that address across restarts, in `~/BusPirate/web-cli.json`,
 so it is still there the next time you open it. The address is the one your router gave the board last time. If the router

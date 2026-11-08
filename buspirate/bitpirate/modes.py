@@ -18,7 +18,7 @@ differ from a Bus Pirate's and are handled here, not left to the caller
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, Iterable, List, Optional
+from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Tuple
 
 from ..device import I2C_SPEEDS_MODERN, SPI_SPEEDS
 from ..exceptions import (
@@ -195,6 +195,12 @@ class _CliMode:
         if lines and lines[0].startswith("Usage:"):
             raise ModeError(f"the Bit Pirate said: {lines[0].strip()}")
         return lines
+
+    def run_restarting(self, line: str, timeout: float = 5.0) -> Tuple[List[str], bool]:
+        """Run a line that restarts the board: what it said, and whether it left USB."""
+        self._check_active()
+        said, gone = self.cli.command_until_gone(line, timeout=timeout)
+        return [text for text in said if text.strip()], gone
 
     def start_stream(self, line: str) -> None:
         """Start a command that runs until Enter and hand the port to a stream.

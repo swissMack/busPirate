@@ -67,8 +67,30 @@ def action_for(cmd: CliCommand, requires: Optional[str] = None) -> Action:
             for name in used(values)
         })
 
+    def explain(said: List[str]) -> None:
+        for phrase, message in cmd.explains:
+            if any(phrase in said_line for said_line in said):
+                raise ParamError(message)
+
+    def restart(ctx, line: str):
+        said, gone = ctx.mode.run_restarting(line, timeout=cmd.timeout)
+        ctx.session.note_reply(said)
+        explain(said)
+        if not any(cmd.restarts in said_line for said_line in said):
+            raise ParamError(cmd.refuses)
+        ready = ctx.session.left_for_web_cli()
+        info = ctx.session.web_cli or {}
+        if ready:
+            said.append(f"The Web CLI is ready at http://{info['ip']}")
+        elif info.get("ip"):
+            said.append(f"The Web CLI did not answer at http://{info['ip']} yet. "
+                        "Wait a little, then open it; reset the board to come back to USB.")
+        return lines(said, caption=f"The board's reply to '{line}'")
+
     def handler(ctx, **values):
         line, shown = words(values), words(values, mask=True)
+        if cmd.restarts:
+            return restart(ctx, line)
         if cmd.streams:
             ctx.mode.start_stream(line)
             return live(cmd.label, decoder="console",
@@ -79,9 +101,7 @@ def action_for(cmd: CliCommand, requires: Optional[str] = None) -> Action:
                 said = ctx.mode.run(line, timeout=cmd.timeout, shown=shown,
                                     picks=list(cmd.picks) or None)
             ctx.session.note_reply(said)
-            for phrase, message in cmd.explains:
-                if any(phrase in said_line for said_line in said):
-                    raise ParamError(message)
+            explain(said)
         finally:
             # Even a stopped command may have changed them (autobaud leaves
             # the UART at the last rate it tried).
