@@ -1,7 +1,7 @@
 import pytest
 
 from buspirate.boards.bp6 import BP6_CABLE, BP6_HEADER
-from buspirate.mcp.wiring import cable_colour, wiring_steps
+from buspirate.mcp.wiring import JOBS, cable_colour, job_notes, wiring_steps
 
 
 def test_v3_i2c_uses_seeed_colours():
@@ -52,3 +52,24 @@ def test_bp6_vout_note_names_the_mcp_power_step_not_the_dashboard():
         vout = [s for s in wiring_steps("bp6", job) if s.pin == "VOUT"][0]
         assert "Power & pull-ups" not in vout.note
         assert "power_plan" in vout.note
+
+
+DASHBOARD_WORDS = ("panel", "dashboard", "Power & pull-ups", "cable legend", "click", "tick")
+
+
+@pytest.mark.parametrize("variant", ["v3", "v4", "bp6", "bitpirate"])
+def test_job_notes_speak_mcp_not_dashboard(variant):
+    for job in JOBS:
+        for note in job_notes(variant, job):
+            assert not any(w.lower() in note.lower() for w in DASHBOARD_WORDS), (variant, job, note)
+
+
+@pytest.mark.parametrize("variant", ["bp6", "bitpirate"])
+def test_v3_cable_note_never_reaches_other_boards(variant):
+    for job in JOBS:
+        assert not any("Seeed/Adafruit" in n for n in job_notes(variant, job)), job
+
+
+def test_v3_keeps_its_cable_warning_and_bp6_its_pullup_note():
+    assert any("Seeed/Adafruit" in n for n in job_notes("v3", "i2c"))
+    assert any("power_plan" in n and "pull-up" in n for n in job_notes("bp6", "i2c"))

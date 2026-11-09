@@ -7,6 +7,7 @@ the driver asks; it is not a firmware emulator.
 
 from __future__ import annotations
 
+import struct
 import time
 
 import flatbuffers
@@ -133,6 +134,11 @@ class FakeBp6:
         self.requests = []
         device = bytearray(256)
         device[0xD0] = 0x58
+        # The Bosch BMP280 datasheet's worked example (§8.1): these calibration
+        # words and raw readings compensate to 25.08 °C and 1006.53 hPa.
+        device[0x88:0xA0] = struct.pack("<HhhHhhhhhhhh", 27504, 26435, -1000, 36477, -10685,
+                                        3024, 2855, 140, -7, 15500, -14600, 6000)
+        device[0xF7:0xFD] = bytes((0x65, 0x5A, 0xC0, 0x7E, 0xED, 0x00))
         self.i2c_devices = {0x76: device}
         self._pointer = {0x76: 0}
         self.flash = FakeFlash()
