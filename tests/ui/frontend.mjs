@@ -849,6 +849,21 @@ window.renderWebCli({ connected: true, variant: "bitpirate",
 check("on USB the address is plain text, to use after a reset",
   !$("webcli").querySelector("a") && /after a reset: 192\.168\.1\.77/.test($("webcli").textContent),
   $("webcli").innerHTML);
+// Switch to Web CLI has restarted the board into it: no USB, page answering.
+window.renderWebCli({ connected: false,
+  web_cli: { ip: "192.168.1.77", on_wifi: false, simulated: false, serving: true } });
+check("once the board serves its Web CLI, the address is a live link",
+  /^Web CLI: /.test($("webcli").textContent) && !/last seen/.test($("webcli").textContent)
+    && $("webcli").querySelector("a")?.href === "http://192.168.1.77/",
+  $("webcli").textContent);
+check("and says how to come back to USB", /Reset the board/.test($("webcli").title), $("webcli").title);
+{
+  const live = await (await fetch(`${BASE}/api/state`)).json();
+  const wifi = live.panels.find((p) => p.id === "wifi");
+  check("the Wi-Fi panel has a Switch to Web CLI button",
+    !!wifi?.actions.find((a) => a.name === "web_cli" && a.label === "Switch to Web CLI"),
+    JSON.stringify(wifi?.actions.map((a) => a.label)));
+}
 // The app remembers the address, not the page: the app's window keeps no
 // browser storage, so a copy here would differ between the app and a browser.
 window.renderWebCli({ connected: true, variant: "bitpirate", web_cli: null });

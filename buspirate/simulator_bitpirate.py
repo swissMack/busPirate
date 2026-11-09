@@ -156,6 +156,9 @@ class FakeBitPirateSerial(ModesMixin):
         return len(data)
 
     def read(self, count: int = 1) -> bytes:
+        if self._state == "gone" and not self._out:
+            # Restarted into its Web CLI: the USB port has gone with it.
+            raise OSError(6, "Device not configured")
         chunk = bytes(self._out[:count])
         del self._out[:count]
         return chunk
@@ -188,6 +191,8 @@ class FakeBitPirateSerial(ModesMixin):
         self._emit(f"{self.mode}> ")
 
     def _key(self, char: str) -> None:
+        if self._state == "gone":
+            return
         if self._state == "boot":
             # Any key at all starts it, even one that is not printable.
             self._emit(BANNER)

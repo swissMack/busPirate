@@ -14,18 +14,20 @@ dependencies = ["pyserial>=3.4", "flatbuffers>=25.2.10"]
 web = ["fastapi>=0.100", "uvicorn>=0.23", "websockets>=11"]
 dev = ["pytest>=7", "fastapi>=0.100", "uvicorn>=0.23", "websockets>=11", "httpx>=0.24", "Pillow>=10"]
 app = ["pywebview>=5"]
+mcp = ["mcp>=2.3,<3; python_version >= '3.10'"]
 
 [project.scripts]
 buspirate = "buspirate.cli:main"
 
 [tool.setuptools]
-packages = ["buspirate", "buspirate.bitpirate", "buspirate.boards", "buspirate.bp6", "buspirate.bp6.bpio", "buspirate.devices", "buspirate.web", "buspirate.web.panels"]
+packages = ["buspirate", "buspirate.bitpirate", "buspirate.boards", "buspirate.bp6", "buspirate.bp6.bpio", "buspirate.devices", "buspirate.mcp", "buspirate.web", "buspirate.web.panels"]
 
 [tool.setuptools.dynamic]
 version = {attr = "buspirate.__version__"}
 
 [tool.setuptools.package-data]
 "buspirate.web" = ["static/*"]
+"buspirate.mcp" = ["notes/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -152,6 +152,20 @@ WIFI = CliMode(
                        "No network is saved on the board yet. Choose A new network "
                        "and give its name and password once; the board remembers it."),),
             help="The saved network is the one the board joined last time"),
+        # handleWebUiStart, firmware/bitpirate-1.8-webui-start.patch: saves a
+        # one-shot flag and restarts; the next boot is WiFi Connect with no
+        # button press, and any reset after it is back to USB. Released
+        # v1.8 has no "start" and prints handleWebUi's instructions instead.
+        CliCommand("web_cli", "Switch to Web CLI", "webui start", timeout=5.0,
+            restarts="Restarting into WiFi Connect",
+            refuses=("This board's firmware cannot switch to the Web CLI by itself. "
+                     "Flash the Bit Pirate firmware from this app's GitHub releases, "
+                     "or reset the board and short-press its button within 3 seconds."),
+            explains=(("No network saved yet",
+                       "No network is saved on the board yet. Use Connect with "
+                       "A new network first; the board remembers it."),),
+            help="Restarts the board into its browser terminal on the saved network. "
+                 "Reset it to come back to USB."),
         CliCommand("disconnect", "Disconnect", "disconnect"),
         CliCommand("ping", "Ping a host", "ping {host}", (
             CliParam("host", "text", "Host", default="8.8.8.8", spaces=False),

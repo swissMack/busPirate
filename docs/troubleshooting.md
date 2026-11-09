@@ -384,3 +384,15 @@ Found on the real board, 2026-10-14 (firmware built 2026-10-12):
 - **Plugging the board in or out shows "Disk Not Ejected Properly"** on a
   Mac: that is the BP6's own storage drive. Eject it in Finder first to
   avoid the message; the app does not use it.
+
+## MCP server, stage 1
+
+Not yet run on real hardware; tick each box when it has been. See
+[MCP server](mcp.md).
+
+- [ ] `claude mcp add buspirate -- .venv/bin/python -m buspirate mcp`, then `/mcp` shows it connected. `connect` (or the start-up auto-connect) opens the board.
+- [ ] The tool list is gated: the tools listed match what `board_status` says the board can do (the simulated BP6 lists no `pwm`, `frequency` or `pins_read_voltage`); before `connect`, only `find_boards`, `connect` and the `knowledge_*` tools.
+- [ ] **BP6:** `power_plan` 3300 mV from the owner returns a token; `power_apply` switches the supply on (check the LED and `board_status`). A plan at 5000 mV, or with no limit, asks for a second yes.
+- [ ] **v4:** `wiring` for I2C says to use the 3.3 V wire (not 5 V) and names its colour; no software voltage choice exists.
+- [ ] I2C scan with a BMP280 on the bus: `i2c_scan` lists 0x76 with its chip label, and `i2c_sensor` gives °C and hPa.
+- [ ] Unplug the board in the middle of a scan: the tool says the board disconnected and to plug it back in; after replugging, `connect` works with no restart.

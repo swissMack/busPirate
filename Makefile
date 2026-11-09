@@ -6,7 +6,7 @@ PY := $(VENV)/bin/python
 # dashboard lives.
 UI_PORT := 8799
 
-.PHONY: help setup dash demo test ui-test ports clean
+.PHONY: help setup dash demo mcp-demo test ui-test ports clean
 
 help:  ## show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -24,6 +24,10 @@ dash: $(PY)  ## open the dashboard against a real Bus Pirate
 
 demo: $(PY)  ## open the dashboard against a simulated device (no hardware)
 	$(PY) -m buspirate dashboard --demo
+
+VARIANT := v3
+mcp-demo:  ## the MCP server against a simulated board (VARIANT=v3|v4|bitpirate|bp6)
+	uv run --isolated --python 3.13 --with-editable '.[mcp]' python -m buspirate mcp --demo --variant $(VARIANT)
 
 test: $(PY)  ## run the test suite
 	$(PY) -m pytest -q

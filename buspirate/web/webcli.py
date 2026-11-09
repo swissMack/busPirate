@@ -14,8 +14,9 @@ import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional
 
 log = logging.getLogger(__name__)
 
@@ -70,3 +71,39 @@ def save_last(ip: str, seen: float) -> None:
 def reply_drops_wifi(lines: Iterable[str]) -> bool:
     """The reply says the board has left (or failed to join) Wi-Fi."""
     return any(line.strip() in _DROPS for line in lines)
+
+
+#: What the board's web server answers before its routes exist: it starts
+#: listening about 7 s before it sets them up (main.cpp, delay(7000)).
+_NOT_YET = "Nothing matches the given URI"
+
+
+def page_is_ready(status: int, body: str) -> bool:
+    """The Web CLI's page itself, not the server's answer while it starts."""
+    return status == 200 and _NOT_YET not in body
+
+
+def _probe(ip: str) -> bool:
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://{ip}/", timeout=2) as response:
+            return page_is_ready(response.status, response.read(4096).decode("utf-8", "replace"))
+    except urllib.error.HTTPError as exc:
+        return page_is_ready(exc.code, "")
+    except (OSError, ValueError):
+        return False
+
+
+def wait_until_serving(ip: str, timeout: float = 30.0, interval: float = 1.0,
+                       probe: Optional[Callable[[str], bool]] = None) -> bool:
+    """Wait for a restarted board's Web CLI page; False if it never came."""
+    probe = probe or _probe
+    deadline = time.monotonic() + timeout
+    while True:
+        if probe(ip):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)

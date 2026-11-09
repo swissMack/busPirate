@@ -60,6 +60,11 @@ class CliCommand:
     #: ``lines`` ((value, line), ...); ``line`` is used for any other value.
     choose_by: str = ""
     lines: Tuple[Tuple[str, str], ...] = ()
+    #: The words the board says as it restarts into its Web CLI. Set, the
+    #: command restarts the board: the app lets go of the port and waits for
+    #: the page; a reply without them means the firmware cannot (``refuses``).
+    restarts: str = ""
+    refuses: str = ""
 
 
 @dataclass(frozen=True)

@@ -64,8 +64,10 @@ def _web_cli(client):
 
 
 def _without_seen(info):
+    """The address record minus its timestamp; on USB it is never serving."""
     assert info["seen"] > 0
-    return {k: v for k, v in info.items() if k != "seen"}
+    assert info["serving"] is False  # only Switch to Web CLI sets it (test_webui_start.py)
+    return {k: v for k, v in info.items() if k not in ("seen", "serving")}
 
 
 def test_no_address_until_the_board_has_joined_wifi(client):

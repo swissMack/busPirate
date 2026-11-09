@@ -80,6 +80,8 @@ class ModesMixin:
         self.wifi_connected: Optional[str] = None
         #: What handleConnect saved to NVS: the last network joined.
         self.wifi_saved: Optional[str] = None
+        #: Firmware with "webui start" (the app's patch); False is v1.8 as released.
+        self.webui_start = True
         self._wifi_choices: List[str] = []
         self.bluetooth_devices = (
             list(bluetooth_devices) if bluetooth_devices is not None else list(BLUETOOTH_DEVICES)
@@ -316,6 +318,10 @@ class ModesMixin:
             ssid = full[:pos]
             self._println(f"WiFi: Connecting to {ssid}...")
             self._wifi_join(ssid)
+        elif root == "webui" and rest == "start" and self.webui_start:
+            self._wifi_webui_start()
+        elif root == "webui":
+            self._wifi_web_ui()
         elif root == "disconnect":
             self.wifi_connected = None
             self._println("WiFi: Disconnected.")
@@ -402,6 +408,17 @@ class ModesMixin:
                      "     • Red   = Connection failed, try connect again with serial", "",
                      "WiFi Web UI: http://192.168.1.77 (reset and select WiFi Connect)"):
             self._println(line)
+
+    def _wifi_webui_start(self) -> None:
+        """handleWebUiStart: with a network saved, say so and restart (leave USB)."""
+        if not self.wifi_saved:
+            self._println("WiFi Web UI: No network saved yet. Use connect first.")
+            return
+        self._println(f"WiFi Web UI: Restarting into WiFi Connect on {self.wifi_saved}...")
+        if self.wifi_connected:
+            self._println("WiFi Web UI: http://192.168.1.77 in about 10 seconds")
+        self._println("WiFi Web UI: Reset the board to come back to USB serial.")
+        self._state = "gone"
 
     def _wifi_status(self) -> None:
         net = next((n for n in self.wifi_networks if n[0] == self.wifi_connected), None)

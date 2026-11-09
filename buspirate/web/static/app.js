@@ -281,8 +281,9 @@ function renderUsb(usb) {
    board's address across restarts (buspirate.web.webcli), not this page:
    the app's window keeps no browser storage. */
 const WEB_CLI_HOW =
-  "The Bit Pirate's browser terminal. It runs instead of USB: reset the board, " +
-  "short-press its button within 3 seconds, wait for the green LED, then open this. " +
+  "The Bit Pirate's browser terminal. It runs instead of USB: use Switch to Web CLI " +
+  "in the Wi-Fi panel, or reset the board and short-press its button within 3 seconds, " +
+  "wait for the green LED, then open this. " +
   "Give it about 10 seconds: until then it answers \"Nothing matches the given URI\"; reload.";
 
 function renderWebCli(s) {
@@ -293,6 +294,12 @@ function renderWebCli(s) {
   box.hidden = !show;
   if (!show) return box.replaceChildren();
   const url = `http://${info.ip}`;
+  const link = el("a", { href: url, target: "_blank", rel: "noopener", text: url });
+  // Switch to Web CLI restarted the board into it and its page answered.
+  if (info.serving && !s.connected) {
+    box.title = "The Bit Pirate's browser terminal is running. Reset the board to come back to USB.";
+    return box.replaceChildren("Web CLI: ", link);
+  }
   const live = info.on_wifi && s.connected;
   const seen = info.seen ? ` (${new Date(info.seen).toLocaleString()})` : "";
   box.title = live ? WEB_CLI_HOW : `${WEB_CLI_HOW} Last seen over USB${seen}.`;
@@ -300,7 +307,7 @@ function renderWebCli(s) {
   // open an error page: plain text until the board has left USB.
   box.replaceChildren(...(live
     ? [`Web CLI after a reset: ${info.ip}`]
-    : ["Web CLI (last seen): ", el("a", { href: url, target: "_blank", rel: "noopener", text: url })]));
+    : ["Web CLI (last seen): ", link]));
 }
 
 function renderNav() {

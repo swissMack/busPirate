@@ -1,0 +1,310 @@
+From 0b03dedf2c721934fdd79e9cb6d49a2e7b59c045 Mon Sep 17 00:00:00 2001
+From: swissMack <tmackmood@gmail.com>
+Date: Sun, 8 Nov 2026 12:33:21 +0100
+Subject: [PATCH] Add "webui start": restart straight into the Web CLI
+
+Boards without a screen pick WiFi Connect with a button press in the
+first 3 seconds after reset. "webui start" (in Wi-Fi mode) saves a
+one-shot NVS flag and restarts; the next boot reads and clears it and
+goes straight to WiFi Connect. A later reset is back to the usual
+selection, so the board cannot get stuck in Web CLI mode. Needs saved
+credentials; if WiFi Connect fails, the existing fallback to USB serial
+applies.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/Controllers/WifiController.cpp       | 31 ++++++++++++++++
+ src/Controllers/WifiController.h         |  3 ++
+ src/Interfaces/INvsService.h             |  2 ++
+ src/Interfaces/IUtilityService.h         |  1 +
+ src/Services/NvsService.cpp              | 12 +++++++
+ src/Services/NvsService.h                |  2 ++
+ src/Services/UtilityService.cpp          |  4 +++
+ src/Services/UtilityService.h            |  1 +
+ src/Shells/HelpShell.cpp                 |  1 +
+ src/main.cpp                             |  8 +++--
+ test/Controllers/test_WifiController.cpp | 46 ++++++++++++++++++++++++
+ test/Services/FakeNvsService.h           |  3 ++
+ test/Services/FakeUtilityService.h       |  3 ++
+ 13 files changed, 115 insertions(+), 2 deletions(-)
+
+diff --git a/src/Controllers/WifiController.cpp b/src/Controllers/WifiController.cpp
+index ee382d1b..b9de747e 100644
+--- a/src/Controllers/WifiController.cpp
++++ b/src/Controllers/WifiController.cpp
+@@ -19,6 +19,7 @@ void WifiController::handleCommand(const TerminalCommand &cmd)
+     else if (root == "probe") handleProbe();
+     else if (root == "ping") handlePing(cmd);
+     else if (root == "sniff") handleSniff(cmd);
++    else if (root == "webui" && cmd.getSubcommand() == "start") handleWebUiStart();
+     else if (root == "webui") handleWebUi(cmd);
+     else if (root == "ssh") handleSsh(cmd);
+     else if (root == "telnet") handleTelnet(cmd);
+@@ -845,6 +846,36 @@ void WifiController::handleWebUi(const TerminalCommand &)
+     }
+ }
+ 
++/*
++Web Interface: restart into WiFi Connect for one boot
++*/
++void WifiController::handleWebUiStart()
++{
++    if (state.getTerminalMode() == TerminalTypeEnum::WiFiClient) {
++        terminalView.println("WiFi Web UI: Already running at http://" + wifiService.getLocalIP());
++        return;
++    }
++
++    nvsService.open();
++    std::string ssid = nvsService.getString(state.getNvsSsidField());
++    std::string password = nvsService.getString(state.getNvsPasswordField());
++    if (ssid.empty() || password.empty()) {
++        nvsService.close();
++        terminalView.println("WiFi Web UI: No network saved yet. Use connect first.");
++        return;
++    }
++    nvsService.saveOneShotWebCli();
++    nvsService.close();
++
++    terminalView.println("WiFi Web UI: Restarting into WiFi Connect on " + ssid + "...");
++    if (wifiService.isConnected()) {
++        terminalView.println("WiFi Web UI: http://" + wifiService.getLocalIP() + " in about 10 seconds");
++    }
++    terminalView.println("WiFi Web UI: Reset the board to come back to USB serial.");
++    utilityService.sleepMs(300); // let the lines reach the host
++    utilityService.restart();
++}
++
+ /*
+ Config
+ */
+diff --git a/src/Controllers/WifiController.h b/src/Controllers/WifiController.h
+index 16abbdb9..3a538d88 100644
+--- a/src/Controllers/WifiController.h
++++ b/src/Controllers/WifiController.h
+@@ -59,6 +59,9 @@ private:
+     // Show WebUI IP
+     void handleWebUi(const TerminalCommand& cmd);
+ 
++    // Restart straight into the Web CLI (WiFi Connect), no button press
++    void handleWebUiStart();
++
+     // Spoof Mac addr
+     void handleSpoof(const TerminalCommand& cmd);
+ 
+diff --git a/src/Interfaces/INvsService.h b/src/Interfaces/INvsService.h
+index cd484e60..0a03b5f8 100644
+--- a/src/Interfaces/INvsService.h
++++ b/src/Interfaces/INvsService.h
+@@ -7,6 +7,7 @@ public:
+     // Storage identifiers shared with early boot, before services exist.
+     static constexpr char NVS_NAMESPACE[] = "wifi_settings";
+     static constexpr char ONE_SHOT_BOOT_KEY[] = "oneshot_boot";
++    static constexpr char ONE_SHOT_WEBCLI_KEY[] = "oneshot_webcli";
+ 
+     virtual ~INvsService() = default;
+ 
+@@ -14,4 +15,5 @@ public:
+     virtual void close() = 0;
+     virtual void saveString(const std::string& key, const std::string& value) = 0;
+     virtual std::string getString(const std::string& key, const std::string& defaultValue = "") = 0;
++    virtual void saveOneShotWebCli() = 0;
+ };
+diff --git a/src/Interfaces/IUtilityService.h b/src/Interfaces/IUtilityService.h
+index 42e658ce..b55deadd 100644
+--- a/src/Interfaces/IUtilityService.h
++++ b/src/Interfaces/IUtilityService.h
+@@ -12,4 +12,5 @@ public:
+     virtual void sleepUs(uint32_t durationUs) const = 0;
+     virtual uint32_t randomUint32() const = 0;
+     virtual int32_t randomRange(int32_t minInclusive, int32_t maxExclusive) const = 0;
++    virtual void restart() const = 0;
+ };
+diff --git a/src/Services/NvsService.cpp b/src/Services/NvsService.cpp
+index df510e94..95ec9b8e 100644
+--- a/src/Services/NvsService.cpp
++++ b/src/Services/NvsService.cpp
+@@ -68,6 +68,18 @@ OneShotBootMode NvsService::consumeOneShotBootMode() {
+     return mode;
+ }
+ 
++void NvsService::saveOneShotWebCli() {
++    preferences.putBool(ONE_SHOT_WEBCLI_KEY, true);
++}
++
++bool NvsService::consumeOneShotWebCli() {
++    bool requested = preferences.getBool(ONE_SHOT_WEBCLI_KEY, false);
++    if (requested) {
++        preferences.remove(ONE_SHOT_WEBCLI_KEY);
++    }
++    return requested;
++}
++
+ void NvsService::saveOneShotUsbUartBridgeConfig(uint8_t rxPin, uint8_t txPin, bool inverted) {
+     preferences.putUChar("oneshot_uart_rx", rxPin);
+     preferences.putUChar("oneshot_uart_tx", txPin);
+diff --git a/src/Services/NvsService.h b/src/Services/NvsService.h
+index 38af78ae..81158f2d 100644
+--- a/src/Services/NvsService.h
++++ b/src/Services/NvsService.h
+@@ -37,6 +37,8 @@ public:
+     OneShotBootMode getOneShotBootMode();
+     void clearOneShotBootMode();
+     OneShotBootMode consumeOneShotBootMode();
++    void saveOneShotWebCli() override;
++    bool consumeOneShotWebCli();
+     void saveOneShotUsbUartBridgeConfig(uint8_t rxPin, uint8_t txPin, bool inverted);
+     void getOneShotUsbUartBridgeConfig(uint8_t defaultRxPin, uint8_t defaultTxPin, bool defaultInverted, uint8_t& rxPin, uint8_t& txPin, bool& inverted);
+     void clearOneShotUsbUartBridgeConfig();
+diff --git a/src/Services/UtilityService.cpp b/src/Services/UtilityService.cpp
+index b41af608..fa982f78 100644
+--- a/src/Services/UtilityService.cpp
++++ b/src/Services/UtilityService.cpp
+@@ -11,6 +11,10 @@ uint32_t UtilityService::nowUs() const {
+     return ::micros();
+ }
+ 
++void UtilityService::restart() const {
++    esp_restart();
++}
++
+ void UtilityService::sleepMs(uint32_t durationMs) const {
+     ::delay(durationMs);
+ }
+diff --git a/src/Services/UtilityService.h b/src/Services/UtilityService.h
+index 65e1368c..c664d40b 100644
+--- a/src/Services/UtilityService.h
++++ b/src/Services/UtilityService.h
+@@ -10,4 +10,5 @@ public:
+     void sleepUs(uint32_t durationUs) const override;
+     uint32_t randomUint32() const override;
+     int32_t randomRange(int32_t minInclusive, int32_t maxExclusive) const override;
++    void restart() const override;
+ };
+diff --git a/src/Shells/HelpShell.cpp b/src/Shells/HelpShell.cpp
+index a4fff3c6..ae6f3007 100644
+--- a/src/Shells/HelpShell.cpp
++++ b/src/Shells/HelpShell.cpp
+@@ -360,6 +360,7 @@ void HelpShell::cmdWifi() {
+         "http analyze <url>   - Get analysis report",
+         "lookup mac|ip <addr> - Lookup MAC or IP address",
+         "webui                - Show the web UI IP",
++        "webui start          - Restart into the web UI",
+         "reset                - Reset interface"
+     };
+     printLines(lines, (int)(sizeof(lines) / sizeof(lines[0])));
+diff --git a/src/main.cpp b/src/main.cpp
+index 12c997fd..4d41065e 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -177,10 +177,14 @@ void setup() {
+     UtilityService utilityService;
+     GlobalState& state = GlobalState::getInstance();
+ 
+-    // Select the terminal type
++    // Select the terminal type: WiFi Connect if "webui start" asked for it
++    // (one boot only), otherwise the usual selection
+     HorizontalSelector selector(deviceView, deviceInput, utilityService);
+     TerminalTypeConfigurator configurator(selector);
+-    TerminalTypeEnum terminalType = configurator.configure();
++    bootNvsService.open();
++    TerminalTypeEnum terminalType = bootNvsService.consumeOneShotWebCli()
++        ? TerminalTypeEnum::WiFiClient
++        : configurator.configure();
+     std::string webIp = "0.0.0.0";
+ 
+     // Configure Wi-Fi if needed
+diff --git a/test/Controllers/test_WifiController.cpp b/test/Controllers/test_WifiController.cpp
+index e6ec611f..be5e95da 100644
+--- a/test/Controllers/test_WifiController.cpp
++++ b/test/Controllers/test_WifiController.cpp
+@@ -349,6 +349,49 @@ void test_webui_reports_serial_warning_and_network_ip_when_connected() {
+     TEST_ASSERT_TRUE(fixture.view.contains("Reset the device"));
+ }
+ 
++void saveCredentials(WifiFixture& fixture) {
++    auto& state = GlobalState::getInstance();
++    fixture.nvs.values[state.getNvsSsidField()] = "LabNet";
++    fixture.nvs.values[state.getNvsPasswordField()] = "secret";
++}
++
++void test_webui_start_with_saved_network_restarts_into_web_cli() {
++    WifiFixture fixture;
++    GlobalState::getInstance().setTerminalMode(TerminalTypeEnum::SerialPort);
++    saveCredentials(fixture);
++    fixture.wifi.connected = true;
++    fixture.wifi.localIp = "192.168.1.80";
++
++    fixture.controller.handleCommand(TerminalCommand("webui", "start", ""));
++
++    TEST_ASSERT_TRUE(fixture.nvs.oneShotWebCli);
++    TEST_ASSERT_EQUAL_UINT32(1, fixture.utility.restartCalls);
++    TEST_ASSERT_TRUE(fixture.view.contains("Restarting into WiFi Connect on LabNet"));
++    TEST_ASSERT_TRUE(fixture.view.contains("http://192.168.1.80"));
++}
++
++void test_webui_start_without_saved_network_does_not_restart() {
++    WifiFixture fixture;
++    GlobalState::getInstance().setTerminalMode(TerminalTypeEnum::SerialPort);
++
++    fixture.controller.handleCommand(TerminalCommand("webui", "start", ""));
++
++    TEST_ASSERT_FALSE(fixture.nvs.oneShotWebCli);
++    TEST_ASSERT_EQUAL_UINT32(0, fixture.utility.restartCalls);
++    TEST_ASSERT_TRUE(fixture.view.contains("No network saved yet"));
++}
++
++void test_webui_without_start_does_not_restart() {
++    WifiFixture fixture;
++    GlobalState::getInstance().setTerminalMode(TerminalTypeEnum::SerialPort);
++    saveCredentials(fixture);
++
++    fixture.controller.handleCommand(TerminalCommand("webui"));
++
++    TEST_ASSERT_FALSE(fixture.nvs.oneShotWebCli);
++    TEST_ASSERT_EQUAL_UINT32(0, fixture.utility.restartCalls);
++}
++
+ void test_waterfall_draws_one_sample_then_stops() {
+     WifiFixture fixture;
+     fixture.terminalInput.queueReadChar(KEY_NONE);
+@@ -401,6 +444,9 @@ void runWifiControllerTests() {
+     RUN_TEST(test_repeater_starts_from_saved_station_credentials);
+     RUN_TEST(test_deauth_preserves_spaced_ssid_target);
+     RUN_TEST(test_webui_reports_serial_warning_and_network_ip_when_connected);
++    RUN_TEST(test_webui_start_with_saved_network_restarts_into_web_cli);
++    RUN_TEST(test_webui_start_without_saved_network_does_not_restart);
++    RUN_TEST(test_webui_without_start_does_not_restart);
+     RUN_TEST(test_waterfall_draws_one_sample_then_stops);
+     RUN_TEST(test_reset_delegates_to_service);
+ }
+diff --git a/test/Services/FakeNvsService.h b/test/Services/FakeNvsService.h
+index 7cc0798a..f234cd73 100644
+--- a/test/Services/FakeNvsService.h
++++ b/test/Services/FakeNvsService.h
+@@ -12,6 +12,9 @@ public:
+     std::vector<std::pair<std::string, std::string>> savedStrings;
+     uint32_t openCalls = 0;
+     uint32_t closeCalls = 0;
++    bool oneShotWebCli = false;
++
++    void saveOneShotWebCli() override { oneShotWebCli = true; }
+ 
+     void open() override { ++openCalls; }
+     void close() override { ++closeCalls; }
+diff --git a/test/Services/FakeUtilityService.h b/test/Services/FakeUtilityService.h
+index ac449a33..5c1a0a9e 100644
+--- a/test/Services/FakeUtilityService.h
++++ b/test/Services/FakeUtilityService.h
+@@ -16,6 +16,9 @@ public:
+     bool advanceTimeOnSleep = false;
+     uint32_t randomValue = 0;
+     int32_t randomRangeValue = 0;
++    mutable uint32_t restartCalls = 0;
++
++    void restart() const override { ++restartCalls; }
+ 
+     uint32_t nowMs() const override {
+         if (!nowMsValues.empty()) {
+-- 
+2.54.0 (Apple Git-157)
+

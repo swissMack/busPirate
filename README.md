@@ -103,6 +103,7 @@ device back to its terminal, so an interrupted script never strands it.
 | [Bus Pirate v4](docs/bus-pirate-v4.md) | what differs from a v3 |
 | [ESP32 Bit Pirate](docs/bitpirate.md) | the third board: what it can and cannot do |
 | [Bus Pirate 6](docs/bus-pirate-6.md) | the fourth board: ports, power, firmware updates, what differs |
+| [MCP server](docs/mcp.md) | let an AI assistant drive the board, with power gated on your say-so |
 | [Troubleshooting](docs/troubleshooting.md) | when it does not work |
 | [Protocol reference](docs/protocol-reference.md) | the binary command tables |
 | [Extending](docs/extending.md) | add a protocol, end to end |
