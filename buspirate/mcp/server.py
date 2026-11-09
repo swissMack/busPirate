@@ -13,11 +13,12 @@ import logging
 import weakref
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 
+import anyio
 from mcp.server.mcpserver import Context, MCPServer
 
 from .. import boards
 from ..exceptions import BusPirateError
-from . import knowledge
+from . import jobs, knowledge
 from .confirm import ConfirmError, ConfirmStore
 from .power import SOURCE_MEASURED, SOURCE_OWNER, PowerRefused, measure, plan_power, suggest_level
 from .session import BoardGone, BoardSession, NotConnected
@@ -39,6 +40,20 @@ BOARD_TOOLS: Dict[str, Tuple[FrozenSet[str], ...]] = {
     "power_apply": _ANY_BOARD,
     "power_off": _ANY_BOARD,
     "hiz": _ANY_BOARD,
+    # bus tools (buspirate.mcp.jobs)
+    "i2c_scan": _ANY_BOARD,
+    "i2c_read": _ANY_BOARD,
+    "i2c_sensor": _ANY_BOARD,
+    "spi_identify": _ANY_BOARD,
+    "spi_transfer": _ANY_BOARD,  # modes other than 0 need spi_modes, checked per call
+    "spi_sensor_read": _ANY_BOARD,
+    "uart_send": _ANY_BOARD,
+    "uart_listen": _ANY_BOARD,
+    "onewire_scan": (frozenset({"onewire"}),),
+    "pins_read_voltage": (frozenset({"adc"}),),
+    "pwm": (frozenset({"pwm"}),),
+    "pwm_off": (frozenset({"pwm"}),),
+    "frequency": (frozenset({"frequency_count"}),),
 }
 
 RECONNECT_HINT = "If new tools don't appear, run /mcp → reconnect buspirate."
@@ -112,8 +127,12 @@ def build_server(session: BoardSession) -> MCPServer:
     confirm = ConfirmStore()
     measured: Dict[str, Any] = {"board": None}  # the board measure_voltages last read
 
-    async def guard(ctx: Context, fn: Callable[[], Dict[str, Any]]) -> Dict[str, Any]:
+    async def guard(ctx: Context, fn: Callable[[], Dict[str, Any]],
+                    threaded: bool = False) -> Dict[str, Any]:
+        """Run ``fn`` (in a worker thread when ``threaded``) and turn errors into results."""
         try:
+            if threaded:
+                return await anyio.to_thread.run_sync(fn)
             return fn()
         except BoardGone:
             apply_gating(server, session)
@@ -121,7 +140,7 @@ def build_server(session: BoardSession) -> MCPServer:
             return {"error": BOARD_GONE}
         except NotConnected as exc:
             return {"error": str(exc)}
-        except BusPirateError as exc:
+        except (BusPirateError, ValueError) as exc:
             return {"error": str(exc)}
 
     # -- always listed --------------------------------------------------------
@@ -289,6 +308,57 @@ def build_server(session: BoardSession) -> MCPServer:
             return out
         return await guard(ctx, lambda: session.run(safe))
 
+    # -- bus tools: the serial I/O runs in a worker thread -----------------------
+
+    async def i2c_scan(ctx: Context, speed_khz: int = 100) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.i2c_scan(session, speed_khz), threaded=True)
+
+    async def i2c_read(ctx: Context, address: int, register: int,
+                       count: int = 1) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.i2c_read(session, address, register, count),
+                           threaded=True)
+
+    async def i2c_sensor(ctx: Context, address: int) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.i2c_sensor(session, address), threaded=True)
+
+    async def spi_identify(ctx: Context, mode: int = 0,
+                           speed_khz: int = 1000) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.spi_identify(session, mode, speed_khz),
+                           threaded=True)
+
+    async def spi_transfer(ctx: Context, write_hex: str, read_count: int, mode: int = 0,
+                           speed_khz: int = 1000) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.spi_transfer(session, write_hex, read_count,
+                                                          mode, speed_khz), threaded=True)
+
+    async def spi_sensor_read(ctx: Context, name: str) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.spi_sensor_read(session, name), threaded=True)
+
+    async def uart_send(ctx: Context, text: str, baud: int = 115200) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.uart_send(session, text, baud), threaded=True)
+
+    async def uart_listen(ctx: Context, seconds: float = 2.0,
+                          baud: int = 115200) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.uart_listen(session, seconds, baud),
+                           threaded=True)
+
+    async def onewire_scan(ctx: Context) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.onewire_scan(session), threaded=True)
+
+    async def pins_read_voltage(ctx: Context) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.pins_read_voltage(session), threaded=True)
+
+    async def pwm(ctx: Context, frequency_hz: float, duty: float) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.pwm(session, frequency_hz, duty), threaded=True)
+
+    async def pwm_off(ctx: Context) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.pwm_off(session), threaded=True)
+
+    async def frequency(ctx: Context) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.frequency(session), threaded=True)
+
+    unpowered = (" Never switches the target supply on: it is powered only after "
+                 "power_apply, and the result's `note` says when it is not.")
     ask_first = (" Only after the owner has said yes to the plan you showed them; ask "
                  "a second time, naming voltage and limit, when needs_extra_confirmation "
                  "is true.")
@@ -322,6 +392,36 @@ def build_server(session: BoardSession) -> MCPServer:
         "hiz": (hiz, "Put every pin in high impedance and the supply off where software "
                 "controls it. Use when done or "
                 "when anything looks wrong."),
+        "i2c_scan": (i2c_scan, "Find the I2C devices on the bus, each named and, where "
+                     "the app knows the chip, read in real units. Use first on an I2C "
+                     "job, after `wiring`. Runs at the fastest speed not above "
+                     "speed_khz." + unpowered),
+        "i2c_read": (i2c_read, "Read `count` bytes from one register of an I2C device "
+                     "(7-bit address 0x08-0x77, given as an integer) and explain them. "
+                     "Use for a chip or register i2c_scan did not read." + unpowered),
+        "i2c_sensor": (i2c_sensor, "Make the I2C sensor at a 7-bit address measure and "
+                       "return its values in real units." + unpowered),
+        "spi_identify": (spi_identify, "Read an SPI flash chip's JEDEC ID: maker, type "
+                         "and size. An all-ff or all-00 ID comes with a warning: it "
+                         "means wiring, not a blank chip." + unpowered),
+        "spi_transfer": (spi_transfer, "Write hex bytes over SPI with CS held low, then "
+                         "read `read_count` bytes. Use for chips no other tool knows. "
+                         "SPI modes other than 0 need a Bus Pirate (not the Bit "
+                         "Pirate)." + unpowered),
+        "spi_sensor_read": (spi_sensor_read, "Read an SPI sensor the app knows by name "
+                            "(e.g. MAX31855) in real units; an unknown name lists the "
+                            "known ones." + unpowered),
+        "uart_send": (uart_send, "Send text on the UART at `baud` (8N1)." + unpowered),
+        "uart_listen": (uart_listen, "Listen on the UART for `seconds` at `baud` (8N1) "
+                        "and return what arrived, as text and hex." + unpowered),
+        "onewire_scan": (onewire_scan, "Find the 1-Wire devices, name each by its ROM "
+                         "and read the ones the app knows (DS18B20 in °C)." + unpowered),
+        "pins_read_voltage": (pins_read_voltage, "Read the voltage on the ADC probe in "
+                              "millivolts." + unpowered),
+        "pwm": (pwm, "Put a PWM signal on AUX: frequency in Hz, duty as a fraction "
+                "0.0-1.0." + unpowered),
+        "pwm_off": (pwm_off, "Stop the PWM signal on AUX."),
+        "frequency": (frequency, "Measure the frequency on the AUX pin, in Hz." + unpowered),
     }
     _SESSIONS[server] = session
     _TOOLS[server] = tools

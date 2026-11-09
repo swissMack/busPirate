@@ -107,18 +107,24 @@ class BoardSession:
 
     # -- state ---------------------------------------------------------------
 
+    # Each reads the attribute once: a bus tool's worker thread may drop the
+    # board (and its power) between two reads.
+
     @property
     def variant(self) -> Optional[str]:
-        return self.board.profile.variant if self.board is not None else None
+        board = self.board
+        return board.profile.variant if board is not None else None
 
     @property
     def capabilities(self) -> FrozenSet[str]:
-        if self.board is None:
+        board = self.board
+        if board is None:
             return frozenset()
-        return frozenset(self.board.profile.capabilities)
+        return frozenset(board.profile.capabilities)
 
     def peripherals(self) -> Dict[str, bool]:
-        return {"power": self.power is not None, "pullups": bool(self.power and self.power.pullups)}
+        power = self.power
+        return {"power": power is not None, "pullups": bool(power and power.pullups)}
 
     # -- use -------------------------------------------------------------------
 

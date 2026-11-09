@@ -307,3 +307,72 @@ def test_hiz_bp6_has_no_owner_note():
     server = build_server(BoardSession(simulated="bp6"))
     call(server, "connect")
     assert "note" not in call(server, "hiz")
+
+
+# -- bus tools ----------------------------------------------------------------
+
+BUS_TOOLS = ("i2c_scan", "i2c_read", "i2c_sensor", "spi_identify", "spi_transfer",
+             "spi_sensor_read", "uart_send", "uart_listen")
+
+
+@pytest.mark.parametrize("variant", ["v3", "v4", "bp6", "bitpirate"])
+def test_bus_tools_gated_by_capability(variant):
+    server = build_server(BoardSession(simulated=variant))
+    call(server, "connect")
+    listed = names(server)
+    assert set(BUS_TOOLS) <= listed
+    assert ("onewire_scan" in listed) == (variant != "bitpirate")
+    for name in ("pwm", "pwm_off", "pins_read_voltage", "frequency"):
+        assert (name in listed) == (variant in ("v3", "v4"))
+
+
+def test_bus_tools_hidden_when_disconnected():
+    server = build_server(BoardSession(simulated="v3"))
+    assert not set(BUS_TOOLS) & names(server)
+
+
+def test_spi_transfer_other_mode_on_bitpirate_is_an_error():
+    server = build_server(BoardSession(simulated="bitpirate"))
+    call(server, "connect")
+    out = call(server, "spi_transfer", {"write_hex": "9f", "read_count": 3, "mode": 2})
+    assert "spi_modes" in out["error"]
+
+
+def test_i2c_scan_through_server_reports_power_note():
+    server = build_server(BoardSession(simulated="bp6"))
+    call(server, "connect")
+    out = call(server, "i2c_scan")
+    assert out["devices"][0]["address"] == "0x76"
+    assert out["power"] is False and "approve power" in out["note"]
+
+
+def test_bad_address_is_an_error_not_a_crash():
+    server = build_server(BoardSession(simulated="v3"))
+    call(server, "connect")
+    out = call(server, "i2c_read", {"address": 0xA0, "register": 0})
+    assert out == {"error": "that looks like an 8-bit address — use 0x50"}
+
+
+def test_power_applied_then_bus_tool_reports_powered():
+    session = BoardSession(simulated="bp6")
+    server = build_server(session)
+    call(server, "connect")
+    plan = call(server, "power_plan", {"millivolts": 3300, "voltage_source": "owner"})
+    call(server, "power_apply", {"token": plan["token"]})
+    out = call(server, "spi_identify")
+    assert out["power"] is True and "note" not in out
+    assert session.board.status().psu_enabled is True
+
+
+def test_board_gone_in_bus_tool_regates():
+    session = BoardSession(simulated="v3")
+    server = build_server(session)
+    call(server, "connect")
+
+    def gone(*a, **k):
+        raise OSError(6, "Device not configured")
+
+    session.board.serial.read = gone
+    out = call(server, "i2c_scan")
+    assert out == {"error": "board disconnected — plug it back in and call connect"}
+    assert names(server) == set(ALWAYS)
