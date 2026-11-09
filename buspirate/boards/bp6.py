@@ -13,6 +13,13 @@ from ._wiring import wire
 # scripts/draw_bp6_board.py from this same list. Pin map from the firmware's
 # src/pirate.h (M_I2C_SDA BIO0, M_SPI_CLK BIO6, M_UART_TX BIO4, ...).
 BP6_HEADER = ["VOUT", "IO0", "IO1", "IO2", "IO3", "IO4", "IO5", "IO6", "IO7", "GND"]
+#: The Bus Pirate 6 probe cable (and the Bit Pirate dock's, which follows it):
+#: header pin label -> wire colour.
+BP6_CABLE: Dict[str, str] = {
+    "VOUT": "red", "IO0": "orange", "IO1": "yellow", "IO2": "green",
+    "IO3": "blue", "IO4": "purple", "IO5": "brown", "IO6": "grey",
+    "IO7": "white", "GND": "black",
+}
 BP6_GEOMETRY = {"width": 700, "height": 525, "x": 350, "first_y": 110, "pitch": 34}
 
 
