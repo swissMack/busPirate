@@ -16,13 +16,26 @@ make setup                                # .venv with everything (3.10+)
 claude mcp add buspirate -- "$PWD/.venv/bin/python" -m buspirate mcp
 ```
 
+If `.venv` is older than 3.10, let `uv` supply the Python instead. This leaves
+`.venv` alone, and `--scope user` makes the server available in every folder:
+
+```bash
+claude mcp add --scope user buspirate -- \
+  uv run --isolated --python 3.13 --with-editable "${PWD}[mcp]" python -m buspirate mcp
+```
+
+Use the absolute path, as `${PWD}` gives you. Claude Code starts the server in
+whatever folder you are working in, so a relative `.` points somewhere else.
+In zsh, write `"${PWD}[mcp]"`, not `"$PWD[mcp]"`: zsh reads the second form as
+an array subscript and drops the path.
+
 With one board plugged in, the server opens it at start-up. With several, or
 none, the assistant calls `find_boards` and then `connect`. If new tools do not
 appear after connecting, run `/mcp` and reconnect `buspirate`.
 
 Try it with no hardware: `make mcp-demo VARIANT=bp6` (or `v3`, `v4`,
 `bitpirate`) serves a simulated board. Add it with
-`claude mcp add buspirate-demo -- uv run --isolated --python 3.13 --with-editable '.[mcp]' python -m buspirate mcp --demo --variant bp6`.
+`claude mcp add --scope user buspirate-demo -- uv run --isolated --python 3.13 --with-editable "${PWD}[mcp]" python -m buspirate mcp --demo --variant bp6`.
 
 ## Tools
 
