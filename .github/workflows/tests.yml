@@ -34,7 +34,14 @@ jobs:
 
       - name: Install buspirate with the dev extra
         # dev only - never app (pywebview + pyobjc, macOS-only, unneeded here).
-        run: pip install -e '.[dev]'
+        # The mcp extra needs Python 3.10+, so only the 3.13 job takes it; the
+        # 3.8 job skips the server tests and checks the core stays importable.
+        run: |
+          if [ "${{ matrix.python-version }}" = "3.13" ]; then
+            pip install -e '.[dev,mcp]'
+          else
+            pip install -e '.[dev]'
+          fi
 
       - name: Run Python test suite
         run: python -m pytest tests/ -q

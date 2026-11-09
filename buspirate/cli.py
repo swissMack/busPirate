@@ -83,6 +83,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     dash.add_argument("--no-browser", action="store_true", help="do not open a browser")
 
+    mcpcmd = sub.add_parser(
+        "mcp", help="serve the board to an AI assistant over MCP (stdio)"
+    )
+    mcpcmd.add_argument(
+        "--demo",
+        action="store_true",
+        help="run against a simulated board, with no hardware",
+    )
+    mcpcmd.add_argument(
+        "--variant",
+        default="v3",
+        choices=list(boards.REGISTRY),
+        help="which board the demo simulates (default: v3)",
+    )
+
     appcmd = sub.add_parser("app", help="open the dashboard in its own window")
     appcmd.add_argument(
         "--port-number",
@@ -207,6 +222,20 @@ def cmd_dashboard(args) -> int:
     return 0
 
 
+def cmd_mcp(args) -> int:
+    need = "the MCP server needs Python 3.10+ and: pip install 'buspirate[mcp]'"
+    if sys.version_info < (3, 10):
+        print(need, file=sys.stderr)
+        return 2
+    try:
+        from .mcp.server import run_stdio
+    except ImportError:
+        print(need, file=sys.stderr)
+        return 2
+    run_stdio(simulated=args.variant if args.demo else None)
+    return 0
+
+
 def cmd_app(args) -> int:
     from .web.window import run_window
 
@@ -237,6 +266,7 @@ def main(argv=None) -> int:
         "spi-id": cmd_spi_id,
         "dashboard": cmd_dashboard,
         "app": cmd_app,
+        "mcp": cmd_mcp,
     }
     try:
         return handlers[args.command](args)
