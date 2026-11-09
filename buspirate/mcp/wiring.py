@@ -60,6 +60,12 @@ def _rows(variant: str, job: str) -> List[Dict[str, Any]]:
     return [w.to_json() for w in panel.wiring]
 
 
+# Notes the dashboard words for its own panels, reworded for the MCP tools.
+_NOTE_OVERRIDES = {
+    ("bp6", "VOUT"): "the adjustable supply — power_plan sets it, and it stays off until you confirm",
+}
+
+
 def wiring_steps(variant: str, job: str) -> List[WiringStep]:
     """The wires to connect for ``job`` on ``variant``. KeyError if none."""
     steps = []
@@ -70,5 +76,6 @@ def wiring_steps(variant: str, job: str) -> List[WiringStep]:
             colour = cable_colour(variant, pin)
         elif variant in ("v3", "v4"):
             colour = colour_name(pin) or colour
-        steps.append(WiringStep(pin, colour or pin, row.get("target", ""), row.get("note", "")))
+        note = _NOTE_OVERRIDES.get((variant, pin), row.get("note", ""))
+        steps.append(WiringStep(pin, colour or pin, row.get("target", ""), note))
     return steps

@@ -45,3 +45,10 @@ def test_bp6_cable_keys_are_the_header():
 def test_step_to_dict():
     step = wiring_steps("bp6", "i2c")[0]
     assert set(step.to_dict()) == {"pin", "colour", "target", "note"}
+
+
+def test_bp6_vout_note_names_the_mcp_power_step_not_the_dashboard():
+    for job in ("i2c", "spi", "onewire"):
+        vout = [s for s in wiring_steps("bp6", job) if s.pin == "VOUT"][0]
+        assert "Power & pull-ups" not in vout.note
+        assert "power_plan" in vout.note
