@@ -85,3 +85,11 @@ def test_suggest_none_when_unpowered():
 def test_suggest_nearest():
     assert suggest_level(Measurement({"IO0": 1750}, "")) == 1800
     assert suggest_level(Measurement({"IO0": 4700, "IO1": 3300}, "")) == 5000
+
+
+def test_v4_pullups_one_path_only():
+    text = " ".join(plan_power("v4", 3300, SOURCE_OWNER, pullups=True).instructions)
+    assert "VPU (green) unconnected" in text and "set_pullup_voltage" in text
+    assert "to the target's VCC" not in text.split("pull-ups:")[1]
+    v3 = " ".join(plan_power("v3", 3300, SOURCE_OWNER, pullups=True).instructions)
+    assert "wire VPU (green) to the target's VCC" in v3

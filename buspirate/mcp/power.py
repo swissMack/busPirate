@@ -60,8 +60,8 @@ def _v3_v4(variant: str, mv: int, pullups: bool) -> List[str]:
     if pullups:
         if variant == "v4":
             lines.append(
-                "pull-ups: the v4 can feed VPU in software (set_pullup_voltage); "
-                "wire VPU (%s) to the target's VCC" % colour_name("VPU"))
+                "pull-ups: leave VPU (%s) unconnected; the v4 feeds it in "
+                "software (set_pullup_voltage, I2C mode)" % colour_name("VPU"))
         else:
             lines.append("pull-ups: wire VPU (%s) to the target's VCC"
                          % colour_name("VPU"))
