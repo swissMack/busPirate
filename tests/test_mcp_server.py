@@ -290,3 +290,20 @@ def test_run_stdio_autoconnects_one_board_and_disconnects(monkeypatch):
     assert seen["transport"] == "stdio"
     assert "power_plan" in seen["names"] and "measure_voltages" in seen["names"]
     assert seen["session"].board is None      # closed on exit
+
+
+def test_hiz_bitpirate_tells_owner_the_supply_is_still_on():
+    session = BoardSession(simulated="bitpirate")
+    server = build_server(session)
+    call(server, "connect")
+    plan = call(server, "power_plan", {"millivolts": 3300, "voltage_source": "owner"})
+    call(server, "power_apply", {"token": plan["token"]})
+    out = call(server, "hiz")
+    assert out["hiz"] is True
+    assert "VIO" in out["note"] and "switch the target off" in out["note"]
+
+
+def test_hiz_bp6_has_no_owner_note():
+    server = build_server(BoardSession(simulated="bp6"))
+    call(server, "connect")
+    assert "note" not in call(server, "hiz")

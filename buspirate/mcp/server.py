@@ -44,6 +44,8 @@ BOARD_TOOLS: Dict[str, Tuple[FrozenSet[str], ...]] = {
 RECONNECT_HINT = "If new tools don't appear, run /mcp → reconnect buspirate."
 BOARD_GONE = "board disconnected — plug it back in and call connect"
 POWER_ACTION = "power_apply"
+NO_SOFTWARE_POWER_NOTE = ("software cannot switch this board's supply; ask the owner to "
+                          "disconnect VIO or switch the target off")
 _BP6_FAMILY = ("bp6", "bp5")
 _BP6_STATUS_FIELDS = ("psu_enabled", "psu_mv", "psu_ma", "psu_tripped", "pullups",
                       "adc_mv", "pin_labels")
@@ -268,8 +270,7 @@ def build_server(session: BoardSession) -> MCPServer:
         elif variant in ("v3", "v4"):
             out["pins"] = bp.decode_pins(bp.set_pins())
         else:
-            out["note"] = ("software cannot switch this board's supply; ask the owner "
-                           "to disconnect VIO or switch the target off")
+            out["note"] = NO_SOFTWARE_POWER_NOTE
         session.power = None
         return out
 
@@ -282,7 +283,10 @@ def build_server(session: BoardSession) -> MCPServer:
                 return _switch_off(bp)
             bp.hiz()
             session.power = None
-            return {"hiz": True}
+            out: Dict[str, Any] = {"hiz": True}
+            if bp.profile.variant not in _BP6_FAMILY:
+                out["note"] = NO_SOFTWARE_POWER_NOTE  # pins are HiZ; the supply is not off
+            return out
         return await guard(ctx, lambda: session.run(safe))
 
     ask_first = (" Only after the owner has said yes to the plan you showed them; ask "
@@ -315,7 +319,8 @@ def build_server(session: BoardSession) -> MCPServer:
                        "owner the plan. Nothing is switched."),
         "power_apply": (power_apply, "Switch on the supply from a power_plan token." + ask_first),
         "power_off": (power_off, "Switch the target supply off."),
-        "hiz": (hiz, "Put every pin in high impedance and the supply off. Use when done or "
+        "hiz": (hiz, "Put every pin in high impedance and the supply off where software "
+                "controls it. Use when done or "
                 "when anything looks wrong."),
     }
     _SESSIONS[server] = session
