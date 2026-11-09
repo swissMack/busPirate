@@ -30,10 +30,16 @@ NO_POWER_NOTE = ("target not powered by the Bus Pirate — it needs its own supp
 NOT_BLANK_WARNING = "MISO not connected or WP/HOLD not tied high — the chip is not blank"
 
 I2C_FIRST, I2C_LAST = 0x08, 0x77
+MAX_READ = 4096  #: most bytes one i2c_read or spi_transfer may ask for
 _BAUDS = {hz: index for index, hz in UART._BAUDS.items()}
 
 
 # -- shared -------------------------------------------------------------------
+
+def _check_count(name: str, value: int, least: int = 1) -> None:
+    if not least <= value <= MAX_READ:
+        raise ValueError("%s must be %d to %d, not %r" % (name, least, MAX_READ, value))
+
 
 def _with_power(session, out: Dict[str, Any]) -> Dict[str, Any]:
     powered = session.peripherals()["power"]
@@ -138,8 +144,7 @@ def i2c_read(session, address: int, register: int, count: int = 1) -> Dict[str, 
     check_address(address)
     if not 0 <= register <= 0xFF:
         raise ValueError("register must be 0x00 to 0xFF")
-    if count < 1:
-        raise ValueError("count must be at least 1")
+    _check_count("count", count)
 
     def work(bp) -> Dict[str, Any]:
         with _open(bp, "i2c", session) as m:
@@ -197,8 +202,7 @@ def spi_identify(session, mode: int = 0, speed_khz: int = 1000) -> Dict[str, Any
 def spi_transfer(session, write_hex: str, read_count: int, mode: int = 0,
                  speed_khz: int = 1000) -> Dict[str, Any]:
     data = _hex_bytes(write_hex)
-    if read_count < 0:
-        raise ValueError("read_count must not be negative")
+    _check_count("read_count", read_count, least=0)
 
     def work(bp) -> Dict[str, Any]:
         with _spi(bp, session, mode, speed_khz) as m:

@@ -116,6 +116,27 @@ def test_spi_transfer_other_mode_needs_spi_modes():
         spi_transfer(connected("bitpirate"), "9f", 3, mode=2)
 
 
+@pytest.mark.parametrize("count", [0, -1, 4097, 10 ** 9])
+def test_i2c_read_count_capped(count):
+    with pytest.raises(ValueError, match="count must be 1 to 4096"):
+        i2c_read(connected("bp6"), 0x76, 0xD0, count)
+
+
+def test_i2c_read_count_at_cap_allowed():
+    out = i2c_read(connected("bp6"), 0x76, 0x00, 4096)
+    assert len(out["hex"].split()) == 4096
+
+
+@pytest.mark.parametrize("read_count", [-1, 4097, 10 ** 9])
+def test_spi_transfer_read_count_capped(read_count):
+    with pytest.raises(ValueError, match="read_count must be 0 to 4096"):
+        spi_transfer(connected("bp6"), "9f", read_count)
+
+
+def test_spi_transfer_read_count_zero_is_write_only():
+    assert spi_transfer(connected("bp6"), "06", 0)["read_hex"] == ""
+
+
 def test_spi_transfer_bad_hex():
     with pytest.raises(ValueError):
         spi_transfer(connected("v3"), "zz", 1)
