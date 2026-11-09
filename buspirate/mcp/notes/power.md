@@ -43,6 +43,9 @@ Every power-on goes through a plan and a single-use confirmation token
   (pin 8). Never connect both.
 - Any other level (for example 1.8 V) is refused for board power. Use the
   target's own supply with GND shared, or a BP6.
+- On v3/v4 the supply is asserted for each bus job and drops when that
+  job's mode exits; `"power": true` in a bus result means approved and
+  applied for each job.
 - About 150 mA each. That is not enough for an ESP32 running Wi-Fi: power it
   from its own USB and share GND.
 - The ADC is 10-bit behind a divide-by-two, reads up to about 6 V, and

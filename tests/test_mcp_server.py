@@ -376,3 +376,155 @@ def test_board_gone_in_bus_tool_regates():
     out = call(server, "i2c_scan")
     assert out == {"error": "board disconnected — plug it back in and call connect"}
     assert names(server) == set(ALWAYS)
+
+
+# -- final review fixes ---------------------------------------------------------
+
+def _tripped_status(session, **fields):
+    """Make the simulated BP6 report a tripped (or dead) supply from now on."""
+    import dataclasses
+    real = session.board.status
+
+    def status(*a, **k):
+        return dataclasses.replace(real(*a, **k), **fields)
+
+    session.board.status = status
+
+
+@pytest.mark.parametrize("fields", [{"psu_tripped": True, "psu_enabled": False},
+                                    {"psu_tripped": False, "psu_enabled": False}])
+def test_power_apply_bp6_trip_is_an_error_not_applied(fields):
+    session = BoardSession(simulated="bp6")
+    server = build_server(session)
+    call(server, "connect")
+    off_calls = []
+    real_set_power = session.board.set_power
+
+    def set_power(on, *a, **k):
+        if not on:
+            off_calls.append(True)
+        return real_set_power(on, *a, **k)
+
+    session.board.set_power = set_power
+    _tripped_status(session, **fields)
+    plan = call(server, "power_plan", {"millivolts": 3300, "voltage_source": "owner"})
+    out = call(server, "power_apply", {"token": plan["token"]})
+    assert "error" in out and "tripped" in out["error"] and "100 mA" in out["error"]
+    assert "short" in out["error"]
+    assert out.get("applied") is False
+    assert session.power is None
+    assert off_calls                                  # switched back off
+    assert call(server, "spi_identify")["power"] is False   # bus tools do not re-enable it
+
+
+def test_power_apply_bp6_trip_clears_an_earlier_plan():
+    session = BoardSession(simulated="bp6")
+    server = build_server(session)
+    call(server, "connect")
+    plan = call(server, "power_plan", {"millivolts": 3300, "voltage_source": "owner"})
+    call(server, "power_apply", {"token": plan["token"]})
+    assert session.power is not None
+    _tripped_status(session, psu_tripped=True, psu_enabled=False)
+    plan = call(server, "power_plan", {"millivolts": 5000, "voltage_source": "owner"})
+    assert "error" in call(server, "power_apply", {"token": plan["token"]})
+    assert session.power is None
+
+
+@pytest.mark.parametrize("variant", ["v3", "v4"])
+def test_power_apply_v3_v4_says_supply_is_per_job(variant):
+    server = build_server(BoardSession(simulated=variant))
+    call(server, "connect")
+    plan = call(server, "power_plan", {"millivolts": 3300, "voltage_source": "owner"})
+    out = call(server, "power_apply", {"token": plan["token"]})
+    assert "each bus job" in out["note"] and "approved and applied" in out["note"]
+
+
+def test_power_apply_rechecks_variant_under_the_lock(monkeypatch):
+    session = _swappable()
+    server = build_server(session)
+    call(server, "connect", {"port": "v3"})
+    plan = call(server, "power_plan", {"millivolts": 3300, "voltage_source": "owner"})
+    call(server, "connect", {"port": "bp6"})
+    # The check before the lock sees a stale v3; the one inside session.run must not.
+    monkeypatch.setattr(BoardSession, "variant", property(lambda self: "v3"))
+    out = call(server, "power_apply", {"token": plan["token"]})
+    assert "error" in out and "nothing was switched" in out["error"]
+    assert session.power is None
+    assert session.run(lambda bp: bp.status().psu_enabled) is False
+
+
+def test_power_notes_say_v3_supply_is_per_job():
+    from buspirate.mcp import knowledge
+    text = " ".join(knowledge.read("power").split())
+    assert "each bus job" in text and "approved and applied" in text
+
+
+def _while_session_held(session, server, tool, args=None):
+    """Call ``tool`` while another thread holds the session lock, as uart_listen
+    does for up to 30 s. Returns (seconds the loop took to answer another tool
+    meanwhile, whether ``tool`` had finished before the session was free, its
+    result)."""
+    import threading
+    import time
+
+    held, release = threading.Event(), threading.Event()
+
+    def hold(bp):
+        held.set()
+        release.wait(10)
+
+    holder = threading.Thread(target=session.run, args=(hold,))
+    holder.start()
+    assert held.wait(5)
+
+    async def scenario():
+        waiting = asyncio.ensure_future(server.call_tool(tool, args or {}))
+        await asyncio.sleep(0.2)          # let the tool start and reach the lock
+        started = time.monotonic()
+        quick = await server.call_tool("knowledge_topics", {})
+        took = time.monotonic() - started
+        assert json.loads(quick.content[0].text)["topics"]
+        early = waiting.done()
+        release.set()
+        result = await asyncio.wait_for(waiting, 5)
+        return took, early, json.loads(result.content[0].text)
+
+    try:
+        return asyncio.run(scenario())
+    finally:
+        release.set()
+        holder.join(5)
+
+
+@pytest.mark.parametrize("tool", ["hiz", "power_off", "board_status", "measure_voltages",
+                                  "disconnect"])
+def test_board_tools_do_not_block_the_event_loop(tool):
+    """While a worker holds the session, the loop keeps serving other tools, and
+    the waiting tool finishes as soon as the session is free."""
+    session = BoardSession(simulated="bp6")
+    server = build_server(session)
+    call(server, "connect")
+    took, early, out = _while_session_held(session, server, tool)
+    assert took < 2                       # the loop was not frozen
+    assert not early                      # it did wait for the session
+    assert "error" not in out
+
+
+def test_connect_does_not_block_the_event_loop():
+    session = BoardSession(simulated="v3")
+    server = build_server(session)
+    call(server, "connect")
+    took, early, out = _while_session_held(session, server, "connect")
+    assert took < 2 and not early
+    assert out["connected"] is True
+
+
+def test_power_apply_does_not_block_the_event_loop():
+    session = BoardSession(simulated="bp6")
+    server = build_server(session)
+    call(server, "connect")
+    plan = call(server, "power_plan", {"millivolts": 3300, "voltage_source": "owner"})
+    took, early, out = _while_session_held(session, server, "power_apply",
+                                           {"token": plan["token"]})
+    assert took < 2 and not early
+    assert out["applied"] is True

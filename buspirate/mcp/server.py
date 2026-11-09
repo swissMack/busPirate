@@ -59,6 +59,12 @@ BOARD_TOOLS: Dict[str, Tuple[FrozenSet[str], ...]] = {
 RECONNECT_HINT = "If new tools don't appear, run /mcp → reconnect buspirate."
 BOARD_GONE = "board disconnected — plug it back in and call connect"
 POWER_ACTION = "power_apply"
+PSU_TRIPPED = ("the supply tripped (or would not start): the target drew more than the "
+               "%d mA current limit and the Bus Pirate 6 cut it — check the wiring for "
+               "a short, then plan again; the supply is off")
+V3_POWER_NOTE = ("on a v3/v4 the supply is asserted for each bus job and drops when "
+                 "that job's mode exits; \"power\": true in a bus result means approved "
+                 "and applied for that job")
 NO_SOFTWARE_POWER_NOTE = ("software cannot switch this board's supply; ask the owner to "
                           "disconnect VIO or switch the target off")
 _BP6_FAMILY = ("bp6", "bp5")
@@ -128,8 +134,14 @@ def build_server(session: BoardSession) -> MCPServer:
     measured: Dict[str, Any] = {"board": None}  # the board measure_voltages last read
 
     async def guard(ctx: Context, fn: Callable[[], Dict[str, Any]],
-                    threaded: bool = False) -> Dict[str, Any]:
-        """Run ``fn`` (in a worker thread when ``threaded``) and turn errors into results."""
+                    threaded: bool = True) -> Dict[str, Any]:
+        """Run ``fn`` and turn errors into results.
+
+        Anything that touches the session or the board runs in a worker thread
+        (the default), so a long job holding the session lock never freezes the
+        event loop; gating and notifications run back on the loop afterwards.
+        Only pure bookkeeping passes ``threaded=False``.
+        """
         try:
             if threaded:
                 return await anyio.to_thread.run_sync(fn)
@@ -150,7 +162,7 @@ def build_server(session: BoardSession) -> MCPServer:
 
     async def connect(ctx: Context, port: Optional[str] = None) -> Dict[str, Any]:
         try:
-            out = session.connect(port)
+            out = await anyio.to_thread.run_sync(lambda: session.connect(port))
         except (NotConnected, OSError, BusPirateError) as exc:
             out = {"connected": False, "error": str(exc)}
         measured["board"] = None
@@ -174,7 +186,7 @@ def build_server(session: BoardSession) -> MCPServer:
     # -- board tools ------------------------------------------------------------
 
     async def disconnect(ctx: Context) -> Dict[str, Any]:
-        session.disconnect()
+        await anyio.to_thread.run_sync(session.disconnect)
         measured["board"] = None
         tools = apply_gating(server, session)
         await ctx.notify_tools_changed()
@@ -208,7 +220,7 @@ def build_server(session: BoardSession) -> MCPServer:
                 return {"error": "no wiring for %r on this board" % job, "jobs": list(JOBS)}
             return {"job": job, "steps": [s.to_dict() for s in found],
                     "notes": _panel_notes(variant, job)}
-        return await guard(ctx, steps)
+        return await guard(ctx, steps, threaded=False)
 
     async def measure_voltages(ctx: Context) -> Dict[str, Any]:
         def read(bp: Any) -> Dict[str, Any]:
@@ -242,7 +254,7 @@ def build_server(session: BoardSession) -> MCPServer:
             out = p.to_dict()
             out["token"] = confirm.issue(POWER_ACTION, p)
             return out
-        return await guard(ctx, plan)
+        return await guard(ctx, plan, threaded=False)
 
     async def power_apply(ctx: Context, token: str) -> Dict[str, Any]:
         def apply() -> Dict[str, Any]:
@@ -255,23 +267,41 @@ def build_server(session: BoardSession) -> MCPServer:
                                  "%s; nothing was switched — plan again"
                                  % (p.variant, session.variant or "none")}
 
+            def supply_off(bp: Any) -> None:
+                try:
+                    bp.set_power(False)  # never leave a half-applied plan on
+                except BusPirateError:
+                    log.warning("could not switch the supply back off", exc_info=True)
+
             def switch(bp: Any) -> Dict[str, Any]:
+                # Checked again under the session lock: the board may have been
+                # swapped between the check above and taking the lock.
+                if bp.profile.variant != p.variant:
+                    return {"error": "this plan was made for a %s, but the connected board "
+                                     "is %s; nothing was switched — plan again"
+                                     % (p.variant, bp.profile.variant)}
                 out = p.to_dict()
                 if p.variant in _BP6_FAMILY:
                     try:
                         bp.set_power(True, millivolts=p.millivolts, milliamps=p.milliamps)
                         st = bp.set_pullups(p.pullups)
                     except BusPirateError:
-                        try:
-                            bp.set_power(False)  # never leave a half-applied plan on
-                        except BusPirateError:
-                            log.warning("could not switch the supply back off", exc_info=True)
+                        supply_off(bp)
+                        session.power = None
                         raise
+                    if st.psu_tripped or not st.psu_enabled:
+                        # Never record it: every bus tool would re-enable the
+                        # supply into the fault.
+                        supply_off(bp)
+                        session.power = None
+                        return {"error": PSU_TRIPPED % p.milliamps, "applied": False,
+                                "psu_enabled": False, "psu_tripped": st.psu_tripped}
                     out.update(psu_enabled=st.psu_enabled, psu_mv=st.psu_mv,
                                psu_ma=st.psu_ma, psu_tripped=st.psu_tripped,
                                pullups_on=st.pullups)
                 elif p.variant in ("v3", "v4"):
                     out["pins"] = bp.decode_pins(bp.set_pins(power=True, pullups=p.pullups))
+                    out["note"] = V3_POWER_NOTE
                 else:
                     out["note"] = ("recorded only: software cannot switch this board's "
                                    "supply; the owner sets it")
@@ -311,51 +341,48 @@ def build_server(session: BoardSession) -> MCPServer:
     # -- bus tools: the serial I/O runs in a worker thread -----------------------
 
     async def i2c_scan(ctx: Context, speed_khz: int = 100) -> Dict[str, Any]:
-        return await guard(ctx, lambda: jobs.i2c_scan(session, speed_khz), threaded=True)
+        return await guard(ctx, lambda: jobs.i2c_scan(session, speed_khz))
 
     async def i2c_read(ctx: Context, address: int, register: int,
                        count: int = 1) -> Dict[str, Any]:
-        return await guard(ctx, lambda: jobs.i2c_read(session, address, register, count),
-                           threaded=True)
+        return await guard(ctx, lambda: jobs.i2c_read(session, address, register, count))
 
     async def i2c_sensor(ctx: Context, address: int) -> Dict[str, Any]:
-        return await guard(ctx, lambda: jobs.i2c_sensor(session, address), threaded=True)
+        return await guard(ctx, lambda: jobs.i2c_sensor(session, address))
 
     async def spi_identify(ctx: Context, mode: int = 0,
                            speed_khz: int = 1000) -> Dict[str, Any]:
-        return await guard(ctx, lambda: jobs.spi_identify(session, mode, speed_khz),
-                           threaded=True)
+        return await guard(ctx, lambda: jobs.spi_identify(session, mode, speed_khz))
 
     async def spi_transfer(ctx: Context, write_hex: str, read_count: int, mode: int = 0,
                            speed_khz: int = 1000) -> Dict[str, Any]:
         return await guard(ctx, lambda: jobs.spi_transfer(session, write_hex, read_count,
-                                                          mode, speed_khz), threaded=True)
+                                                          mode, speed_khz))
 
     async def spi_sensor_read(ctx: Context, name: str) -> Dict[str, Any]:
-        return await guard(ctx, lambda: jobs.spi_sensor_read(session, name), threaded=True)
+        return await guard(ctx, lambda: jobs.spi_sensor_read(session, name))
 
     async def uart_send(ctx: Context, text: str, baud: int = 115200) -> Dict[str, Any]:
-        return await guard(ctx, lambda: jobs.uart_send(session, text, baud), threaded=True)
+        return await guard(ctx, lambda: jobs.uart_send(session, text, baud))
 
     async def uart_listen(ctx: Context, seconds: float = 2.0,
                           baud: int = 115200) -> Dict[str, Any]:
-        return await guard(ctx, lambda: jobs.uart_listen(session, seconds, baud),
-                           threaded=True)
+        return await guard(ctx, lambda: jobs.uart_listen(session, seconds, baud))
 
     async def onewire_scan(ctx: Context) -> Dict[str, Any]:
-        return await guard(ctx, lambda: jobs.onewire_scan(session), threaded=True)
+        return await guard(ctx, lambda: jobs.onewire_scan(session))
 
     async def pins_read_voltage(ctx: Context) -> Dict[str, Any]:
-        return await guard(ctx, lambda: jobs.pins_read_voltage(session), threaded=True)
+        return await guard(ctx, lambda: jobs.pins_read_voltage(session))
 
     async def pwm(ctx: Context, frequency_hz: float, duty: float) -> Dict[str, Any]:
-        return await guard(ctx, lambda: jobs.pwm(session, frequency_hz, duty), threaded=True)
+        return await guard(ctx, lambda: jobs.pwm(session, frequency_hz, duty))
 
     async def pwm_off(ctx: Context) -> Dict[str, Any]:
-        return await guard(ctx, lambda: jobs.pwm_off(session), threaded=True)
+        return await guard(ctx, lambda: jobs.pwm_off(session))
 
     async def frequency(ctx: Context) -> Dict[str, Any]:
-        return await guard(ctx, lambda: jobs.frequency(session), threaded=True)
+        return await guard(ctx, lambda: jobs.frequency(session))
 
     unpowered = (" Never switches the target supply on: it is powered only after "
                  "power_apply, and the result's `note` says when it is not.")
@@ -396,7 +423,7 @@ def build_server(session: BoardSession) -> MCPServer:
                      "the app knows the chip, read in real units. Use first on an I2C "
                      "job, after `wiring`. Runs at the fastest speed not above "
                      "speed_khz." + unpowered),
-        "i2c_read": (i2c_read, "Read `count` bytes from one register of an I2C device "
+        "i2c_read": (i2c_read, "Read `count` bytes (1-4096) from one register of an I2C device "
                      "(7-bit address 0x08-0x77, given as an integer) and explain them. "
                      "Use for a chip or register i2c_scan did not read." + unpowered),
         "i2c_sensor": (i2c_sensor, "Make the I2C sensor at a 7-bit address measure and "
@@ -405,7 +432,7 @@ def build_server(session: BoardSession) -> MCPServer:
                          "and size. An all-ff or all-00 ID comes with a warning: it "
                          "means wiring, not a blank chip." + unpowered),
         "spi_transfer": (spi_transfer, "Write hex bytes over SPI with CS held low, then "
-                         "read `read_count` bytes. Use for chips no other tool knows. "
+                         "read `read_count` bytes (0-4096). Use for chips no other tool knows. "
                          "SPI modes other than 0 need a Bus Pirate (not the Bit "
                          "Pirate)." + unpowered),
         "spi_sensor_read": (spi_sensor_read, "Read an SPI sensor the app knows by name "
