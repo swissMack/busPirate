@@ -2,7 +2,9 @@
 
 from buspirate.base import BusPirate
 from buspirate.bitpirate import BitPirate
-from buspirate.connect import open_device
+import pytest
+
+from buspirate.connect import open_device, open_simulated
 from buspirate.ports import KNOWN_ADAPTERS
 from buspirate.simulator import FakeSerial, fake_factory
 from buspirate.simulator_bitpirate import FakeBitPirateSerial
@@ -81,3 +83,18 @@ def test_a_false_alarm_keeps_the_bus_pirate_error():
             buspirate_options={"identify_timeout": 0.02},
             bitpirate_options={"connect_timeout": 0.05},
         )
+
+
+@pytest.mark.parametrize("variant,expected", [("v3", "Bus Pirate v3"), ("v4", "Bus Pirate v4"),
+                                              ("bp6", "Bus Pirate 6"), ("bitpirate", "ESP32 Bit Pirate")])
+def test_open_simulated_identifies(variant, expected):
+    bp = open_simulated(variant)
+    try:
+        assert bp.profile.describe().startswith(expected)
+    finally:
+        bp.close()
+
+
+def test_open_simulated_rejects_unknown():
+    with pytest.raises(ValueError):
+        open_simulated("v9")

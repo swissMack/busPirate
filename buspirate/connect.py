@@ -98,3 +98,39 @@ def open_device(
             # It only looked like one. The Bus Pirate's own failure is the
             # one that explains what is wrong.
             raise bus_pirate_error from None
+
+
+def open_simulated(variant: str, on_traffic: Optional[TrafficHook] = None):
+    """Open a simulated board: ``"v3"``, ``"v4"``, ``"bp6"`` or ``"bitpirate"``."""
+    if variant == "bp6":
+        from .bp6 import BusPirate6
+        from .simulator_bp6 import FakeBp6
+
+        fake = FakeBp6()
+        return BusPirate6(
+            FakeBp6.BINARY,
+            terminal_port=FakeBp6.TERMINAL,
+            serial_factory=fake.factory(),
+            on_traffic=on_traffic,
+            connect_timeout=0.2,
+        ).open()
+    if variant == "bitpirate":
+        from .simulator import fake_factory
+        from .simulator_bitpirate import FakeBitPirateSerial
+
+        return BitPirate(
+            "simulated:bitpirate",
+            serial_factory=fake_factory(FakeBitPirateSerial(booting=True)),
+            on_traffic=on_traffic,
+            connect_timeout=0.3,
+        ).open()
+    if variant in ("v3", "v4"):
+        from .simulator import FakeSerial, fake_factory
+
+        return BusPirate(
+            "simulated:" + variant,
+            serial_factory=fake_factory(FakeSerial(variant=variant)),
+            on_traffic=on_traffic,
+            identify_timeout=0.05,
+        ).open()
+    raise ValueError("unknown simulated variant: %r" % (variant,))

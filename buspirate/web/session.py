@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from .. import boards
 from .. import device as device_module
-from ..connect import open_device
+from ..connect import open_device, open_simulated
 from ..exceptions import BusPirateError, ConnectionError, ModeError, PortGoneError
 from ..ports import discover, resolve
 from .decoders import make_decoder
@@ -388,40 +388,8 @@ class DeviceSession:
     def _open_device(self, port: str):
         """Open the board on ``port`` with the driver it needs."""
         variant = simulated_variant(port)
-        if variant == "bp6":
-            from ..bp6 import BusPirate6
-            from ..simulator_bp6 import FakeBp6
-
-            fake = FakeBp6()
-            return BusPirate6(
-                FakeBp6.BINARY,
-                terminal_port=FakeBp6.TERMINAL,
-                serial_factory=fake.factory(),
-                on_traffic=self._on_traffic,
-                connect_timeout=0.2,
-            ).open()
-        if variant == "bitpirate":
-            from ..bitpirate import BitPirate
-            from ..simulator import fake_factory
-            from ..simulator_bitpirate import FakeBitPirateSerial
-
-            return BitPirate(
-                port,
-                serial_factory=fake_factory(FakeBitPirateSerial(booting=True)),
-                on_traffic=self._on_traffic,
-                connect_timeout=0.3,
-            ).open()
         if variant is not None:
-            from ..base import BusPirate
-            from ..simulator import FakeSerial, fake_factory
-
-            fake = FakeSerial(variant=variant)
-            return BusPirate(
-                port,
-                serial_factory=fake_factory(fake),
-                on_traffic=self._on_traffic,
-                identify_timeout=0.05,
-            ).open()
+            return open_simulated(variant, on_traffic=self._on_traffic)
         return open_device(
             port,
             usb_id=(self.port_info or {}).get("usb_id"),
