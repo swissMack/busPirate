@@ -70,3 +70,13 @@ def test_notes_ship_in_the_wheel():
     from pathlib import Path
     pyproject = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text()
     assert '"buspirate.mcp" = ["notes/*.md"]' in pyproject
+
+
+def test_pic_note_powers_low_voltage_parts_from_3v3_only():
+    note = read("pic")
+    vdd = [ln for ln in note.splitlines() if "VDD" in ln and "|" in ln]
+    assert vdd and all("+3.3V" in ln for ln in vdd)
+    for line in note.splitlines():
+        if "+5V" in line and "VDD" in line:
+            assert "never" in line or "not" in line, line
+    assert "never connect the orange +5V lead" in note

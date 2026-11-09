@@ -19,8 +19,12 @@
 
 PiratePICprog was "in the initial testing phase" with a limited part list.
 A part not in its database cannot be programmed without adding it to `pic.c`.
-Check the part's datasheet for its supply voltage before choosing a level
-(see the power note); the v3/v4 offers only 3.3 V or 5 V.
+**Every supported low-voltage part is 3.3 V only**: the 18F24J50
+(PIC18F46J50 family), 24FJ64GA002 (PIC24FJ64GA004 family) and 24FJ256GB106
+(PIC24FJ256GB110 family) datasheets all give an operating range of 2.0 V to
+3.6 V. **Wire +3.3V (red) only and never connect the orange +5V lead.** For a
+part added to the database later, check its datasheet before choosing a
+level (see the power note); the v3/v4 offers only 3.3 V or 5 V.
 
 ## Wiring (v3/v4, Seeed colours)
 
@@ -30,7 +34,7 @@ Check the part's datasheet for its supply voltage before choosing a level
 | PGD (data) | MOSI | grey |
 | MCLR | CS | white |
 | GND | GND | brown, first |
-| VDD (only if the Bus Pirate powers it) | +3.3V or +5V | red / orange |
+| VDD (only if the Bus Pirate powers it) | +3.3V only, never +5V | red |
 
 AUX (blue) is the VPP control for the high-voltage adapter; not used for LVP.
 The Bus Pirate's PIC mode bit-bangs CLK and MOSI, and PiratePICprog drives
@@ -64,7 +68,8 @@ confirm.
 **PiratePICprog switches the Bus Pirate's supply on by itself** when it
 enters programming mode (`iface->VCCHigh()` in pic18.c / pic24.c, which sets
 the power bit). On a v3/v4 that turns on both regulators, so the level is
-whichever supply wire is connected. Treat running picprog as a power-on: the
+whichever supply wire is connected: **never connect the +5V (orange) lead** to
+these 3.3 V parts. Treat running picprog as a power-on: the
 owner confirms the level first. A target with its own supply must not have a
 Bus Pirate supply wire connected at all.
 
@@ -77,4 +82,7 @@ Sources:
 - https://github.com/BusPirate/Bus_Pirate/blob/master/Firmware/pic.c
 - docs/superpowers/specs/2026-11-09-buspirate-mcp-design.md (v3/v4 only, low-voltage only)
 - docs/troubleshooting.md (v4 7.0 mode menu lists PIC)
+- https://ww1.microchip.com/downloads/en/DeviceDoc/39931d.pdf (PIC18F46J50 family incl. 18F24J50: 2.0-3.6 V)
+- https://ww1.microchip.com/downloads/en/DeviceDoc/39881e.pdf (PIC24FJ64GA004 family incl. 24FJ64GA002: 2.0-3.6 V)
+- https://ww1.microchip.com/downloads/en/DeviceDoc/39897c.pdf (PIC24FJ256GB110 family incl. 24FJ256GB106: 2.0-3.6 V)
 - buspirate/web/wiring.py (Seeed colours)
