@@ -27,3 +27,12 @@ def test_creates_folder_and_default_is_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     r = backup.save(b"z", "w", now=T)
     assert r["path"].startswith(str(tmp_path / "BusPirate" / "backups"))
+
+
+def test_what_cannot_escape_the_folder(tmp_path):
+    folder = tmp_path / "out"
+    r = backup.save(b"x", "../x/y", folder=folder, now=T)
+    from pathlib import Path
+    p = Path(r["path"])
+    assert p.parent == folder and p.read_bytes() == b"x"
+    assert "/" not in p.name and not (tmp_path / "x").exists()

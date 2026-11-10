@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -13,6 +14,7 @@ def save(data: bytes, what: str, folder: Optional[Path] = None,
     """Write ``<folder>/<what>-<YYYYmmdd-HHMMSS>.bin`` (``-2``, ``-3`` ... if taken)."""
     folder = Path(folder) if folder is not None else Path.home() / "BusPirate" / "backups"
     folder.mkdir(parents=True, exist_ok=True)
+    what = re.sub(r"[^\w.-]", "_", what) or "backup"  # a bare filename, never a path
     stamp = (now or datetime.datetime.now()).strftime("%Y%m%d-%H%M%S")
     n = 1
     while True:
