@@ -368,3 +368,38 @@ def test_disconnect_forgets_the_last_recipe(session, confirm, recipes):
     _ran(session, confirm)
     session.disconnect()
     assert session.last_recipe is None
+
+
+# -- fix round 1 ----------------------------------------------------------------------
+
+def test_target_powered_run_clears_a_stale_power_plan(session, confirm, recipes):
+    from buspirate.mcp.jobs import i2c_scan
+    from buspirate.mcp.power import SOURCE_OWNER, plan_power
+
+    recipes()
+    fake = _fake(session)
+    fake.adc_mv = [3300] * 8
+    token = engine.plan_recipe(session, confirm, "toy-backpack", {})["token"]
+    session.power = plan_power("bp6", 5000, SOURCE_OWNER)  # left over; supply is off
+    assert "error" not in engine.run_recipe(session, confirm, token, {})
+    assert session.power is None
+    i2c_scan(session)  # a universal bus tool afterwards must not switch our supply on
+    assert fake.psu_enabled is False
+
+
+def test_identify_plan_has_no_above_default_warning(session, confirm, recipes):
+    recipes(name="toy-identify", default_mv=0, min_mv=800, max_mv=5000)
+    plan = engine.plan_recipe(session, confirm, "toy-identify", {"millivolts": 3300})
+    assert not any("default" in w for w in plan["warnings"])
+
+
+def test_millivolts_none_is_absent_and_non_integer_refused(session, confirm, recipes):
+    recipes(default_mv=3300)
+    plan = engine.plan_recipe(session, confirm, "toy-backpack", {"millivolts": None})
+    assert plan["power"]["millivolts"] == 3300 and plan["token"]
+    recipes(name="toy-identify", default_mv=0, min_mv=800, max_mv=5000)
+    assert engine.plan_recipe(session, confirm, "toy-identify",
+                              {"millivolts": None})["error"].startswith("ask the owner")
+    for bad in ("3300", 3.3, True):
+        plan = engine.plan_recipe(session, confirm, "toy-backpack", {"millivolts": bad})
+        assert "error" in plan and "token" not in plan

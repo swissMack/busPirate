@@ -101,6 +101,11 @@ def plan_recipe(session: Any, confirm: ConfirmStore, name: str,
         raise NotConnected("no board is connected — call connect first")
     if session.variant != "bp6":
         return {"error": "these recipes are for a Bus Pirate 6, not a %s" % session.variant}
+    options = {k: v for k, v in options.items() if not (k == "millivolts" and v is None)}
+    asked = options.get("millivolts")
+    if asked is not None and (isinstance(asked, bool) or not isinstance(asked, int)):
+        return {"error": "millivolts must be a whole number of mV, such as 3300, not %r"
+                % (asked,)}
     merged = dict(recipe.options)
     merged.update(options)
     warnings = list(recipe.notes)
@@ -145,7 +150,7 @@ def plan_recipe(session: Any, confirm: ConfirmStore, name: str,
             supply = SUPPLY_BP6
             if recipe.milliamps == 0:
                 warnings.append("this plan has no current limit")
-            elif mv > recipe.default_mv:
+            elif recipe.default_mv and mv > recipe.default_mv:
                 warnings.append("%d mV is above this recipe's default of %d mV"
                                 % (mv, recipe.default_mv))
 
@@ -211,6 +216,9 @@ def _run_planned(session: Any, recipe: Recipe, payload: Dict[str, Any],
                 if target_mv is None or _range_error(recipe, target_mv, "the target"):
                     return {"error": "plan again: the target's own voltage is gone or "
                             "changed since the plan (now %s mV)" % target_mv}
+                # Never leave a stale plan behind: every bus tool re-asserts
+                # session.power, which would feed our supply into the target.
+                session.power = None
                 if recipe.pullups:
                     bp.set_pullups(True)  # fed from the target's VOUT
             else:
