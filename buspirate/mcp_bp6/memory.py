@@ -75,7 +75,13 @@ def _range(start: int, length: int) -> str:
 def prepare(job: WriteJob, read: Callable[[int, int], bytes], chip: str, label: str,
             keep_backup: bool, span: Optional[Tuple[int, int]] = None) -> Dict[str, Any]:
     span_start, span_length = span if span is not None else (job.offset, job.length)
+    if not (span_start <= job.offset and job.offset + job.length <= span_start + span_length):
+        raise ValueError("the span %s must cover the whole job range %s"
+                         % (_range(span_start, span_length), _range(job.offset, job.length)))
     old = bytes(read(span_start, span_length))
+    if len(old) != span_length:
+        raise ValueError("the chip returned %d bytes for a %d-byte read at 0x%06x"
+                         % (len(old), span_length, span_start))
     saved = backup_mod.save(old, "%s-%06x" % (label, span_start)) if keep_backup else None
     where = "backup at %s" % saved["path"] if saved else "no backup (declined)"
     summary = "%s %s %s from %s; %s" % (chip, job.operation, _range(job.offset, job.length),
@@ -97,13 +103,21 @@ def commit(prepared: Dict[str, Any], read: Callable[[int, int], bytes],
     start, length = prepared["span_start"], prepared["span_length"]
     backup = prepared["backup"]
     try:
-        if hashlib.sha256(bytes(read(start, length))).hexdigest() != prepared["_sha"]:
+        now = bytes(read(start, length))
+        if len(now) != length:
+            return {"error": "the chip returned %d bytes for a %d-byte re-read; nothing was "
+                             "written" % (len(now), length),
+                    "verified": False, "backup": backup,
+                    "hint": _hint(backup, "check the wiring and power, then plan again")}
+        if hashlib.sha256(now).hexdigest() != prepared["_sha"]:
             return {"error": CHANGED}
         fill = job.data if job.data is not None else b"\xff" * job.length
         at = job.offset - start
         image = old[:at] + fill + old[at + job.length:]
         write_span(start, image)
         after = bytes(read(start, length))
+        if len(after) != length:
+            raise BusPirateError("the chip returned %d bytes reading back %d" % (len(after), length))
     except BusPirateError as exc:
         return {"error": str(exc), "verified": False, "backup": backup,
                 "hint": _hint(backup, "the write failed part-way, so the chip may hold "

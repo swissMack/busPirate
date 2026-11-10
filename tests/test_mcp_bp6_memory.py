@@ -166,3 +166,27 @@ def test_commit_reports_write_error():
     assert r["error"] == "no ACK" and r["verified"] is False
     assert r["backup"] == prep["backup"]
     assert prep["backup"]["path"] in r["hint"]
+
+
+def test_prepare_refuses_span_not_covering_job():
+    chip = Chip()
+    job = memory.parse_job({"offset": 4, "data_hex": "aabbccdd"}, 64)
+    for span in [(5, 16), (0, 6), (8, 8)]:
+        with pytest.raises(ValueError):
+            memory.prepare(job, chip.read, "c", "l", False, span=span)
+
+
+def test_prepare_refuses_short_read():
+    chip = Chip()
+    job = memory.parse_job({"offset": 4, "data_hex": "aa"}, 64)
+    with pytest.raises(ValueError):
+        memory.prepare(job, lambda s, n: chip.read(s, n - 1), "c", "l", False)
+
+
+def test_commit_short_reread_writes_nothing():
+    chip = Chip()
+    job = memory.parse_job({"offset": 4, "data_hex": "aabb"}, 64)
+    prep = memory.prepare(job, chip.read, "c", "l", True)
+    r = memory.commit(prep, lambda s, n: chip.read(s, n - 1), chip.write_span)
+    assert r["verified"] is False and "nothing was written" in r["error"]
+    assert prep["backup"]["path"] in r["hint"] and chip.calls == []
