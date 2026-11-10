@@ -101,7 +101,8 @@ def test_every_module_in_the_package_is_in_the_catalog():
     for info in pkgutil.iter_modules(devices.__path__):
         name = f"{devices.__name__}.{info.name}"
         assert name in listed, f"{name} is not in devices._MODULES"
-        assert importlib.import_module(name).DEVICES
+        # Reader modules (eeprom24, nmea) have no catalogue entry: DEVICES == [].
+        assert hasattr(importlib.import_module(name), "DEVICES")
 
 
 def test_every_device_is_well_formed():

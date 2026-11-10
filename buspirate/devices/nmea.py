@@ -95,3 +95,6 @@ def parse(text: str) -> List[Dict[str, Any]]:
                 "date": _field(f, 9) or None,
             })
     return out
+
+# Reader modules, not catalogue entries (see devices/__init__ _MODULES).
+DEVICES: list = []

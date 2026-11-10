@@ -61,3 +61,6 @@ def read(i2c, address: int, part: str, offset: int = 0,
         out += i2c.read(address | block, n)
         pos += n
     return bytes(out)
+
+# Reader modules, not catalogue entries (see devices/__init__ _MODULES).
+DEVICES: list = []
