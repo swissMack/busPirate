@@ -73,8 +73,21 @@ def read_ddr4(i2c, address: int = 0x50) -> bytes:
 
 # -- DDR5 ---------------------------------------------------------------------------
 
+def require_ddr5_hub(i2c, address: int = 0x50) -> None:
+    """Raise SpdError unless an SPD5118 hub answers (MR0/MR1 read 0x51 0x18).
+
+    A pointer-only read never writes data. On a DDR4 EEPROM an MR11 write would be a
+    data write, so every DDR5 write is preceded by this.
+    """
+    ident = bytes(i2c.read_after_write(address, b"\x00", 2))
+    if ident != b"\x51\x18":
+        raise SpdError("not a DDR5 SPD hub (MR0/MR1 read %s); for a DDR4 module use ddr4-spd"
+                       % ident.hex(" ").upper())
+
+
 def read_ddr5(i2c, address: int = 0x50) -> bytes:
     """The 1024 bytes of a DDR5 SPD: eight 128-byte pages via MR11. Ends on page 0."""
+    require_ddr5_hub(i2c, address)
     out = bytearray()
     try:
         for page in range(8):

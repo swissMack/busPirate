@@ -62,6 +62,8 @@ class FakeDdr5:
             self.page = data[1]
 
     def read_after_write(self, address, pointer, count):
+        if bytes(pointer) == b"\x00":
+            return b"\x51\x18"[:count]  # MR0/MR1: SPD5118 hub
         base = self.page * 128 + (pointer[0] & 0x7F)
         return self.image[base:base + count]
 
@@ -123,3 +125,10 @@ def test_decode_bad_crc_warns():
 def test_decode_unknown():
     out = spd.decode(bytes([0, 0, 0x99, 0x09]) + bytes(60))
     assert out["memory_type"] == "unknown 0x99" and out["module_type"] == "type 0x09"
+
+
+def test_ddr5_on_ddr4_module_never_writes():
+    fake = FakeDdr4(ddr4_image())
+    with pytest.raises(spd.SpdError, match="not a DDR5 SPD hub .*use ddr4-spd"):
+        spd.read_ddr5(fake)
+    assert not [w for w in fake.writes if w[1]], fake.writes

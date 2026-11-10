@@ -51,9 +51,14 @@ def _make_ddr_check(kind: str, type_byte: int, pointer: bytes):
                     # The page survives between runs while the plank stays powered.
                     spd._select_page(m, 0)
                 else:
+                    spd.require_ddr5_hub(m, address)  # before any write: DDR4 would take data
                     m.write(address, bytes([0x0B, 0]))  # MR11: page 0
                 found_type = m.read_after_write(address, pointer, 1)[0]
-            except (NackError, spd.SpdError):
+            except spd.SpdError as exc:
+                if kind == "DDR5":
+                    return {"ok": False, "error": str(exc)}
+                found_type = -1
+            except NackError:
                 found_type = -1
         if found_type != type_byte:
             seen = "no memory type" if found_type < 0 else "memory type 0x%02X" % found_type

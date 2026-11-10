@@ -247,6 +247,8 @@ def _install_ddr5(fake, image):
     state = {"page": 0}
 
     def module(written, count):
+        if written == b"\x00" and count == 2:
+            return b"\x51\x18"  # MR0/MR1: SPD5118 hub
         if len(written) == 2 and written[0] == 0x0B:
             state["page"] = written[1]
             return b""
@@ -325,3 +327,22 @@ def test_ddr4_check_after_failed_scan_reads_page0(session, confirm, tmp_path, mo
     fake.i2c_handlers[0x37](b"", 0)  # leave the module on page 1, as a failed scan used to
     _, out = _run(session, confirm, "ddr4-spd")
     assert out["check"]["ok"] is True and out["result"]["memory_type"] == "DDR4"
+
+
+def test_ddr5_on_ddr4_module_never_writes(session, confirm):
+    _, ddr4_image, _ = _ddr_fakes()
+    fake = _fake(session)
+    _install_ddr4(fake, ddr4_image())
+    writes = []
+    original = fake._data
+
+    def spy(request):
+        written = bytes(request.DataWrite(i) for i in range(request.DataWriteLength()))
+        if written and request.BytesRead() == 0:
+            writes.append((written[0] >> 1, written[1:]))
+        return original(request)
+    fake._data = spy
+    _, out = _run(session, confirm, "ddr5-spd")
+    assert out["stopped"] == "check failed"
+    assert "not a DDR5 SPD hub" in out["check"]["error"]
+    assert not [w for w in writes if w[1]], writes  # only address-only writes
