@@ -405,6 +405,26 @@ def test_rerun_destructive_new_token(session, confirm, recipes):
     assert again and again != first and calls == ["prepare", "prepare"]
 
 
+def test_run_cannot_change_backup(session, confirm, recipes):
+    calls = []
+    _destructive(recipes, calls)
+    token = engine.plan_recipe(session, confirm, "toy-write", {"backup": True})["token"]
+    assert "error" in engine.run_recipe(session, confirm, token, {"backup": False})
+    assert calls == []
+    token = engine.plan_recipe(session, confirm, "toy-write", {"backup": True})["token"]
+    assert "commit" in engine.run_recipe(session, confirm, token, {})
+    assert "error" in engine.run_recipe(session, confirm, None, {"backup": False})
+
+
+def test_destructive_without_identity_no_token(session, confirm, recipes):
+    calls, ident = [], [None]
+    _destructive(recipes, calls, ident)
+    out = _prepared(session, confirm)
+    assert "commit" not in out and out["stopped"] == "check failed" and calls == []
+    ident[0] = ""
+    assert "commit" not in _prepared(session, confirm)
+
+
 def test_recipe_commit_required():
     with pytest.raises(ValueError):
         _toy(name="x", risk="destructive", commit=None)

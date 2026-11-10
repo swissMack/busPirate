@@ -24,6 +24,7 @@ from .recipes import REGISTRY, Recipe
 ACTION = "recipe_run"  #: the ConfirmStore action recipe tokens are issued for
 WINDOW_S = 300.0       #: how long a token, and a re-run after a run, stays valid
 LOCKED = ("millivolts", "address")  #: options a re-run may not change
+LOCKED_DESTRUCTIVE = ("backup",)  #: more options a destructive recipe fixes at the plan
 
 # How a recipe's target is powered.
 SUPPLY_BP6 = "bp6"        # our supply, from the plan
@@ -178,8 +179,10 @@ def plan_recipe(session: Any, confirm: ConfirmStore, name: str,
     }
 
 
-def _changed_locked(before: Dict[str, Any], options: Dict[str, Any]) -> Optional[str]:
-    for key in LOCKED:
+def _changed_locked(recipe: Recipe, before: Dict[str, Any],
+                    options: Dict[str, Any]) -> Optional[str]:
+    keys = LOCKED + (LOCKED_DESTRUCTIVE if recipe.risk == "destructive" else ())
+    for key in keys:
         if key in options and options[key] != before.get(key):
             return key
     return None
@@ -193,6 +196,10 @@ def _check_then_act(bp: Any, recipe: Recipe, options: Dict[str, Any],
         check = recipe.check(bp, options)
     except NackError as exc:
         check = {"ok": False, "error": str(exc)}
+    if (recipe.risk == "destructive" and check.get("ok", False)
+            and not (isinstance(check.get("identity"), str) and check["identity"])):
+        check = {"ok": False, "error": "the check returned no identity for the chip, so "
+                 "a change could not be tied to it"}
     out["check"] = check
     if not check.get("ok", False):
         out.update(stopped="check failed", hint=check.get("hint") or CHECK_HINT)
@@ -290,7 +297,7 @@ def _rerun(session: Any, confirm: ConfirmStore, options: Dict[str, Any]) -> Dict
         recipe = REGISTRY.get(last["name"])
         if recipe is None:
             return {"error": "plan again: recipe %r is gone" % last["name"]}
-        key = _changed_locked(last["options"], options)
+        key = _changed_locked(recipe, last["options"], options)
         if key:
             return {"error": "plan again: a re-run cannot change %s" % key}
         supply = last["supply"]
@@ -318,7 +325,7 @@ def run_recipe(session: Any, confirm: ConfirmStore, token: Optional[str],
     recipe = REGISTRY.get(payload["name"])
     if recipe is None:
         return {"error": "plan again: recipe %r is gone" % payload["name"]}
-    key = _changed_locked(payload["options"], options)
+    key = _changed_locked(recipe, payload["options"], options)
     if key:
         return {"error": "plan again: %s was fixed by the plan" % key}
     merged = dict(payload["options"])
@@ -354,7 +361,8 @@ def commit_recipe(session: Any, confirm: ConfirmStore, token: str) -> Dict[str, 
         if not check.get("ok", False):
             return {"error": "plan again: the chip no longer answers the check (%s)"
                     % (check.get("error") or check.get("hint") or "check failed")}
-        if check.get("identity") != prepared.get("_identity"):
+        ident = check.get("identity")
+        if not (isinstance(ident, str) and ident) or ident != prepared.get("_identity"):
             return {"error": "plan again: the chip is not the one that was prepared "
                     "(%s, was %s)" % (check.get("identity"), prepared.get("_identity"))}
         return {"recipe": recipe.name, "committed": True,
