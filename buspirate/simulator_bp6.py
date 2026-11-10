@@ -130,6 +130,10 @@ class FakeBp6:
         self.psu_tripped = False
         self.psu_mv = 0
         self.psu_ma = 0
+        #: A target with its own supply: the mV it puts on IO0..IO7 (8 values),
+        #: and on VOUT while our supply is off. None: nothing there.
+        self.adc_mv = None
+        self.vout_mv = None
         self.pullups = False
         self.requests = []
         #: IO pin state as set over BPIO2 (bit n = IOn, direction 1 = output).
@@ -193,6 +197,11 @@ class FakeBp6:
 
     def over_limit(self) -> bool:
         return 0 < self.psu_ma < self.load_ma
+
+    def add_i2c_device(self, address: int, data: bytes = bytes(256)) -> None:
+        """Answer at ``address`` with a 256-byte register file."""
+        self.i2c_devices[address] = bytearray(data)
+        self._pointer[address] = 0
 
     def set_load(self, milliamps: int) -> None:
         """Change what the target draws, as when a part is plugged in."""
@@ -267,7 +276,11 @@ class FakeBp6:
 
         modes = vector(_ST.StatusResponseStartModesAvailableVector, MODES)
         labels = vector(_ST.StatusResponseStartModePinLabelsVector, PIN_LABELS[self.mode])
-        adc = [self.psu_mv if (self.pullups and self.psu_enabled) else 0] * 8
+        if self.adc_mv is not None:
+            adc = list(self.adc_mv)
+        else:
+            adc = [self.psu_mv if (self.pullups and self.psu_enabled) else 0] * 8
+        vout_off = 22 if self.vout_mv is None else self.vout_mv
         _ST.StatusResponseStartAdcMvVector(b, 8)
         for value in reversed(adc):
             b.PrependUint32(value)
@@ -291,7 +304,7 @@ class FakeBp6:
         _ST.StatusResponseAddPsuEnabled(b, self.psu_enabled)
         _ST.StatusResponseAddPsuSetMv(b, self.psu_mv)
         _ST.StatusResponseAddPsuSetMa(b, self.psu_ma)
-        _ST.StatusResponseAddPsuMeasuredMv(b, self.psu_mv if self.psu_enabled else 22)
+        _ST.StatusResponseAddPsuMeasuredMv(b, self.psu_mv if self.psu_enabled else vout_off)
         _ST.StatusResponseAddPsuMeasuredMa(b, self.load_ma if self.psu_enabled else 1)
         _ST.StatusResponseAddPsuCurrentError(b, self.psu_tripped)
         _ST.StatusResponseAddPullupEnabled(b, self.pullups)

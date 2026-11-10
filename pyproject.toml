@@ -20,7 +20,7 @@ mcp = ["mcp>=2.3,<3; python_version >= '3.10'"]
 buspirate = "buspirate.cli:main"
 
 [tool.setuptools]
-packages = ["buspirate", "buspirate.bitpirate", "buspirate.boards", "buspirate.bp6", "buspirate.bp6.bpio", "buspirate.devices", "buspirate.mcp", "buspirate.mcp_bp6", "buspirate.web", "buspirate.web.panels"]
+packages = ["buspirate", "buspirate.bitpirate", "buspirate.boards", "buspirate.bp6", "buspirate.bp6.bpio", "buspirate.devices", "buspirate.mcp", "buspirate.mcp_bp6", "buspirate.mcp_bp6.recipes", "buspirate.web", "buspirate.web.panels"]
 
 [tool.setuptools.dynamic]
 version = {attr = "buspirate.__version__"}
