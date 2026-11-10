@@ -10,9 +10,10 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from ... import devices
+from ...devices import eeprom25
 from ...mcp import jobs
 from ...spiflash import SPIFlash
-from .. import backup
+from .. import backup, memory
 from . import Recipe, register
 
 DOCS = "https://docs.buspirate.com/docs/"
@@ -103,6 +104,143 @@ register(Recipe(
     notes=("reading is harmless, but a chip soldered on a board may share its bus: power the "
            "board off and keep its other devices quiet",
            "backup=True reads the whole chip; length limits it")))
+
+
+# -- flash: writes -------------------------------------------------------------------
+
+SECTOR = 4096
+_WRITE_WORDS = ("write", "erase", "program", "restore")
+
+
+def _flash_job(opts: Options, size: Optional[int]) -> memory.WriteJob:
+    if size is None:
+        raise ValueError("the JEDEC ID does not give the chip's size: pass length")
+    return memory.parse_job(opts, size)
+
+
+def _flash_write_check(bp: Any, opts: Options) -> Dict[str, Any]:
+    with open_spi(bp) as m:
+        info = describe_jedec(SPIFlash(m).jedec_id())
+    if info["warning"]:
+        return {"ok": False, "error": "no flash chip answers (JEDEC ID %s)" % info["jedec"],
+                "hint": info["warning"]}
+    try:
+        _flash_job(opts, info["capacity_bytes"] or _length(opts))
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "jedec": info["jedec"]}
+    return {"ok": True, "jedec": info["jedec"], "identity": info["jedec"]}
+
+
+def _flash_write_prepare(bp: Any, opts: Options) -> Dict[str, Any]:
+    """Read the sectors the range touches, save them as a backup, and describe the change."""
+    with open_spi(bp) as m:
+        flash = SPIFlash(m)
+        info = describe_jedec(flash.jedec_id())
+        job = _flash_job(opts, info["capacity_bytes"] or _length(opts))
+        start = job.offset - job.offset % SECTOR
+        end = -(-(job.offset + job.length) // SECTOR) * SECTOR
+        return memory.prepare(job, flash.read, chip="SPI flash %s" % info["jedec"],
+                              label="spi-flash-" + info["jedec"].replace(" ", ""),
+                              keep_backup=opts["backup"], span=(start, end - start))
+
+
+def _flash_write_commit(bp: Any, opts: Options, prepared: Dict[str, Any]) -> Dict[str, Any]:
+    """Check the chip is unchanged, erase the sectors, program the new image, read it back."""
+    def write_span(start: int, image: bytes) -> None:
+        flash.erase_range(start, len(image))
+        flash.write(start, image)
+
+    with open_spi(bp) as m:
+        flash = SPIFlash(m)
+        return memory.commit(prepared, flash.read, write_span)
+
+
+register(Recipe(
+    name="spi-flash-write", title="SPI flash chip: write or erase a range",
+    words=("spi-flash-write",) + _WRITE_WORDS + (
+        "flash", "spi", "25q", "w25q", "winbond", "bios", "firmware", "memory"),
+    bus="spi", default_mv=3300, min_mv=1800, max_mv=3600, pullups=False, wiring=SPI_WIRING,
+    risk="destructive", check=_flash_write_check, action=_flash_write_prepare,
+    commit=_flash_write_commit, options=dict(memory.WRITE_OPTIONS),
+    source=DOCS + "devices/w25q64/",
+    notes=("the whole 4 KB sectors the range touches are rewritten; bytes outside the range "
+           "are kept",
+           "WP and HOLD must be high",
+           "a chip soldered on a board may share its bus: power the board off")))
+
+
+# -- SPI EEPROM and FRAM -------------------------------------------------------------
+
+def _eeprom_part(opts: Options) -> str:
+    if not opts.get("part"):
+        raise ValueError("name the part with the part option; known: %s"
+                         % ", ".join(sorted(eeprom25.PARTS)))
+    return eeprom25.normalize(opts["part"])
+
+
+def _eeprom_check(write: bool):
+    def check(bp: Any, opts: Options) -> Dict[str, Any]:
+        try:
+            part = _eeprom_part(opts)
+            if write:
+                memory.parse_job(opts, eeprom25.PARTS[part][0])
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        with open_spi(bp) as m:
+            value = eeprom25.status(m)
+        if value == 0xFF:
+            return {"ok": False, "error": "nothing answers: check CS, and that WP and HOLD "
+                                          "are high"}
+        return {"ok": True, "identity": part, "status": "0x%02X" % value}
+    return check
+
+
+def _eeprom_backup(bp: Any, opts: Options) -> Dict[str, Any]:
+    """Read the whole chip and save it as a backup file; nothing is written to the chip."""
+    part = _eeprom_part(opts)
+    with open_spi(bp) as m:
+        data = eeprom25.read(m, part, 0, eeprom25.PARTS[part][0])
+    saved = backup.save(data, "spi-%s" % part)
+    saved.update(part=part, first_64_hex=data[:64].hex(" "))
+    return saved
+
+
+def _eeprom_prepare(bp: Any, opts: Options) -> Dict[str, Any]:
+    part = _eeprom_part(opts)
+    job = memory.parse_job(opts, eeprom25.PARTS[part][0])
+    with open_spi(bp) as m:
+        return memory.prepare(job, lambda start, length: eeprom25.read(m, part, start, length),
+                              chip=part, label="spi-%s" % part, keep_backup=opts["backup"])
+
+
+def _eeprom_commit(bp: Any, opts: Options, prepared: Dict[str, Any]) -> Dict[str, Any]:
+    """Check the chip is unchanged, write the new bytes, read them back and compare."""
+    part = _eeprom_part(opts)
+    with open_spi(bp) as m:
+        return memory.commit(prepared, lambda start, length: eeprom25.read(m, part, start, length),
+                             lambda start, image: eeprom25.write(m, part, start, image))
+
+
+_EEPROM_WORDS = ("eeprom", "25lc256", "25lc", "at25", "25xx", "fram", "fm25", "mb85rs", "memory")
+
+register(Recipe(
+    name="spi-eeprom", title="25xx SPI EEPROM / FRAM: back up its contents",
+    words=("spi-eeprom", "backup", "dump") + _EEPROM_WORDS,
+    bus="spi", default_mv=3300, min_mv=1800, max_mv=5000, pullups=False, wiring=SPI_WIRING,
+    check=_eeprom_check(False), action=_eeprom_backup, options={"part": None},
+    source=DOCS + "command-reference/",
+    notes=("name the part: a wrong size silently wraps and gives a wrong backup",
+           "WP and HOLD must be high")))
+
+register(Recipe(
+    name="spi-eeprom-write", title="25xx SPI EEPROM / FRAM: write or erase its contents",
+    words=("spi-eeprom-write",) + _WRITE_WORDS + _EEPROM_WORDS,
+    bus="spi", default_mv=3300, min_mv=1800, max_mv=5000, pullups=False, wiring=SPI_WIRING,
+    risk="destructive", check=_eeprom_check(True), action=_eeprom_prepare,
+    commit=_eeprom_commit, options=dict({"part": None}, **memory.WRITE_OPTIONS),
+    source=DOCS + "command-reference/",
+    notes=("WP and HOLD must be high for the write to take",
+           "name the part: a wrong size silently wraps")))
 
 
 # -- MAX31855 -----------------------------------------------------------------------

@@ -24,6 +24,7 @@ from .bp6.bpio.ResponsePacketContents import ResponsePacketContents
 from .bp6.framing import FrameReader, cobs_decode, frame
 from .devices.aht20 import crc8
 from .devices.eeprom24 import PAGES as _EEPROM_PAGES, SIZES as _EEPROM_SIZES
+from .devices.eeprom25 import PARTS as _SPI_PARTS
 from .simulator import FakeFlash
 
 MODES = ("HiZ", "1WIRE", "UART", "HDUART", "I2C", "SPI", "2WIRE", "3WIRE",
@@ -162,6 +163,62 @@ class FakeEeprom24:
         return bytes(out)
 
 
+class FakeEeprom25:
+    """A 25xx SPI EEPROM / FRAM: READ, WRITE, WREN and RDSR, page wrap, one busy poll."""
+
+    def __init__(self, part: str, data=None) -> None:
+        self.part = part.upper()
+        self.size, self.addr_bytes, self.page = _SPI_PARTS[self.part]
+        self.mem = bytearray(data if data is not None else b"\xff" * self.size)
+        if len(self.mem) < self.size:
+            self.mem += b"\xff" * (self.size - len(self.mem))
+        self.write_enabled = False
+        self.busy = 0
+        self.protect_bits = 0  # status bits 2-3; writes are ignored while set
+        self.writes = []  # (offset, length) of each data write
+
+    def _address(self, opcode: int, body: bytes):
+        width = self.addr_bytes
+        pointer = int.from_bytes(body[:width], "big")
+        if width == 1 and self.size == 512 and opcode & 0x08:
+            pointer += 256
+        return pointer % self.size, body[width:]
+
+    def exchange(self, written: bytes, read_count: int) -> bytes:
+        if not written:
+            return b"\x00" * read_count
+        opcode, body = written[0], written[1:]
+        if opcode == 0x05:
+            value = (1 if self.busy > 0 else 0) | (2 if self.write_enabled else 0) | self.protect_bits
+            if self.busy > 0:
+                self.busy -= 1
+            return bytes([value]) * read_count
+        if opcode == 0x06:
+            self.write_enabled = True
+            return b""
+        if opcode & 0xF7 == 0x03:
+            pos, _ = self._address(opcode, body)
+            out = bytearray()
+            for _ in range(read_count):
+                out.append(self.mem[pos])
+                pos = (pos + 1) % self.size
+            return bytes(out)
+        if opcode & 0xF7 == 0x02:
+            pos, data = self._address(opcode, body)
+            if not self.write_enabled or self.protect_bits:
+                self.write_enabled = False
+                return b""
+            self.writes.append((pos, len(data)))
+            for byte in data:
+                self.mem[pos] = byte
+                start = pos - pos % self.page
+                pos = start + (pos + 1 - start) % self.page
+            self.write_enabled = False
+            self.busy = 1
+            return b""
+        return b"\x00" * read_count
+
+
 class FakeSht31:
     """An SHT31: ``F3 2D`` reads the status register, ``24 00`` measures 25 °C and 50 %RH."""
 
@@ -228,6 +285,7 @@ class FakeBp6:
         self.add_i2c_device(0x44, handler=FakeSht31())
         self.add_eeprom24(0x50, "24C02", bytes((i * 7 + 3) & 0xFF for i in range(256)))
         self.flash = FakeFlash()
+        self.spi_device = self.flash  # whatever answers on CS: swap for another chip
         self.onewire_rom = DS18B20_ROM
         self.uart_echo = True
         self._spi_written, self._spi_read = bytearray(), 0
@@ -488,12 +546,12 @@ class FakeBp6:
             self._spi_written += written
             data = b""
             if count:
-                whole = self.flash.exchange(bytes(self._spi_written), self._spi_read + count)
+                whole = self.spi_device.exchange(bytes(self._spi_written), self._spi_read + count)
                 data = whole[self._spi_read:]
                 self._spi_read += count
             elif stopped and not self._spi_read and self._spi_written:
                 # A write-only command (write enable, program, erase) acts at CS high.
-                self.flash.exchange(bytes(self._spi_written), 0)
+                self.spi_device.exchange(bytes(self._spi_written), 0)
             return self._data_response(data)
         if self.mode == "1WIRE":
             if started and not self.onewire_rom:

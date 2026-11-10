@@ -249,3 +249,107 @@ def test_recipes_never_touch_power(session, confirm, monkeypatch):
         assert out["check"]["ok"] is True and "result" in out, (name, out)
         ran.append(name)
     assert len(ran) == 9
+
+
+# -- SPI flash writes, SPI EEPROM and FRAM --------------------------------------------
+
+def _plan_prepare_commit(session, confirm, name, options):
+    plan = engine.plan_recipe(session, confirm, name, options)
+    assert "error" not in plan, plan
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out.get("commit"), out
+    return out, engine.commit_recipe(session, confirm, out["commit"]["token"])
+
+
+def test_spi_write_recipes_registered():
+    assert REGISTRY["spi-flash-write"].risk == "destructive"
+    assert REGISTRY["spi-eeprom-write"].risk == "destructive"
+    assert REGISTRY["spi-eeprom"].risk == "none"
+    assert REGISTRY["spi-eeprom-write"].default_mv == 3300
+    assert (REGISTRY["spi-eeprom-write"].min_mv, REGISTRY["spi-eeprom-write"].max_mv) == (1800, 5000)
+
+
+def test_flash_write_keeps_sector_neighbours(session, confirm, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    flash = _fake(session).flash
+    flash.memory[0:0x2000] = bytes((i * 5 + 1) & 0xFF for i in range(0x2000))
+    old = bytes(flash.memory[0:0x2000])
+    prepared, done = _plan_prepare_commit(
+        session, confirm, "spi-flash-write",
+        {"offset": 0x0FFC, "data_hex": "00 01 02 03 04 05 06 07 08 09"})
+    result = done["result"]
+    assert result["verified"] is True and done["committed"] is True
+    assert (result["span_start"], result["span_length"]) == (0, 0x2000)
+    assert Path(result["backup"]["path"]).read_bytes() == old
+    now = bytes(flash.memory[0:0x2000])
+    assert now[0xFFC:0x1006] == bytes(range(10))
+    assert now[:0xFFC] == old[:0xFFC] and now[0x1006:] == old[0x1006:]
+
+
+def test_flash_erase_range(session, confirm, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    flash = _fake(session).flash
+    flash.memory[0:0x3000] = b"\x5a" * 0x3000
+    _, done = _plan_prepare_commit(session, confirm, "spi-flash-write",
+                                   {"operation": "erase", "offset": 0x1000, "length": 0x100})
+    assert done["committed"] is True
+    assert bytes(flash.memory[0x1000:0x1100]) == b"\xff" * 0x100
+    assert bytes(flash.memory[0x1100:0x2000]) == b"\x5a" * 0xF00
+    assert bytes(flash.memory[:0x1000]) == b"\x5a" * 0x1000
+
+
+def test_flash_write_beyond_chip_stops(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "spi-flash-write", {})
+    out = engine.run_recipe(session, confirm, plan["token"],
+                            {"offset": 1 << 25, "data_hex": "00"})
+    assert out["stopped"] == "check failed" and "commit" not in out
+
+
+def test_spi_eeprom_full_flow(session, confirm, tmp_path, monkeypatch):
+    from buspirate.simulator_bp6 import FakeEeprom25
+    monkeypatch.setenv("HOME", str(tmp_path))
+    chip = FakeEeprom25("25256", bytes((i * 3) & 0xFF for i in range(32768)))
+    _fake(session).spi_device = chip
+    old = bytes(chip.mem)
+    prepared, done = _plan_prepare_commit(
+        session, confirm, "spi-eeprom-write",
+        {"part": "25LC256", "offset": 0x3E, "data_hex": "aa bb cc dd"})
+    assert prepared["commit"]["chip"].startswith("25256")
+    result = done["result"]
+    assert result["verified"] is True and result["written"] == 4
+    assert Path(result["backup"]["path"]).read_bytes() == old[0x3E:0x42]
+    assert bytes(chip.mem[0x3E:0x42]) == bytes.fromhex("aabbccdd")
+    assert bytes(chip.mem[:0x3E]) == old[:0x3E] and bytes(chip.mem[0x42:]) == old[0x42:]
+
+
+def test_spi_eeprom_backup_reads_whole_part(session, confirm, tmp_path, monkeypatch):
+    from buspirate.simulator_bp6 import FakeEeprom25
+    monkeypatch.setenv("HOME", str(tmp_path))
+    chip = FakeEeprom25("25040", bytes(i % 251 for i in range(512)))
+    _fake(session).spi_device = chip
+    _, out = _run(session, confirm, "spi-eeprom", run_options={"part": "25040"})
+    assert Path(out["result"]["path"]).read_bytes() == bytes(chip.mem)
+
+
+def test_spi_eeprom_missing_part(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "spi-eeprom-write", {})
+    out = engine.run_recipe(session, confirm, plan["token"], {"data_hex": "00"})
+    assert out["stopped"] == "check failed" and "commit" not in out
+    assert "25256" in out["check"]["error"]
+
+
+def test_spi_eeprom_protected_reports_the_error_and_is_not_committed(
+        session, confirm, tmp_path, monkeypatch):
+    from buspirate.simulator_bp6 import FakeEeprom25
+    monkeypatch.setenv("HOME", str(tmp_path))
+    chip = FakeEeprom25("25256", bytes(range(256)) * 128)
+    chip.protect_bits = 0x0C
+    _fake(session).spi_device = chip
+    old = bytes(chip.mem)
+    _, done = _plan_prepare_commit(session, confirm, "spi-eeprom-write",
+                                   {"part": "25256", "data_hex": "ff 00 ff 00"})
+    result = done["result"]
+    assert "0x0c" in result["error"].lower()
+    assert done["committed"] is False
+    assert result["backup"] is not None
+    assert bytes(chip.mem) == old
