@@ -53,6 +53,7 @@ board without an ADC gets no `pins_read_voltage`, for instance).
 | `power_plan`, `power_apply`, `power_off` | the two-step power switch, below |
 | `hiz` | all pins to high-impedance (the safe state) |
 | `i2c_scan`, `i2c_read`, `i2c_sensor` | scan with chip labels; read a register; read a known sensor in real units |
+| `i2c_write`, `lcd_write` | write raw bytes (a register is the first byte); show text on an HD44780 LCD behind a PCF8574 backpack. On a v3/v4 the supply drops when the tool returns, so an LCD powered from the Bus Pirate loses its text |
 | `spi_identify`, `spi_transfer`, `spi_sensor_read` | flash JEDEC ID with the part named; raw transfer; known SPI sensors |
 | `uart_send`, `uart_listen` | send text; capture what the target says |
 | `onewire_scan` | list 1-Wire devices (DS18B20 temperatures in °C) |

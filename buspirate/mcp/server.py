@@ -43,6 +43,8 @@ BOARD_TOOLS: Dict[str, Tuple[FrozenSet[str], ...]] = {
     "i2c_scan": _ANY_BOARD,
     "i2c_read": _ANY_BOARD,
     "i2c_sensor": _ANY_BOARD,
+    "i2c_write": _ANY_BOARD,
+    "lcd_write": _ANY_BOARD,
     "spi_identify": _ANY_BOARD,
     "spi_transfer": _ANY_BOARD,  # modes other than 0 need spi_modes, checked per call
     "spi_sensor_read": _ANY_BOARD,
@@ -336,6 +338,14 @@ def build_server(session: BoardSession) -> MCPServer:
     async def i2c_sensor(ctx: Context, address: int) -> Dict[str, Any]:
         return await guard(ctx, lambda: jobs.i2c_sensor(session, address))
 
+    async def i2c_write(ctx: Context, address: int, data_hex: str) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.i2c_write(session, address, data_hex))
+
+    async def lcd_write(ctx: Context, message: str, address: int = 0x27, size: str = "16x2",
+                        backlight: bool = True) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.lcd_write(session, message, address, size,
+                                                       backlight))
+
     async def spi_identify(ctx: Context, mode: int = 0,
                            speed_khz: int = 1000) -> Dict[str, Any]:
         return await guard(ctx, lambda: jobs.spi_identify(session, mode, speed_khz))
@@ -414,6 +424,15 @@ def build_server(session: BoardSession) -> MCPServer:
                      "Use for a chip or register i2c_scan did not read." + unpowered),
         "i2c_sensor": (i2c_sensor, "Make the I2C sensor at a 7-bit address measure and "
                        "return its values in real units." + unpowered),
+        "i2c_write": (i2c_write, "Write hex bytes to an I2C device in one transaction "
+                      "(7-bit address 0x08-0x77 as an integer; to set a register, its "
+                      "number is the first byte, e.g. 'f4 27'). It changes the chip, so "
+                      "say what you are writing and why before you call it." + unpowered),
+        "lcd_write": (lcd_write, "Show a message on an HD44780 character LCD behind a "
+                      "PCF8574 I2C backpack (usually 0x27 or 0x3F; size 16x2 or 20x4). "
+                      "Each line of the message is a row; the words clear, home, 'line N' "
+                      "and 'backlight on/off' on a line of their own are commands. "
+                      "The display cannot answer, so ask the owner what it shows." + unpowered),
         "spi_identify": (spi_identify, "Read an SPI flash chip's JEDEC ID: maker, type "
                          "and size. An all-ff or all-00 ID comes with a warning: it "
                          "means wiring, not a blank chip." + unpowered),

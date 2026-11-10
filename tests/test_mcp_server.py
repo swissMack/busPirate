@@ -311,7 +311,7 @@ def test_hiz_bp6_has_no_owner_note():
 
 # -- bus tools ----------------------------------------------------------------
 
-BUS_TOOLS = ("i2c_scan", "i2c_read", "i2c_sensor", "spi_identify", "spi_transfer",
+BUS_TOOLS = ("i2c_scan", "i2c_read", "i2c_sensor", "i2c_write", "lcd_write", "spi_identify", "spi_transfer",
              "spi_sensor_read", "uart_send", "uart_listen")
 
 
@@ -528,3 +528,21 @@ def test_power_apply_does_not_block_the_event_loop():
                                            {"token": plan["token"]})
     assert took < 2 and not early
     assert out["applied"] is True
+
+
+def test_lcd_write_and_i2c_write_through_the_server():
+    server = build_server(BoardSession(simulated="bp6"))
+    call(server, "connect")
+    assert call(server, "i2c_write", {"address": 0x76, "data_hex": "f4 27"})["written_bytes"] == 2
+    out = call(server, "lcd_write", {"message": "Hello World", "address": 0x76})
+    assert out["sent_bytes"] > 0 and out["power"] is False and "note" in out
+    assert "error" in call(server, "i2c_write", {"address": 0x76, "data_hex": "zz"})
+
+
+def test_lcd_write_and_i2c_write_through_the_server():
+    server = build_server(BoardSession(simulated="bp6"))
+    call(server, "connect")
+    assert call(server, "i2c_write", {"address": 0x76, "data_hex": "f4 27"})["written_bytes"] == 2
+    out = call(server, "lcd_write", {"message": "Hello World", "address": 0x76})
+    assert out["sent_bytes"] > 0 and out["power"] is False and "note" in out
+    assert "error" in call(server, "i2c_write", {"address": 0x76, "data_hex": "zz"})

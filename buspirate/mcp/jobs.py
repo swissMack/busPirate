@@ -20,6 +20,7 @@ import time
 from typing import Any, Dict, Optional
 
 from .. import devices
+from ..devices import hd44780
 from ..capabilities import CAP_ADC, CAP_FREQUENCY, CAP_PWM, CAP_SPI_MODES
 from ..exceptions import BusPirateError
 from ..spiflash import SPIFlash
@@ -101,13 +102,13 @@ def check_address(address: int) -> int:
     return address
 
 
-def _hex_bytes(text: str) -> bytes:
+def _hex_bytes(text: str, name: str = "write_hex") -> bytes:
     cleaned = text.replace("0x", "").replace(",", " ")
     try:
         return bytes.fromhex(cleaned)
     except ValueError:
-        raise ValueError("write_hex must be hex bytes such as '9f' or '03 00 00 00', "
-                         "not %r" % (text,)) from None
+        raise ValueError("%s must be hex bytes such as '9f' or '03 00 00 00', "
+                         "not %r" % (name, text)) from None
 
 
 def _baud_index(baud: int) -> int:
@@ -164,6 +165,47 @@ def i2c_sensor(session, address: int) -> Dict[str, Any]:
             return {"error": "no decoder for 0x%02X" % address}
         return _reading(reading)
     return _with_power(session, session.run(work))
+
+
+
+def i2c_write(session, address: int, data_hex: str) -> Dict[str, Any]:
+    """Write raw bytes to an I2C device in one transaction (start, address, data, stop)."""
+    check_address(address)
+    data = _hex_bytes(data_hex, "data_hex")
+    if not 1 <= len(data) <= MAX_READ:
+        raise ValueError("data_hex must be 1 to %d bytes, not %d" % (MAX_READ, len(data)))
+
+    def work(bp) -> Dict[str, Any]:
+        with _open(bp, "i2c", session) as m:
+            m.write(address, data)
+        return {"address": "0x%02X" % address, "written_bytes": len(data),
+                "hex": data.hex(" ")}
+    return _with_power(session, session.run(work))
+
+
+LCD_CHECK = ("The display cannot answer, so look at it: solid blocks or a lit, empty "
+             "screen mean the contrast screw on the back needs turning.")
+LCD_SUPPLY_NOTE = ("On a v3/v4 the supply drops when this tool returns, and the display "
+                   "loses its text with it: give the LCD its own supply to keep the text.")
+
+
+def lcd_write(session, message: str, address: int = 0x27, size: str = "16x2",
+              backlight: bool = True) -> Dict[str, Any]:
+    """Show ``message`` on an HD44780 LCD behind a PCF8574 I2C backpack."""
+    check_address(address)
+    if size not in hd44780.SIZES:
+        raise ValueError("size must be one of %s, not %r" % (", ".join(hd44780.SIZES), size))
+    transfers = [data for data, _ in hd44780.compose(message, size, backlight) if data]
+
+    def work(bp) -> Dict[str, Any]:
+        with _open(bp, "i2c", session) as m:
+            sent = hd44780.send(m, address, transfers)
+        return {"address": "0x%02X" % address, "size": size, "sent_bytes": sent,
+                "steps": len(transfers), "check": LCD_CHECK}
+    out = _with_power(session, session.run(work))
+    if session.variant in ("v3", "v4") and out["power"]:
+        out["supply_note"] = LCD_SUPPLY_NOTE
+    return out
 
 
 # -- SPI --------------------------------------------------------------------------
