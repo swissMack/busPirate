@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Optional
+from typing import Any, Dict, Optional, Sequence
 
 from ..base import SerialLink, TrafficHook
 from ..device import parse_bp6_status
@@ -215,6 +215,35 @@ class BusPirate6(SerialLink):
         self.configure(pullup_enable=on, pullup_disable=not on)
         return self.status()
 
+    def set_pins(self, direction_mask: int, direction: int, value_mask: int, value: int) -> Status:
+        """Set IO pins: bit n is IOn, direction 1 = output. Only masked bits change."""
+        for name, bits in (("direction_mask", direction_mask), ("direction", direction),
+                           ("value_mask", value_mask), ("value", value)):
+            if not 0 <= bits <= 0xFF:
+                raise ValueError(f"{name} must fit in 8 bits (IO0 to IO7)")
+        self.configure(io_direction=(direction_mask, direction), io_value=(value_mask, value))
+        return self.status()
+
+    def read_pins(self) -> Dict[str, Any]:
+        """Direction and level bits of the IO pins, and each pin's voltage in mV."""
+        status = self.status()
+        return {
+            "direction": status.io_direction,
+            "value": status.io_value,
+            "mv": {f"IO{n}": mv for n, mv in enumerate(status.adc_mv)},
+        }
+
+    def set_onboard_leds(self, colors: Sequence[int]) -> None:
+        """Colour the board's own LEDs (0xRRGGBB each, from the first)."""
+        count = self.status(quiet=True).led_count
+        if len(colors) > count:
+            raise ValueError(f"the board has {count} LEDs; {len(colors)} colours were given")
+        self.configure(led_color=[int(c) & 0xFFFFFF for c in colors])
+
+    def resume_onboard_leds(self) -> None:
+        """Give the onboard LEDs back to the board's own effect."""
+        self.configure(led_resume=True)
+
     def hiz(self) -> None:
         if self._mode is not None:
             self._mode.close()
@@ -251,6 +280,11 @@ class BusPirate6(SerialLink):
         from .modes import Bp6UART
 
         return self._enter_mode(Bp6UART)
+
+    def led(self):
+        from .modes import Bp6LED
+
+        return self._enter_mode(Bp6LED)
 
     def onewire(self):
         from .modes import Bp6OneWire

@@ -224,3 +224,24 @@ def test_only_corrupt_frames_end_in_a_protocol_error():
     link = BpioLink(_Port([b"\x05\x11\x00"]), lambda *a: None, timeout=0.05)
     with pytest.raises(ProtocolError):
         link.request(protocol.data_request(read=1))
+
+
+def test_led_colour_resume_and_submode_round_trip():
+    payload = protocol.configuration_request(
+        mode="LED", mode_config=protocol.ModeConfig(submode=1),
+        led_color=[0xFF0000, 0x00FF00, 0x0000FF], led_resume=True,
+    )
+    _, table = _root(payload)
+    request = CR.ConfigurationRequest()
+    request.Init(table.Bytes, table.Pos)
+    assert [request.LedColor(i) for i in range(request.LedColorLength())] == [
+        0xFF0000, 0x00FF00, 0x0000FF]
+    assert request.LedResume() is True
+    assert request.ModeConfiguration().Submode() == 1
+
+
+def test_no_led_fields_by_default():
+    _, table = _root(protocol.configuration_request(psu_disable=True))
+    request = CR.ConfigurationRequest()
+    request.Init(table.Bytes, table.Pos)
+    assert request.LedColorIsNone() and request.LedResume() is False

@@ -155,3 +155,53 @@ def test_a_failing_stop_does_not_hide_the_nack(bp, fake):
         fake.data_faults = ["Protocol request failed", None]  # the NACK, then a silent STOP
         with pytest.raises(NackError):
             i2c.read_register(0x76, 0xD0)
+
+
+# -- pins and LEDs -------------------------------------------------------------
+
+def test_set_pins_then_read(bp, fake):
+    bp.set_pins(0b100, 0b100, 0b100, 0b100)
+    pins = bp.read_pins()
+    assert pins["value"] & 0b100
+    assert pins["direction"] & 0b100
+    assert set(pins["mv"]) == {f"IO{n}" for n in range(8)}
+    assert fake.pin_log == [(0b100, 0b100, 0b100, 0b100)]
+
+
+def test_set_pins_changes_only_masked_bits(bp):
+    bp.set_pins(0b11, 0b11, 0b11, 0b11)
+    bp.set_pins(0b01, 0b00, 0b10, 0b00)
+    pins = bp.read_pins()
+    assert (pins["direction"], pins["value"]) == (0b10, 0b01)
+
+
+def test_onboard_leds_and_resume(bp, fake):
+    bp.set_onboard_leds([0xFF0000, 0x00FF00])
+    bp.resume_onboard_leds()
+    assert fake.led_log == [[0xFF0000, 0x00FF00], "resume"]
+
+
+def test_onboard_leds_limit(bp):
+    with pytest.raises(ValueError):
+        bp.set_onboard_leds([0] * 19)
+
+
+def test_ws2812_bytes(bp, fake):
+    with bp.led() as led:
+        led.write_pixels([0x112233])
+    assert fake.pixel_log == [bytes([0x22, 0x11, 0x33])]
+    assert fake.led_submode == 0
+
+
+def test_apa102_frames(bp, fake):
+    with bp.led() as led:
+        led.configure("apa102")
+        assert fake.led_submode == 1
+        led.write_pixels([0x112233])
+    assert fake.pixel_log == [bytes.fromhex("00 00 00 00 FF 33 22 11 FF")]
+
+
+def test_led_rejects_an_unknown_strip(bp):
+    with bp.led() as led:
+        with pytest.raises(ValueError):
+            led.configure("neopixel")

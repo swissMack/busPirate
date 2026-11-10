@@ -132,6 +132,16 @@ class FakeBp6:
         self.psu_ma = 0
         self.pullups = False
         self.requests = []
+        #: IO pin state as set over BPIO2 (bit n = IOn, direction 1 = output).
+        self.io_direction = 0
+        self.io_value = 0
+        #: Every request that set pins, LEDs or an LED-mode submode.
+        self.pin_log = []
+        self.led_log = []   # onboard colour lists; "resume" for a resume
+        self.led_submode = 0
+        self.led_count = 18
+        #: Bytes written to the LED strip, one entry per data request.
+        self.pixel_log = []
         device = bytearray(256)
         device[0xD0] = 0x58
         # The Bosch BMP280 datasheet's worked example (§8.1): these calibration
@@ -286,7 +296,9 @@ class FakeBp6:
         _ST.StatusResponseAddPsuCurrentError(b, self.psu_tripped)
         _ST.StatusResponseAddPullupEnabled(b, self.pullups)
         _ST.StatusResponseAddAdcMv(b, adc_vec)
-        _ST.StatusResponseAddLedCount(b, 18)
+        _ST.StatusResponseAddLedCount(b, self.led_count)
+        _ST.StatusResponseAddIoDirection(b, self.io_direction)
+        _ST.StatusResponseAddIoValue(b, self.io_value)
         return self._packet(b, ResponsePacketContents.StatusResponse, _ST.StatusResponseEnd(b))
 
     def _configure(self, request) -> bytes:
@@ -313,6 +325,18 @@ class FakeBp6:
                         error = "Power supply initialization failed"
                 else:
                     self.psu_enabled, self.psu_tripped = True, False
+        if request.IoDirectionMask() or request.IoValueMask():
+            dm, d = request.IoDirectionMask(), request.IoDirection()
+            vm, v = request.IoValueMask(), request.IoValue()
+            self.pin_log.append((dm, d, vm, v))
+            self.io_direction = (self.io_direction & ~dm) | (d & dm)
+            self.io_value = (self.io_value & ~vm) | (v & vm)
+        if not request.LedColorIsNone():
+            self.led_log.append([request.LedColor(i) for i in range(request.LedColorLength())])
+        if request.LedResume():
+            self.led_log.append("resume")
+        if request.Mode() and request.ModeConfiguration() is not None:
+            self.led_submode = request.ModeConfiguration().Submode()
         if request.PsuDisable():
             self.psu_enabled = False  # the trip flag stays, as on the real board
         if request.PullupEnable():
@@ -370,6 +394,9 @@ class FakeBp6:
         if self.mode == "UART":
             if written and self.uart_echo:
                 self.uart_receive(written)
+            return self._data_response(b"")
+        if self.mode == "LED":
+            self.pixel_log.append(written)
             return self._data_response(b"")
         return self._data_response(b"", error="Invalid mode")
 

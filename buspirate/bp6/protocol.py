@@ -9,7 +9,7 @@ table has a NULL entry for it (src/binmode/bpio.c) and can crash on one.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 import flatbuffers
 
@@ -42,6 +42,7 @@ class ModeConfig:
     clock_polarity: bool = False
     clock_phase: bool = False
     chip_select_idle: bool = True
+    submode: int = 0
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,9 @@ class Status:
     psu_tripped: bool = False
     pullups: bool = False
     adc_mv: Tuple[int, ...] = ()
+    io_direction: int = 0
+    io_value: int = 0
+    led_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -107,6 +111,8 @@ def _mode_config(builder, config: ModeConfig) -> int:
     _MC.ModeConfigurationAddClockPolarity(builder, config.clock_polarity)
     _MC.ModeConfigurationAddClockPhase(builder, config.clock_phase)
     _MC.ModeConfigurationAddChipSelectIdle(builder, config.chip_select_idle)
+    if config.submode:
+        _MC.ModeConfigurationAddSubmode(builder, config.submode)
     return _MC.ModeConfigurationEnd(builder)
 
 
@@ -122,12 +128,20 @@ def configuration_request(
     pullup_disable: bool = False,
     io_direction: Optional[Tuple[int, int]] = None,
     io_value: Optional[Tuple[int, int]] = None,
+    led_color: Optional[Sequence[int]] = None,
+    led_resume: bool = False,
 ) -> bytes:
     """One ConfigurationRequest. A mode always travels with its configuration:
     the firmware requires ``mode_configuration`` whenever ``mode`` is set."""
     builder = flatbuffers.Builder(128)
     mode_name = builder.CreateString(mode) if mode is not None else None
     mode_table = _mode_config(builder, mode_config or ModeConfig()) if mode is not None else None
+    colors = None
+    if led_color is not None:
+        _CR.ConfigurationRequestStartLedColorVector(builder, len(led_color))
+        for color in reversed(list(led_color)):
+            builder.PrependUint32(int(color))
+        colors = builder.EndVector()
     _CR.ConfigurationRequestStart(builder)
     if mode_name is not None:
         _CR.ConfigurationRequestAddMode(builder, mode_name)
@@ -148,6 +162,10 @@ def configuration_request(
     if io_value is not None:
         _CR.ConfigurationRequestAddIoValueMask(builder, io_value[0])
         _CR.ConfigurationRequestAddIoValue(builder, io_value[1])
+    if colors is not None:
+        _CR.ConfigurationRequestAddLedColor(builder, colors)
+    if led_resume:
+        _CR.ConfigurationRequestAddLedResume(builder, True)
     return _packet(
         builder, RequestPacketContents.ConfigurationRequest, _CR.ConfigurationRequestEnd(builder)
     )
@@ -212,6 +230,9 @@ def _status(table) -> Status:
         psu_tripped=bool(table.PsuCurrentError()),
         pullups=bool(table.PullupEnabled()),
         adc_mv=tuple(table.AdcMv(index) for index in range(table.AdcMvLength())),
+        io_direction=table.IoDirection(),
+        io_value=table.IoValue(),
+        led_count=table.LedCount(),
     )
 
 
