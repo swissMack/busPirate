@@ -119,7 +119,7 @@ def test_every_device_is_well_formed():
 
 def test_scan_labels_come_from_the_catalog():
     assert devices.i2c_label(0x38) == "AHT20"
-    assert devices.i2c_label(0x77) == "BMP280 / BME280 / BMP180"
+    assert devices.i2c_label(0x77) == "BMP280 / BME280 / MS5611 / BMP180"
     assert devices.i2c_label(0x50) == "24Cxx EEPROM"
     assert devices.i2c_label(0x11) == ""
     assert devices.onewire_label(0x28) == "DS18B20 thermometer"
