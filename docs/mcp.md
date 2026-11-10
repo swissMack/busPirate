@@ -53,6 +53,7 @@ board without an ADC gets no `pins_read_voltage`, for instance).
 | `power_plan`, `power_apply`, `power_off` | the two-step power switch, below |
 | `hiz` | all pins to high-impedance (the safe state) |
 | `i2c_scan`, `i2c_read`, `i2c_sensor` | scan with chip labels; read a register; read a known sensor in real units |
+| `i2c_write`, `lcd_write` | write raw bytes (a register is the first byte); show text on an HD44780 LCD behind a PCF8574 backpack. On a v3/v4 the supply drops when the tool returns, so an LCD powered from the Bus Pirate loses its text |
 | `spi_identify`, `spi_transfer`, `spi_sensor_read` | flash JEDEC ID with the part named; raw transfer; known SPI sensors |
 | `uart_send`, `uart_listen` | send text; capture what the target says |
 | `onewire_scan` | list 1-Wire devices (DS18B20 temperatures in °C) |
@@ -79,6 +80,49 @@ What "powered" means differs by board:
 - **BP6 / BP5:** the supply stays on until `power_off`, a trip, or disconnect.
 - **ESP32 Bit Pirate:** the supply is the **dock switch** (1.8, 3.3 or 5 V),
   set by you. Software cannot turn it off; `hiz` says so.
+
+## The Bus Pirate 6 server (`bp6`)
+
+`buspirate mcp-bp6` is a second server for the **Bus Pirate 6 only**. It works
+from recipes: name a device ("lcd", "bme280", "ds18b20", "spi flash") and the
+assistant finds its recipe, shows you the wiring and the power plan in one
+message, and runs it after your yes. Register it at user scope through uv,
+from the repo folder:
+
+```bash
+R="$PWD"
+claude mcp add --scope user bp6 -- \
+  uv run --isolated --python 3.13 --with-editable "${R}[mcp]" python -m buspirate mcp-bp6
+claude mcp add --scope user bp6-demo -- \
+  uv run --isolated --python 3.13 --with-editable "${R}[mcp]" python -m buspirate mcp-bp6 --demo
+```
+
+As above, in zsh write `"${R}[mcp]"`, not `"$R[mcp]"`. `bp6-demo` serves a
+simulated Bus Pirate 6, with no hardware.
+
+How it differs from `buspirate`:
+
+- **Every tool is listed from the start**, and there is no `find_boards`. The
+  board opens on first use, not at start-up, so `bp6` can be registered next to
+  `buspirate` without fighting over the port. If the port is busy, the tool
+  says which program to close. With two BP6s plugged in it uses the first and
+  names the others; `connect(port)` picks another. Any other board is refused
+  with a pointer to the `buspirate` server.
+- **Recipes:** `recipes(query)` finds one; `recipe_plan(name, options)`
+  measures the target and returns the wiring, the power plan and a token
+  without switching anything; `recipe_run(token)` applies the plan, runs a
+  check, then the action. A target that already has its own voltage is
+  *target-powered*: the supply stays off. If the check fails, power stays as
+  planned so you can fix the wiring and re-run with `recipe_run(token=None)`
+  within 5 minutes.
+- **Primitive tools:** `board_status`, `connect`, `wiring`, `hiz`, `power_off`,
+  `measure_voltages`, `power_plan`, `power_apply`, `i2c_scan`, `i2c_read`,
+  `i2c_write`, `spi_transfer`, `uart_send`, `uart_listen`, `onewire_scan`,
+  `pins` (drive IO pins with 1, 0 or `"in"` and read every pin's level and
+  voltage) and `bp6_notes` (limits, pin map with colours, the pull-up rule and
+  the risks).
+- **The supply is capped at 5 V, and goes off when the session ends:** on exit
+  the board goes to HiZ, supply and pull-ups off, so an LCD loses its text.
 
 ## Stage roadmap
 

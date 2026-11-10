@@ -98,6 +98,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="which board the demo simulates (default: v3)",
     )
 
+    bp6cmd = sub.add_parser(
+        "mcp-bp6", help="serve a Bus Pirate 6 to an AI assistant over MCP, with recipes (stdio)"
+    )
+    bp6cmd.add_argument(
+        "--demo",
+        action="store_true",
+        help="run against a simulated Bus Pirate 6, with no hardware",
+    )
+
     appcmd = sub.add_parser("app", help="open the dashboard in its own window")
     appcmd.add_argument(
         "--port-number",
@@ -222,17 +231,32 @@ def cmd_dashboard(args) -> int:
     return 0
 
 
+MCP_NEEDS = "the MCP server needs Python 3.10+ and: pip install 'buspirate[mcp]'"
+
+
 def cmd_mcp(args) -> int:
-    need = "the MCP server needs Python 3.10+ and: pip install 'buspirate[mcp]'"
     if sys.version_info < (3, 10):
-        print(need, file=sys.stderr)
+        print(MCP_NEEDS, file=sys.stderr)
         return 2
     try:
         from .mcp.server import run_stdio
     except ImportError:
-        print(need, file=sys.stderr)
+        print(MCP_NEEDS, file=sys.stderr)
         return 2
     run_stdio(simulated=args.variant if args.demo else None)
+    return 0
+
+
+def cmd_mcp_bp6(args) -> int:
+    if sys.version_info < (3, 10):
+        print(MCP_NEEDS, file=sys.stderr)
+        return 2
+    try:
+        from .mcp_bp6.server import run_stdio
+    except ImportError:
+        print(MCP_NEEDS, file=sys.stderr)
+        return 2
+    run_stdio(demo=args.demo)
     return 0
 
 
@@ -267,6 +291,7 @@ def main(argv=None) -> int:
         "dashboard": cmd_dashboard,
         "app": cmd_app,
         "mcp": cmd_mcp,
+        "mcp-bp6": cmd_mcp_bp6,
     }
     try:
         return handlers[args.command](args)

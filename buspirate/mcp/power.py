@@ -7,14 +7,26 @@ owner then confirmed.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional
 
+from ..exceptions import BusPirateError
 from ..web.wiring import colour_name
+
+log = logging.getLogger(__name__)
 
 SOURCE_OWNER = "owner"
 SOURCE_MEASURED = "measured"
 _SOURCES = (SOURCE_OWNER, SOURCE_MEASURED)
+
+PSU_TRIPPED = ("the supply tripped (or would not start): the target drew more than the "
+               "%d mA current limit and the Bus Pirate 6 cut it — check the wiring for "
+               "a short, then plan again; the supply is off")
+V3_POWER_NOTE = ("on a v3/v4 the supply is asserted for each bus job and drops when "
+                 "that job's mode exits; \"power\": true in a bus result means approved "
+                 "and applied for that job")
+_BP6_FAMILY = ("bp6", "bp5")
 
 DEFAULT_MILLIAMPS = 100
 BP6_MV_RANGE = (800, 5000)
@@ -145,3 +157,48 @@ def suggest_level(m: Measurement) -> Optional[int]:
         return None
     top = max(live)
     return min(DOCK_LEVELS, key=lambda lvl: abs(lvl - top))
+
+
+def _supply_off(bp: Any) -> None:
+    try:
+        bp.set_power(False)  # never leave a half-applied plan on
+    except BusPirateError:
+        log.warning("could not switch the supply back off", exc_info=True)
+
+
+def apply_plan(bp: Any, session: Any, plan: PowerPlan) -> Dict[str, Any]:
+    """Switch a confirmed plan on; record it on ``session`` only if it held.
+
+    Call under the session lock (``session.run``). Raises ``PowerRefused`` when
+    the board is not the one the plan was made for.
+    """
+    if bp.profile.variant != plan.variant:
+        raise PowerRefused("this plan was made for a %s, but the connected board is %s; "
+                           "nothing was switched — plan again"
+                           % (plan.variant, bp.profile.variant))
+    out = plan.to_dict()
+    if plan.variant in _BP6_FAMILY:
+        try:
+            bp.set_power(True, millivolts=plan.millivolts, milliamps=plan.milliamps)
+            st = bp.set_pullups(plan.pullups)
+        except BusPirateError:
+            _supply_off(bp)
+            session.power = None
+            raise
+        if st.psu_tripped or not st.psu_enabled:
+            # Never record it: every bus tool would re-enable the supply into the fault.
+            _supply_off(bp)
+            session.power = None
+            return {"error": PSU_TRIPPED % plan.milliamps, "applied": False,
+                    "psu_enabled": False, "psu_tripped": st.psu_tripped}
+        out.update(psu_enabled=st.psu_enabled, psu_mv=st.psu_mv, psu_ma=st.psu_ma,
+                   psu_tripped=st.psu_tripped, pullups_on=st.pullups)
+    elif plan.variant in ("v3", "v4"):
+        out["pins"] = bp.decode_pins(bp.set_pins(power=True, pullups=plan.pullups))
+        out["note"] = V3_POWER_NOTE
+    else:
+        out["note"] = ("recorded only: software cannot switch this board's "
+                       "supply; the owner sets it")
+    session.power = plan
+    out["applied"] = True
+    return out

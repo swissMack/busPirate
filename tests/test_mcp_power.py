@@ -2,7 +2,8 @@ import pytest
 
 from buspirate.connect import open_simulated
 from buspirate.mcp.power import (
-    SOURCE_OWNER, Measurement, PowerRefused, measure, plan_power, suggest_level,
+    PSU_TRIPPED, SOURCE_OWNER, Measurement, PowerRefused, apply_plan, measure, plan_power,
+    suggest_level,
 )
 
 
@@ -93,3 +94,72 @@ def test_v4_pullups_one_path_only():
     assert "to the target's VCC" not in text.split("pull-ups:")[1]
     v3 = " ".join(plan_power("v3", 3300, SOURCE_OWNER, pullups=True).instructions)
     assert "wire VPU (green) to the target's VCC" in v3
+
+
+class _Session:
+    power = None
+
+
+def test_apply_plan_bp6_records_power():
+    bp = open_simulated("bp6")
+    try:
+        session = _Session()
+        plan = plan_power("bp6", 3300, SOURCE_OWNER)
+        result = apply_plan(bp, session, plan)
+        assert session.power is plan
+        assert result["psu_enabled"] is True and result["applied"] is True
+    finally:
+        bp.close()
+
+
+def _bp6_with_load(load_ma):
+    from buspirate.bp6 import BusPirate6
+    from buspirate.simulator_bp6 import FakeBp6
+
+    fake = FakeBp6(load_ma=load_ma)
+    bp = BusPirate6(FakeBp6.BINARY, terminal_port=FakeBp6.TERMINAL,
+                    serial_factory=fake.factory(), connect_timeout=0.2).open()
+    return fake, bp
+
+
+def test_apply_plan_trip_leaves_power_off():
+    import dataclasses
+
+    fake, bp = _bp6_with_load(12)
+    try:
+        real = bp.status
+        bp.status = lambda *a, **k: dataclasses.replace(
+            real(*a, **k), psu_tripped=True, psu_enabled=False)
+        session = _Session()
+        result = apply_plan(bp, session, plan_power("bp6", 3300, SOURCE_OWNER, milliamps=100))
+        assert session.power is None
+        assert result["error"] == PSU_TRIPPED % 100 and result["applied"] is False
+        assert result["psu_enabled"] is False and result["psu_tripped"] is True
+        assert fake.psu_enabled is False
+    finally:
+        bp.close()
+
+
+def test_apply_plan_load_over_limit_raises_with_supply_off():
+    from buspirate.exceptions import BusPirateError
+
+    fake, bp = _bp6_with_load(200)  # the board refuses to start into this load
+    try:
+        session = _Session()
+        with pytest.raises(BusPirateError, match="100 mA"):
+            apply_plan(bp, session, plan_power("bp6", 3300, SOURCE_OWNER, milliamps=100))
+        assert session.power is None
+        assert fake.psu_enabled is False
+    finally:
+        bp.close()
+
+
+def test_apply_plan_wrong_board_refused():
+    bp = open_simulated("bp6")
+    try:
+        session = _Session()
+        with pytest.raises(PowerRefused):
+            apply_plan(bp, session, plan_power("v3", 3300, SOURCE_OWNER))
+        assert session.power is None
+    finally:
+        bp.close()

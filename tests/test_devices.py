@@ -101,7 +101,11 @@ def test_every_module_in_the_package_is_in_the_catalog():
     for info in pkgutil.iter_modules(devices.__path__):
         name = f"{devices.__name__}.{info.name}"
         assert name in listed, f"{name} is not in devices._MODULES"
-        assert importlib.import_module(name).DEVICES
+        module = importlib.import_module(name)
+        if info.name in ("eeprom24", "nmea"):  # readers: no catalogue entry
+            assert hasattr(module, "DEVICES")
+        else:
+            assert module.DEVICES
 
 
 def test_every_device_is_well_formed():
@@ -119,7 +123,7 @@ def test_every_device_is_well_formed():
 
 def test_scan_labels_come_from_the_catalog():
     assert devices.i2c_label(0x38) == "AHT20"
-    assert devices.i2c_label(0x77) == "BMP280 / BME280 / BMP180"
+    assert devices.i2c_label(0x77) == "BMP280 / BME280 / MS5611 / BMP180"
     assert devices.i2c_label(0x50) == "24Cxx EEPROM"
     assert devices.i2c_label(0x11) == ""
     assert devices.onewire_label(0x28) == "DS18B20 thermometer"

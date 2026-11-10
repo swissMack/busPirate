@@ -35,6 +35,8 @@ class BoardSession:
         self.board: Any = None
         self.port: Optional[str] = None
         self.power: Optional[PowerPlan] = None
+        #: The BP6 recipe that last ran here, for a re-run without a token.
+        self.last_recipe: Optional[Dict[str, Any]] = None
 
     # -- discovery / connection ---------------------------------------------
 
@@ -95,6 +97,7 @@ class BoardSession:
 
     def _drop(self) -> None:
         board, self.board, self.port, self.power = self.board, None, None, None
+        self.last_recipe = None
         if board is not None:
             try:
                 board.close()

@@ -16,7 +16,7 @@ Firmware behaviour relied on (src/binmode/bpio_*.c, firmware built 2026-10-12):
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Sequence
 
 from ..device import I2C_SPEEDS_MODERN, SPI_SPEEDS
 from ..devices.ds18x20 import crc8
@@ -397,3 +397,49 @@ def _address(address: int) -> int:
     if not 0 <= address <= 0x7F:
         raise ValueError(f"0x{address:X} is not a 7-bit I2C address")
     return address
+
+
+#: LED-mode submode numbers in BPIO2.
+# UNVERIFIED on hardware: the firmware source is not in the repo and the
+# research note gives only the terminal's menu types, so these are the guess.
+LED_SUBMODES = {"ws2812": 0, "apa102": 1}
+
+
+class Bp6LED(_Bp6Mode):
+    """An addressable LED strip on IO0 (WS2812) or IO0 and IO1 (APA102)."""
+
+    title = "LED"
+    name = "LED"
+
+    def __init__(self, bp) -> None:
+        self.kind = "ws2812"
+        super().__init__(bp)
+
+    def default_config(self) -> ModeConfig:
+        return ModeConfig(submode=LED_SUBMODES[self.kind])
+
+    def configure(self, kind: str) -> None:
+        if kind not in LED_SUBMODES:
+            raise ValueError(f"kind must be one of {sorted(LED_SUBMODES)}")
+        self._check_active()
+        self.kind = kind
+        self.config = self.default_config()
+        self._apply()
+
+    def write_pixels(self, colors: Sequence[int]) -> None:
+        """Send one 0xRRGGBB colour per pixel, in the strip's own byte order."""
+        self._check_active()
+        rgb = [((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF) for c in colors]
+        if self.kind == "ws2812":
+            data = b"".join(bytes((g, r, b)) for r, g, b in rgb)
+        else:
+            data = b"\x00" * 4
+            data += b"".join(bytes((0xE0 | 31, b, g, r)) for r, g, b in rgb)
+            data += b"\xff" * ((len(rgb) + 15) // 16)
+        limit = self._limit("max_write")
+        for offset in range(0, len(data), limit):
+            response = self._data(start=offset == 0, write=data[offset:offset + limit],
+                                  stop=offset + limit >= len(data))
+            if response.error:
+                self._release()
+                raise ProtocolError(f"the LED strip write failed: {response.error}")

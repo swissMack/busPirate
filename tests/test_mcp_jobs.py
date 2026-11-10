@@ -8,6 +8,8 @@ from buspirate.mcp.jobs import (
     i2c_read,
     i2c_scan,
     i2c_sensor,
+    i2c_write,
+    lcd_write,
     onewire_scan,
     pins_read_voltage,
     pwm,
@@ -44,7 +46,7 @@ def test_i2c_scan_labels_devices(variant):
 
 def test_i2c_scan_addresses_and_reading_bp6():
     result = i2c_scan(connected("bp6"))
-    device = result["devices"][0]
+    device = next(d for d in result["devices"] if d["address"] == "0x76")
     assert device["address"] == "0x76" and device["address_8bit"] == "0xEC/0xED"
     assert device["reading"]["device"] and device["reading"]["values"]
     assert result["speed_khz"] == 100
@@ -254,6 +256,63 @@ def test_unplug_mid_scan_raises_boardgone():
 
 def test_simulated_bmp280_reads_the_datasheet_example():
     # Bosch BMP280 datasheet §8.1 worked example: 25.08 °C, 1006.53 hPa.
-    values = i2c_scan(connected("bp6"))["devices"][0]["reading"]["values"]
+    bmp = next(d for d in i2c_scan(connected("bp6"))["devices"] if d["address"] == "0x76")
+    values = bmp["reading"]["values"]
     assert values["Temperature"] == "25.08 °C"
     assert values["Pressure"] == "1006.53 hPa"
+
+
+
+# -- I2C writes and the LCD ---------------------------------------------------------
+
+def test_i2c_write_lands_in_the_register_bp6():
+    s = connected("bp6")
+    out = i2c_write(s, 0x76, "f4 27")
+    assert out["address"] == "0x76" and out["written_bytes"] == 2
+    assert i2c_read(s, 0x76, 0xF4)["hex"] == "27"
+
+
+@pytest.mark.parametrize("variant", ALL)
+def test_i2c_write_to_a_present_device(variant):
+    s = connected(variant)
+    address = int(i2c_scan(s)["devices"][0]["address"], 16)
+    assert i2c_write(s, address, "00")["written_bytes"] == 1
+
+
+@pytest.mark.parametrize("bad", ["", "zz", "f"])
+def test_i2c_write_rejects_bad_hex(bad):
+    with pytest.raises(ValueError):
+        i2c_write(connected("bp6"), 0x76, bad)
+
+
+def test_i2c_write_rejects_8bit_address_and_oversize():
+    with pytest.raises(ValueError, match="8-bit"):
+        i2c_write(connected("bp6"), 0xEC, "00")
+    with pytest.raises(ValueError):
+        i2c_write(connected("bp6"), 0x76, "00" * 4097)
+
+
+def test_lcd_write_sends_the_composed_steps():
+    s = connected("bp6")
+    out = lcd_write(s, "Hello World", address=0x76)
+    expected = sum(len(d) for d, _ in devices.hd44780.compose("Hello World", "16x2") if d)
+    assert out["sent_bytes"] == expected and out["size"] == "16x2"
+    assert "contrast" in out["check"]
+
+
+def test_lcd_write_rejects_unknown_size():
+    with pytest.raises(ValueError, match="16x2"):
+        lcd_write(connected("bp6"), "hi", size="8x1")
+
+
+@pytest.mark.parametrize("variant", ["v3", "v4"])
+def test_lcd_write_on_v3_v4_warns_the_supply_drops(variant):
+    s = connected(variant)
+    s.power = plan_power(variant, 5000, SOURCE_OWNER)
+    address = int(i2c_scan(s)["devices"][0]["address"], 16)
+    out = lcd_write(s, "hi", address=address)
+    assert "own supply" in out["supply_note"]
+
+
+def test_lcd_write_bp6_has_no_supply_note():
+    assert "supply_note" not in lcd_write(connected("bp6"), "hi", address=0x76)

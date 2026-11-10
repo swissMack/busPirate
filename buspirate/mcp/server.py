@@ -19,7 +19,10 @@ from .. import boards
 from ..exceptions import BusPirateError
 from . import jobs, knowledge
 from .confirm import ConfirmError, ConfirmStore
-from .power import SOURCE_MEASURED, SOURCE_OWNER, PowerRefused, measure, plan_power, suggest_level
+from .power import (  # noqa: F401  (PSU_TRIPPED, V3_POWER_NOTE re-exported)
+    PSU_TRIPPED, SOURCE_MEASURED, SOURCE_OWNER, V3_POWER_NOTE, PowerRefused, apply_plan,
+    measure, plan_power, suggest_level,
+)
 from .session import BoardGone, BoardSession, NotConnected
 from .wiring import JOBS, job_notes, wiring_steps
 
@@ -43,6 +46,8 @@ BOARD_TOOLS: Dict[str, Tuple[FrozenSet[str], ...]] = {
     "i2c_scan": _ANY_BOARD,
     "i2c_read": _ANY_BOARD,
     "i2c_sensor": _ANY_BOARD,
+    "i2c_write": _ANY_BOARD,
+    "lcd_write": _ANY_BOARD,
     "spi_identify": _ANY_BOARD,
     "spi_transfer": _ANY_BOARD,  # modes other than 0 need spi_modes, checked per call
     "spi_sensor_read": _ANY_BOARD,
@@ -58,12 +63,6 @@ BOARD_TOOLS: Dict[str, Tuple[FrozenSet[str], ...]] = {
 RECONNECT_HINT = "If new tools don't appear, run /mcp → reconnect buspirate."
 BOARD_GONE = "board disconnected — plug it back in and call connect"
 POWER_ACTION = "power_apply"
-PSU_TRIPPED = ("the supply tripped (or would not start): the target drew more than the "
-               "%d mA current limit and the Bus Pirate 6 cut it — check the wiring for "
-               "a short, then plan again; the supply is off")
-V3_POWER_NOTE = ("on a v3/v4 the supply is asserted for each bus job and drops when "
-                 "that job's mode exits; \"power\": true in a bus result means approved "
-                 "and applied for that job")
 NO_SOFTWARE_POWER_NOTE = ("software cannot switch this board's supply; ask the owner to "
                           "disconnect VIO or switch the target off")
 _BP6_FAMILY = ("bp6", "bp5")
@@ -253,47 +252,13 @@ def build_server(session: BoardSession) -> MCPServer:
                                  "%s; nothing was switched — plan again"
                                  % (p.variant, session.variant or "none")}
 
-            def supply_off(bp: Any) -> None:
-                try:
-                    bp.set_power(False)  # never leave a half-applied plan on
-                except BusPirateError:
-                    log.warning("could not switch the supply back off", exc_info=True)
-
             def switch(bp: Any) -> Dict[str, Any]:
                 # Checked again under the session lock: the board may have been
                 # swapped between the check above and taking the lock.
-                if bp.profile.variant != p.variant:
-                    return {"error": "this plan was made for a %s, but the connected board "
-                                     "is %s; nothing was switched — plan again"
-                                     % (p.variant, bp.profile.variant)}
-                out = p.to_dict()
-                if p.variant in _BP6_FAMILY:
-                    try:
-                        bp.set_power(True, millivolts=p.millivolts, milliamps=p.milliamps)
-                        st = bp.set_pullups(p.pullups)
-                    except BusPirateError:
-                        supply_off(bp)
-                        session.power = None
-                        raise
-                    if st.psu_tripped or not st.psu_enabled:
-                        # Never record it: every bus tool would re-enable the
-                        # supply into the fault.
-                        supply_off(bp)
-                        session.power = None
-                        return {"error": PSU_TRIPPED % p.milliamps, "applied": False,
-                                "psu_enabled": False, "psu_tripped": st.psu_tripped}
-                    out.update(psu_enabled=st.psu_enabled, psu_mv=st.psu_mv,
-                               psu_ma=st.psu_ma, psu_tripped=st.psu_tripped,
-                               pullups_on=st.pullups)
-                elif p.variant in ("v3", "v4"):
-                    out["pins"] = bp.decode_pins(bp.set_pins(power=True, pullups=p.pullups))
-                    out["note"] = V3_POWER_NOTE
-                else:
-                    out["note"] = ("recorded only: software cannot switch this board's "
-                                   "supply; the owner sets it")
-                session.power = p
-                out["applied"] = True
-                return out
+                try:
+                    return apply_plan(bp, session, p)
+                except PowerRefused as exc:
+                    return {"error": str(exc)}
             return session.run(switch)
         return await guard(ctx, apply)
 
@@ -335,6 +300,14 @@ def build_server(session: BoardSession) -> MCPServer:
 
     async def i2c_sensor(ctx: Context, address: int) -> Dict[str, Any]:
         return await guard(ctx, lambda: jobs.i2c_sensor(session, address))
+
+    async def i2c_write(ctx: Context, address: int, data_hex: str) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.i2c_write(session, address, data_hex))
+
+    async def lcd_write(ctx: Context, message: str, address: int = 0x27, size: str = "16x2",
+                        backlight: bool = True) -> Dict[str, Any]:
+        return await guard(ctx, lambda: jobs.lcd_write(session, message, address, size,
+                                                       backlight))
 
     async def spi_identify(ctx: Context, mode: int = 0,
                            speed_khz: int = 1000) -> Dict[str, Any]:
@@ -414,6 +387,15 @@ def build_server(session: BoardSession) -> MCPServer:
                      "Use for a chip or register i2c_scan did not read." + unpowered),
         "i2c_sensor": (i2c_sensor, "Make the I2C sensor at a 7-bit address measure and "
                        "return its values in real units." + unpowered),
+        "i2c_write": (i2c_write, "Write hex bytes to an I2C device in one transaction "
+                      "(7-bit address 0x08-0x77 as an integer; to set a register, its "
+                      "number is the first byte, e.g. 'f4 27'). It changes the chip, so "
+                      "say what you are writing and why before you call it." + unpowered),
+        "lcd_write": (lcd_write, "Show a message on an HD44780 character LCD behind a "
+                      "PCF8574 I2C backpack (usually 0x27 or 0x3F; size 16x2 or 20x4). "
+                      "Each line of the message is a row; the words clear, home, 'line N' "
+                      "and 'backlight on/off' on a line of their own are commands. "
+                      "The display cannot answer, so ask the owner what it shows." + unpowered),
         "spi_identify": (spi_identify, "Read an SPI flash chip's JEDEC ID: maker, type "
                          "and size. An all-ff or all-00 ID comes with a warning: it "
                          "means wiring, not a blank chip." + unpowered),
