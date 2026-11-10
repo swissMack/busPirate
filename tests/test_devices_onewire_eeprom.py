@@ -61,3 +61,36 @@ def test_scratchpad_mismatch_raises():
     with pytest.raises(oe.ScratchpadError) as exc:
         oe.write(chip, 0x2D, 0, b"\x01\x02", wait=0)
     assert isinstance(exc.value, BusPirateError) and bytes(chip.mem) == old
+
+
+def test_ds2431_refuses_to_copy_an_unaligned_or_short_scratchpad():
+    """The merge test depends on this: a real DS2431 copies only a full aligned row."""
+    chip = FakeDs2431()
+    old = bytes(chip.mem)
+    chip.reset()
+    chip.write(bytes([0xCC, 0x0F, 6, 0]) + b"\xaa\xbb\xcc")
+    chip.reset()
+    chip.write(b"\xcc\xaa")
+    back = chip.read(3 + 3)
+    assert back[2] & 0x20  # PF set
+    chip.reset()
+    chip.write(bytes([0xCC, 0x55]) + back[:3])
+    assert chip.read(1) == b"\xff" and bytes(chip.mem) == old
+
+
+def test_ds2433_partial_copy_inside_a_row_and_writes_past_the_end_refused():
+    chip = FakeDs2431(family=0x23)
+    chip.reset()
+    chip.write(bytes([0xCC, 0x0F, 4, 0]) + b"\x01\x02")
+    chip.reset()
+    chip.write(b"\xcc\xaa")
+    back = chip.read(5)
+    assert not back[2] & 0x20
+    chip.reset()
+    chip.write(bytes([0xCC, 0x55]) + back[:3])
+    assert chip.read(1) == b"\xaa" and bytes(chip.mem[4:6]) == b"\x01\x02"
+    chip.reset()
+    chip.write(bytes([0xCC, 0x0F, 0, 2]) + bytes(32))  # 0x200: at the end of memory
+    chip.reset()
+    chip.write(b"\xcc\xaa")
+    assert chip.read(3)[2] & 0x20

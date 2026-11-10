@@ -89,6 +89,9 @@ def _write_row(ow, start: int, image: bytes, row: int, wait: float) -> None:
     if back[:2] != ta or back[3:] != image:
         raise ScratchpadError("the scratchpad at 0x%04X read back %s, not what was written; "
                               "nothing was copied" % (start, back.hex(" ")))
+    if back[2] & 0x20 or back[2] & 0x1F != (start % row) + row - 1:
+        raise ScratchpadError("the scratchpad at 0x%04X reports E/S 0x%02X (partial or flagged): "
+                              "nothing was copied" % (start, back[2]))
     ow.reset()
     ow.write(bytes([SKIP_ROM, COPY_SCRATCHPAD]) + ta + back[2:3])
     time.sleep(wait)

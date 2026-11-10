@@ -304,8 +304,10 @@ class FakeDs2431:
             rom = body + bytes([_crc8(body)])
         self.rom = bytes(rom)
         self.copy_fails = False
+        self.family = family
         self.scratch_ta = b"\x00\x00"
         self.scratch = b""
+        self.pf = False  # E/S bit 5: the scratchpad is not a copyable one
         self._cmd = bytearray()
         self._sent = 0
 
@@ -314,13 +316,21 @@ class FakeDs2431:
         return True
 
     def _es(self):
-        return (self.scratch_ta[0] % self.row + len(self.scratch) - 1) & 0x1F
+        end = (self.scratch_ta[0] % self.row + len(self.scratch) - 1) & 0x1F
+        return end | (0x20 if self.pf else 0)
 
     def write(self, data):
         self._cmd += data
         rest = bytes(self._cmd[1:]) if self._cmd[:1] == b"\xcc" else b""
         if rest[:1] == b"\x0f" and len(rest) >= 3:
-            self.scratch_ta, self.scratch = rest[1:3], rest[3:3 + self.row]
+            ta = rest[1] | rest[2] << 8
+            offset = ta % self.row
+            self.scratch_ta = rest[1:3]
+            self.scratch = rest[3:3 + self.row - offset]  # a row's end truncates the data
+            # PF: a write at or past the end of memory; a DS2431 also needs the whole,
+            # row-aligned 8 bytes (it copies nothing else), a DS2433 may be partial.
+            self.pf = (ta >= self.size or ta + len(self.scratch) > self.size
+                       or (self.family == 0x2D and (offset != 0 or len(self.scratch) != self.row)))
 
     def _stream(self, at):
         cmd = bytes(self._cmd)
@@ -333,11 +343,12 @@ class FakeDs2431:
         if rest[:1] == b"\xaa":
             return self.scratch_ta + bytes([self._es()]) + self.scratch
         if rest[:1] == b"\x55" and len(rest) >= 4:
-            ok = rest[1:3] == self.scratch_ta and rest[3] == self._es() and not self.copy_fails
+            ok = (rest[1:3] == self.scratch_ta and rest[3] == self._es() and not self.pf
+                  and bool(self.scratch) and not self.copy_fails)
             if ok and at == 0:
                 start = self.scratch_ta[0] | self.scratch_ta[1] << 8
                 self.mem[start:start + len(self.scratch)] = self.scratch
-            return b"\xaa" if ok else b"\x00"
+            return b"\xaa" if ok else b"\xff"
         return b""
 
     def read(self, count):
