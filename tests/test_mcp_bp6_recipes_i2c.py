@@ -210,3 +210,86 @@ def test_eeprom_write_protected_unverified(session, confirm, tmp_path, monkeypat
     assert result["mismatches"] > 0
     assert "WP" in result["hint"]
     assert "error" not in result
+
+
+# -- DDR4 / DDR5 SPD ----------------------------------------------------------------
+
+def _ddr_fakes():
+    from buspirate.simulator_bp6 import FakeNack
+    from test_devices_spd import ddr4_image, ddr5_image
+    return FakeNack, ddr4_image, ddr5_image
+
+
+def _install_ddr4(fake, image):
+    FakeNack, _, _ = _ddr_fakes()
+    state = {"page": 0}
+
+    def module(written, count):
+        base = state["page"] * 256 + (written[0] if written else 0)
+        return image[base:base + count]
+
+    def spa(page):
+        def handler(written, count):
+            if count == 0:  # an address-only write selects the page
+                state["page"] = page
+                return b""
+            if page == 0 and state["page"] == 1:  # the read at 0x36 is NACKed on page 1
+                raise FakeNack()
+            return bytes(count)
+        return handler
+
+    fake.add_i2c_device(0x50, bytes(256), module)
+    fake.add_i2c_device(0x36, bytes(256), spa(0))
+    fake.add_i2c_device(0x37, bytes(256), spa(1))
+
+
+def _install_ddr5(fake, image):
+    state = {"page": 0}
+
+    def module(written, count):
+        if len(written) == 2 and written[0] == 0x0B:
+            state["page"] = written[1]
+            return b""
+        base = state["page"] * 128 + ((written[0] & 0x7F) if written else 0)
+        return image[base:base + count]
+
+    fake.add_i2c_device(0x50, bytes(256), module)
+
+
+def test_ddr_recipes_are_registered():
+    for name in ("ddr4-spd", "ddr5-spd"):
+        r = REGISTRY[name]
+        assert r.bus == "i2c" and r.risk == "none" and not r.pullups
+        assert (r.default_mv, r.min_mv, r.max_mv) == (5000, 4500, 5000)
+        assert r.wiring == (("5V", "VOUT"), ("GND", "GND"), ("SDA", "IO0"), ("SCL", "IO1"))
+
+
+def test_ddr4_recipe_saves_image(session, confirm, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _, ddr4_image, _ = _ddr_fakes()
+    image = ddr4_image()
+    _install_ddr4(_fake(session), image)
+    _, out = _run(session, confirm, "ddr4-spd")
+    res = out["result"]
+    assert res["memory_type"] == "DDR4" and res["part_number"] == "M378A1K43DB2-CTD"
+    assert res["crc_ok"] == [True, True]
+    assert Path(res["path"]).read_bytes() == image
+    assert "ddr4-spd-M378A1K43DB2-CTD" in Path(res["path"]).name
+
+
+def test_ddr5_recipe_reads_image(session, confirm, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _, _, ddr5_image = _ddr_fakes()
+    image = ddr5_image()
+    _install_ddr5(_fake(session), image)
+    _, out = _run(session, confirm, "ddr5-spd")
+    assert Path(out["result"]["path"]).read_bytes() == image
+    assert out["result"]["memory_type"] == "DDR5"
+
+
+def test_ddr5_recipe_wrong_module(session, confirm):
+    _, ddr4_image, _ = _ddr_fakes()
+    _install_ddr4(_fake(session), ddr4_image())
+    _, out = _run(session, confirm, "ddr5-spd")
+    assert out["stopped"] == "check failed"
+    assert "DDR5" in out["check"]["error"]
