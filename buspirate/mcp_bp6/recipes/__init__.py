@@ -87,3 +87,4 @@ def find_recipes(query: Optional[str]) -> List[Dict[str, str]]:
 
 
 from . import i2c  # noqa: E402,F401  (registers the I2C recipes)
+from . import identify, led, onewire, pins, spi, uart  # noqa: E402,F401  (the other buses)
