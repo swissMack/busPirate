@@ -205,3 +205,15 @@ def test_led_rejects_an_unknown_strip(bp):
     with bp.led() as led:
         with pytest.raises(ValueError):
             led.configure("neopixel")
+
+
+def test_spi_cs_idle_kept(bp, fake):
+    with bp.spi() as spi:
+        spi.set_cs_active_high(True)
+        assert fake.spi_cs_idle is False
+        spi.set_speed(2)
+        assert fake.spi_cs_idle is False
+        spi.set_mode(0)
+        assert fake.spi_cs_idle is False
+        spi.set_cs_active_high(False)
+        assert fake.spi_cs_idle is True

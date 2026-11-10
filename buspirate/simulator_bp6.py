@@ -25,6 +25,7 @@ from .bp6.framing import FrameReader, cobs_decode, frame
 from .devices.aht20 import crc8
 from .devices.eeprom24 import PAGES as _EEPROM_PAGES, SIZES as _EEPROM_SIZES
 from .devices.eeprom25 import PARTS as _SPI_PARTS
+from .devices.eeprom93 import PARTS as _MW_PARTS
 from .simulator import FakeFlash
 
 MODES = ("HiZ", "1WIRE", "UART", "HDUART", "I2C", "SPI", "2WIRE", "3WIRE",
@@ -219,6 +220,70 @@ class FakeEeprom25:
         return b"\x00" * read_count
 
 
+class FakeMicrowire:
+    """A 93Cxx Microwire EEPROM with a bit-level model; needs an active-high CS.
+
+    Zeros before the start bit (the first 1) are ignored. READ answers a dummy 0 and then
+    the data bits; WRITE needs EWEN; after a write it reads 0x00 (busy) for two polls.
+    """
+
+    cs_active_high = True
+
+    def __init__(self, part: str, org: int, data=None) -> None:
+        self.part, self.org = part.upper(), org
+        self.size, x8, x16 = _MW_PARTS[self.part]
+        self.abits = x8 if org == 8 else x16
+        self.mem = bytearray(data if data is not None else b"\xff" * self.size)
+        if len(self.mem) < self.size:
+            self.mem += b"\xff" * (self.size - len(self.mem))
+        self.write_enabled = False
+        self.ewen_works = True  # False: EWEN is ignored, so writes are too
+        self.busy_polls = 2
+        self.busy = 0
+        self.writes = []  # (offset, length) of each write
+
+    def exchange(self, written: bytes, read_count: int) -> bytes:
+        if not written:
+            if self.busy > 0:
+                self.busy -= 1
+                return b"\x00" * read_count
+            return b"\xff" * read_count
+        bits = "".join(format(b, "08b") for b in written)
+        start = bits.find("1")
+        if start < 0:
+            return b"\x00" * read_count
+        body = bits[start + 1:]
+        opcode, rest = body[:2], body[2:]
+        if len(opcode) < 2 or len(rest) < self.abits:
+            return b"\x00" * read_count
+        address, tail = int(rest[:self.abits], 2), rest[self.abits:]
+        unit = 8 if self.org == 8 else 16
+        step = unit // 8
+        if opcode == "10":  # READ: dummy 0, then data bits, address advancing
+            stream, pos = ["0"], (address * step) % self.size
+            for _ in range(-(-read_count * 8 // unit) + 1):
+                stream.append("".join(format(self.mem[(pos + i) % self.size], "08b")
+                                      for i in range(step)))
+                pos = (pos + step) % self.size
+            out = "".join(stream)
+            return int(out[:read_count * 8], 2).to_bytes(read_count, "big") if read_count else b""
+        if opcode == "01":  # WRITE
+            if len(tail) < unit or not self.write_enabled:
+                return b"\x00" * read_count
+            pos = (address * step) % self.size
+            self.mem[pos:pos + step] = int(tail[:unit], 2).to_bytes(step, "big")
+            self.writes.append((pos, step))
+            self.busy = self.busy_polls
+            return b"\x00" * read_count
+        if opcode == "00":  # extended: the top two address bits pick the command
+            top = rest[:2]
+            if top == "11":
+                self.write_enabled = self.ewen_works
+            elif top == "00":
+                self.write_enabled = False
+        return b"\x00" * read_count
+
+
 class FakeSht31:
     """An SHT31: ``F3 2D`` reads the status register, ``24 00`` measures 25 °C and 50 %RH."""
 
@@ -286,6 +351,8 @@ class FakeBp6:
         self.add_eeprom24(0x50, "24C02", bytes((i * 7 + 3) & 0xFF for i in range(256)))
         self.flash = FakeFlash()
         self.spi_device = self.flash  # whatever answers on CS: swap for another chip
+        #: The chip_select_idle of the last SPI mode configuration; False = active-high CS.
+        self.spi_cs_idle = True
         self.onewire_rom = DS18B20_ROM
         self.uart_echo = True
         self._spi_written, self._spi_read = bytearray(), 0
@@ -498,6 +565,7 @@ class FakeBp6:
             self.led_log.append("resume")
         if request.Mode() and request.ModeConfiguration() is not None:
             self.led_submode = request.ModeConfiguration().Submode()
+            self.spi_cs_idle = request.ModeConfiguration().ChipSelectIdle()
         if request.PsuDisable():
             self.psu_enabled = False  # the trip flag stays, as on the real board
         if request.PullupEnable():
@@ -545,6 +613,9 @@ class FakeBp6:
                 self._spi_written, self._spi_read = bytearray(), 0
             self._spi_written += written
             data = b""
+            if getattr(self.spi_device, "cs_active_high", False) and self.spi_cs_idle:
+                # An active-high chip never sees an active-low CS: reads come back 0x00.
+                return self._data_response(bytes(count))
             if count:
                 whole = self.spi_device.exchange(bytes(self._spi_written), self._spi_read + count)
                 data = whole[self._spi_read:]

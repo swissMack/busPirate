@@ -353,3 +353,49 @@ def test_spi_eeprom_protected_reports_the_error_and_is_not_committed(
     assert done["committed"] is False
     assert result["backup"] is not None
     assert bytes(chip.mem) == old
+
+
+# -- Microwire 93Cxx ---------------------------------------------------------------------
+
+def test_microwire_write_full_flow(session, confirm, tmp_path, monkeypatch):
+    from buspirate.simulator_bp6 import FakeMicrowire
+    monkeypatch.setenv("HOME", str(tmp_path))
+    chip = FakeMicrowire("93C46", 16, bytes((i * 7 + 1) & 0xFF for i in range(128)))
+    _fake(session).spi_device = chip
+    old = bytes(chip.mem)
+    assert REGISTRY["microwire-eeprom-write"].risk == "destructive"
+    assert REGISTRY["microwire-eeprom"].risk == "none"
+    prepared, done = _plan_prepare_commit(
+        session, confirm, "microwire-eeprom-write",
+        {"part": "93LC46B", "offset": 3, "data_hex": "aa bb cc"})
+    assert prepared["commit"]["chip"].startswith("93C46")
+    result = done["result"]
+    assert result["verified"] is True and result["written"] == 3
+    assert Path(result["backup"]["path"]).read_bytes() == old[2:6]
+    assert bytes(chip.mem[3:6]) == bytes.fromhex("aabbcc")
+    assert bytes(chip.mem[:3]) == old[:3] and bytes(chip.mem[6:]) == old[6:]
+    assert _fake(session).spi_cs_idle is False
+
+
+def test_microwire_backup_reads_whole_part(session, confirm, tmp_path, monkeypatch):
+    from buspirate.simulator_bp6 import FakeMicrowire
+    monkeypatch.setenv("HOME", str(tmp_path))
+    chip = FakeMicrowire("93C56", 8, bytes((i * 3 + 2) & 0xFF for i in range(256)))
+    _fake(session).spi_device = chip
+    _, out = _run(session, confirm, "microwire-eeprom", run_options={"part": "93C56", "org": 8})
+    assert Path(out["result"]["path"]).read_bytes() == bytes(chip.mem)
+
+
+def test_microwire_check_fails_on_zeros_with_hint(session, confirm):
+    from buspirate.simulator_bp6 import FakeMicrowire
+    _fake(session).spi_device = FakeMicrowire("93C46", 16, bytes(128))
+    plan = engine.plan_recipe(session, confirm, "microwire-eeprom", {"part": "93C46"})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out["stopped"] == "check failed"
+    assert "cannot tell" in out["check"]["hint"]
+
+
+def test_microwire_missing_part(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "microwire-eeprom", {})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out["stopped"] == "check failed" and "93C46" in out["check"]["error"]

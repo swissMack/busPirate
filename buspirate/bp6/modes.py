@@ -16,6 +16,7 @@ Firmware behaviour relied on (src/binmode/bpio_*.c, firmware built 2026-10-12):
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Dict, Iterable, List, Sequence
 
 from ..device import I2C_SPEEDS_MODERN, SPI_SPEEDS
@@ -205,15 +206,22 @@ class Bp6SPI(_Bp6Mode):
     def set_speed(self, speed: int) -> None:
         if speed not in SPI_SPEEDS:
             raise ValueError(f"speed must be one of {sorted(SPI_SPEEDS)}")
-        self.config = ModeConfig(speed=SPI_SPEEDS[speed], clock_polarity=self.config.clock_polarity,
-                                 clock_phase=self.config.clock_phase)
+        self.config = dataclasses.replace(self.config, speed=SPI_SPEEDS[speed])
         self._apply()
 
     def set_mode(self, mode: int, push_pull: bool = True) -> None:
         if mode not in (0, 1, 2, 3):
             raise ValueError("SPI mode must be 0, 1, 2 or 3")
-        self.config = ModeConfig(speed=self.config.speed, clock_polarity=bool(mode & 0b10),
-                                 clock_phase=bool(mode & 0b01))
+        self.config = dataclasses.replace(self.config, clock_polarity=bool(mode & 0b10),
+                                          clock_phase=bool(mode & 0b01))
+        self._apply()
+
+    def set_cs_active_high(self, active_high: bool) -> None:
+        """Select CS polarity: active-high (Microwire) or the usual active-low.
+
+        # UNVERIFIED on hardware: that the BP6 firmware honours chip_select_idle over BPIO2.
+        """
+        self.config = dataclasses.replace(self.config, chip_select_idle=not active_high)
         self._apply()
 
     def configure(self, push_pull: bool = True, clock_idle_high: bool = False,

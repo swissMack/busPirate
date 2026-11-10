@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from ... import devices
-from ...devices import eeprom25
+from ...devices import eeprom25, eeprom93
 from ...mcp import jobs
 from ...spiflash import SPIFlash
 from .. import backup, memory
@@ -241,6 +241,108 @@ register(Recipe(
     source=DOCS + "command-reference/",
     notes=("WP and HOLD must be high for the write to take",
            "name the part: a wrong size silently wraps")))
+
+
+# -- Microwire 93Cxx EEPROM ----------------------------------------------------------
+
+MW_WIRING = (("CS", "IO5"), ("CLK", "IO6"), ("DI", "IO7"), ("DO", "IO4"),
+             ("GND", "GND"), ("VCC", "VOUT"))
+MW_KHZ = 250
+MW_ZERO_HINT = ("the first two bytes read as 00 00: check CS (active-high, IO5), the ORG pin and "
+                "the supply (a plain 93C46 needs 4.5 V or more); if the chip really starts with "
+                "00 00, this check cannot tell; check the wiring with a chip of known contents")
+
+
+def _mw_args(opts: Options):
+    if not opts.get("part"):
+        raise ValueError("name the part with the part option; known: %s"
+                         % ", ".join(sorted(eeprom93.PARTS)))
+    org = opts.get("org", 16)
+    if isinstance(org, bool) or org not in (8, 16):
+        raise ValueError("org must be 8 or 16, not %r" % (org,))
+    return eeprom93.normalize(opts["part"], org), org
+
+
+def open_microwire(bp: Any):
+    """SPI mode 0 at 250 kHz or less with an active-high CS. Close it when done."""
+    m = open_spi(bp, MW_KHZ)
+    try:
+        m.set_cs_active_high(True)  # UNVERIFIED on hardware
+    except BaseException:
+        m.close()
+        raise
+    return m
+
+
+def _mw_check(write: bool):
+    def check(bp: Any, opts: Options) -> Dict[str, Any]:
+        try:
+            part, org = _mw_args(opts)
+            if write:
+                memory.parse_job(opts, eeprom93.PARTS[part][0])
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        with open_microwire(bp) as m:
+            head = eeprom93.read(m, part, org, 0, 2)
+        if head == b"\x00\x00":
+            return {"ok": False, "error": "nothing answers: the first two bytes are 00 00",
+                    "hint": MW_ZERO_HINT}
+        return {"ok": True, "identity": "%s x%d" % (part, org)}
+    return check
+
+
+def _mw_backup(bp: Any, opts: Options) -> Dict[str, Any]:
+    """Read the whole chip and save it as a backup file; nothing is written to the chip."""
+    part, org = _mw_args(opts)
+    with open_microwire(bp) as m:
+        data = eeprom93.read(m, part, org, 0, eeprom93.PARTS[part][0])
+    saved = backup.save(data, "microwire-%s-x%d" % (part, org))
+    saved.update(part=part, org=org, first_64_hex=data[:64].hex(" "))
+    return saved
+
+
+def _mw_prepare(bp: Any, opts: Options) -> Dict[str, Any]:
+    part, org = _mw_args(opts)
+    job = memory.parse_job(opts, eeprom93.PARTS[part][0])
+    unit = 1 if org == 8 else 2  # x16 reads and writes whole words
+    start = job.offset - job.offset % unit
+    end = -(-(job.offset + job.length) // unit) * unit
+    with open_microwire(bp) as m:
+        return memory.prepare(
+            job, lambda at, length: eeprom93.read(m, part, org, at, length),
+            chip="%s x%d" % (part, org), label="microwire-%s-x%d" % (part, org),
+            keep_backup=opts["backup"], span=(start, end - start))
+
+
+def _mw_commit(bp: Any, opts: Options, prepared: Dict[str, Any]) -> Dict[str, Any]:
+    """Check the chip is unchanged, write the new words, read them back and compare."""
+    part, org = _mw_args(opts)
+    with open_microwire(bp) as m:
+        return memory.commit(prepared, lambda at, length: eeprom93.read(m, part, org, at, length),
+                             lambda at, image: eeprom93.write(m, part, org, at, image))
+
+
+_MW_WORDS = ("microwire", "93c46", "93c56", "93c66", "93c76", "93c86", "93lc46", "93aa46",
+             "93xx", "eeprom", "memory")
+_MW_NOTES = ("ORG high or open = x16, ORG to GND = x8: set org to match",
+             "a plain 93C46 (not LC or AA) needs 4.5 V or more: plan with millivolts=5000",
+             "UNVERIFIED on a real board: try the read recipe on a chip with known contents "
+             "before writing")
+
+register(Recipe(
+    name="microwire-eeprom", title="93Cxx Microwire EEPROM: back up its contents",
+    words=("microwire-eeprom", "backup", "dump") + _MW_WORDS,
+    bus="spi", default_mv=3300, min_mv=1800, max_mv=5000, pullups=False, wiring=MW_WIRING,
+    check=_mw_check(False), action=_mw_backup, options={"part": None, "org": 16},
+    source=DOCS + "command-reference/", notes=_MW_NOTES))
+
+register(Recipe(
+    name="microwire-eeprom-write", title="93Cxx Microwire EEPROM: write or erase its contents",
+    words=("microwire-eeprom-write",) + _WRITE_WORDS + _MW_WORDS,
+    bus="spi", default_mv=3300, min_mv=1800, max_mv=5000, pullups=False, wiring=MW_WIRING,
+    risk="destructive", check=_mw_check(True), action=_mw_prepare, commit=_mw_commit,
+    options=dict({"part": None, "org": 16}, **memory.WRITE_OPTIONS),
+    source=DOCS + "command-reference/", notes=_MW_NOTES))
 
 
 # -- MAX31855 -----------------------------------------------------------------------
