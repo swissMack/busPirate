@@ -14,6 +14,20 @@ from . import Device, Meaning, Reading
 ADDRESS = 0x40
 MEASURE_HUMIDITY = bytes([0xF5])
 READ_TEMPERATURE = bytes([0xE0])
+READ_USER_REGISTER = bytes([0xE7])
+# Bits that may legitimately differ: 7 and 0 (resolution), 6 (end-of-battery),
+# 2 (heater). What is left reads 0x3A on the Si7021 and 0x02 on HTU21D/SHT21.
+USER_REGISTER_MASK = 0x3A
+USER_REGISTER_DEFAULTS = (0x3A, 0x02)
+
+
+def probe(i2c, address: int) -> bool:
+    try:
+        i2c.write(address, READ_USER_REGISTER)
+        reply = i2c.read(address, 1)
+    except Exception:  # a NACK: not one of these chips
+        return False
+    return len(reply) == 1 and (reply[0] & USER_REGISTER_MASK) in USER_REGISTER_DEFAULTS
 
 
 def decode(humidity_raw: bytes, temperature_raw: bytes) -> Meaning:
@@ -46,6 +60,7 @@ DEVICES = [
         bus="i2c",
         summary="humidity + temperature (also HTU21D, SHT21)",
         addresses=(ADDRESS,),
+        probe=probe,
         measure=measure,
     ),
 ]

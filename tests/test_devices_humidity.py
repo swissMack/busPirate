@@ -104,13 +104,32 @@ def test_identify_picks_the_right_driver_at_0x44():
     assert devices.read_i2c(sht4x_chip(), 0x44).device == "SHT4x"
 
 
+def si7021_chip(user_register=0x3A):
+    return FakeI2C({si7021.READ_USER_REGISTER: bytes([user_register]),
+                    si7021.MEASURE_HUMIDITY: bytes([0x7C, 0x80]),
+                    si7021.READ_TEMPERATURE: bytes([0x66, 0x00])})
+
+
+def test_si7021_probe_accepts_both_reset_defaults_and_ignores_variable_bits():
+    assert si7021.probe(si7021_chip(0x3A), 0x40)  # Si7021
+    assert si7021.probe(si7021_chip(0x02), 0x40)  # HTU21D / SHT21
+    assert si7021.probe(si7021_chip(0x3A | 0x40 | 0x04 | 0x81), 0x40)  # battery, heater, resolution
+
+
+def test_an_ina219_like_chip_at_0x40_is_not_identified():
+    ina = FakeI2C({})  # NACKs every command
+    assert not si7021.probe(ina, 0x40)
+    assert devices.identify_i2c(ina, 0x40) is None and devices.read_i2c(ina, 0x40) is None
+    assert not si7021.probe(si7021_chip(0x00), 0x40)  # ACKs but wrong register contents
+    assert devices.read_i2c(si7021_chip(0x00), 0x40) is None
+
+
 def test_si7021_translates_a_reply():
     # RH 0x7C80 = 31872 -> -6 + 125*31872/65536 = 54.79 %;
     # T 0x6600 = 26112 -> -46.85 + 175.72*26112/65536 = 23.16 C (formulas, not a bench value)
-    bus = FakeI2C({si7021.MEASURE_HUMIDITY: bytes([0x7C, 0x80]),
-                   si7021.READ_TEMPERATURE: bytes([0x66, 0x00])})
+    bus = si7021_chip()
     r = devices.read_i2c(bus, 0x40)
     assert r.device == "Si7021" and r.raw == bytes([0x7C, 0x80, 0x66, 0x00])
     assert value(r.meaning, "Humidity") == "54.8 %RH"
     assert value(r.meaning, "Temperature") == "23.16 °C"
-    assert [w[1] for w in bus.writes] == [bytes([0xF5]), bytes([0xE0])]
+    assert [w[1] for w in bus.writes][-2:] == [bytes([0xF5]), bytes([0xE0])]
