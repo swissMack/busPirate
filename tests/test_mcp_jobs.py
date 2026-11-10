@@ -250,3 +250,10 @@ def test_unplug_mid_scan_raises_boardgone():
     with pytest.raises(BoardGone):
         i2c_scan(s)
     assert s.board is None
+
+
+def test_simulated_bmp280_reads_the_datasheet_example():
+    # Bosch BMP280 datasheet §8.1 worked example: 25.08 °C, 1006.53 hPa.
+    values = i2c_scan(connected("bp6"))["devices"][0]["reading"]["values"]
+    assert values["Temperature"] == "25.08 °C"
+    assert values["Pressure"] == "1006.53 hPa"

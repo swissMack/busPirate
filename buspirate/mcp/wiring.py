@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from .. import boards
 from ..boards.bitpirate import DOCK_HEADER
@@ -79,3 +79,54 @@ def wiring_steps(variant: str, job: str) -> List[WiringStep]:
         note = _NOTE_OVERRIDES.get((variant, pin), row.get("note", ""))
         steps.append(WiringStep(pin, colour or pin, row.get("target", ""), note))
     return steps
+
+
+_V3_V4 = ("v3", "v4")
+
+#: The dashboard's notes under each job's panel, reworded for an AI client.
+#: Each rule: (text the note contains, boards it is true for or None for all,
+#: replacement). A note matched on a board outside its list is dropped, so the
+#: v3 cable warning never reaches a Bus Pirate 6. Unmatched notes pass through.
+_NOTE_REWRITES: Tuple[Tuple[str, Optional[Tuple[str, ...]], str], ...] = (
+    ("Seeed/Adafruit", _V3_V4,
+     "Colours and pin order are the Seeed/Adafruit cable, the firmware reference: pin 1 is "
+     "MISO (black) and pin 10 is GND (brown). SparkFun cables are usually reversed and the "
+     "v2go differs, so check these colours against your own cable."),
+    ("selecting this panel", _V3_V4,
+     "The pin tools work in bitbang mode, so using them leaves whatever protocol mode the "
+     "board was in."),
+    ("Power & pull-ups", None,
+     "I2C needs pull-ups: power_plan switches them on (10 kΩ) unless pullups is false."),
+    ("The dashboard finds one device", None,
+     "onewire_scan finds one device. With several on the bus, use the board's own "
+     "terminal: 'm 1wire', then 'scan'."),
+    ("The dashboard sets these pins", None,
+     "The driver sets these pins itself each time it enters a mode: the Bus Pirate 6 "
+     "layout of the dock's header, not the firmware's own defaults. Bus Pirate 5/6 "
+     "adapters plug straight in."),
+)
+
+
+def _dashboard_notes(variant: str, job: str) -> List[str]:
+    board = boards.get(variant)
+    override = board.wiring.get("panels", {}).get(job, {}) if board is not None else {}
+    if "notes" in override:
+        return list(override["notes"])
+    try:
+        panel = importlib.import_module("buspirate.web.panels." + job).PANEL
+    except ImportError:
+        return []
+    return list(panel.notes)
+
+
+def job_notes(variant: str, job: str) -> List[str]:
+    """The notes for ``job`` on ``variant``, worded for the MCP tools."""
+    notes = []
+    for note in _dashboard_notes(variant, job):
+        for needle, only, replacement in _NOTE_REWRITES:
+            if needle in note:
+                note = replacement if only is None or variant in only else None
+                break
+        if note is not None:
+            notes.append(note)
+    return notes

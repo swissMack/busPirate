@@ -8,7 +8,6 @@ Power is never switched on without a redeemed confirmation token:
 does ``power_apply(token)`` touch the supply.
 """
 
-import importlib
 import logging
 import weakref
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
@@ -22,7 +21,7 @@ from . import jobs, knowledge
 from .confirm import ConfirmError, ConfirmStore
 from .power import SOURCE_MEASURED, SOURCE_OWNER, PowerRefused, measure, plan_power, suggest_level
 from .session import BoardGone, BoardSession, NotConnected
-from .wiring import JOBS, wiring_steps
+from .wiring import JOBS, job_notes, wiring_steps
 
 log = logging.getLogger(__name__)
 
@@ -113,19 +112,6 @@ def apply_gating(server: MCPServer, session: BoardSession) -> List[str]:
             server.add_tool(fn, name=name, description=description)
             listed.add(name)
     return sorted(listed)
-
-
-def _panel_notes(variant: str, job: str) -> List[str]:
-    """The notes the dashboard shows under this job's panel on this board."""
-    board = boards.get(variant)
-    override = board.wiring.get("panels", {}).get(job, {}) if board is not None else {}
-    if "notes" in override:
-        return list(override["notes"])
-    try:
-        panel = importlib.import_module("buspirate.web.panels." + job).PANEL
-    except ImportError:
-        return []
-    return list(panel.notes)
 
 
 def build_server(session: BoardSession) -> MCPServer:
@@ -219,7 +205,7 @@ def build_server(session: BoardSession) -> MCPServer:
             except KeyError:
                 return {"error": "no wiring for %r on this board" % job, "jobs": list(JOBS)}
             return {"job": job, "steps": [s.to_dict() for s in found],
-                    "notes": _panel_notes(variant, job)}
+                    "notes": job_notes(variant, job)}
         return await guard(ctx, steps, threaded=False)
 
     async def measure_voltages(ctx: Context) -> Dict[str, Any]:
