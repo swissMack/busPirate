@@ -25,7 +25,7 @@ DEVICES = [
     _i2c("PCF8574 / MCP23017 I/O expander", 0x20),
     _i2c("TSL2561 light sensor", 0x39),
     _i2c("SSD1306 OLED", 0x3C),
-    _i2c("INA219 / HTU21D", 0x40),
+    _i2c("INA219", 0x40),
     _i2c("ADS1115 / LM75 temperature", 0x48),
     _i2c("24Cxx EEPROM", 0x50, 0x51),
     _i2c("ADXL345 accelerometer", 0x53),
