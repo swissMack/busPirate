@@ -26,6 +26,7 @@ from .devices.aht20 import crc8
 from .devices.eeprom24 import PAGES as _EEPROM_PAGES, SIZES as _EEPROM_SIZES
 from .devices.eeprom25 import PARTS as _SPI_PARTS
 from .devices.eeprom93 import PARTS as _MW_PARTS
+from .devices.onewire_eeprom import FAMILIES as _OW_FAMILIES
 from .simulator import FakeFlash
 
 MODES = ("HiZ", "1WIRE", "UART", "HDUART", "I2C", "SPI", "2WIRE", "3WIRE",
@@ -284,6 +285,67 @@ class FakeMicrowire:
         return b"\x00" * read_count
 
 
+class FakeDs2431:
+    """A 1-Wire EEPROM (DS2431 / DS2433): READ ROM, skip ROM, read memory, scratchpad, copy.
+
+    Implements ``reset() -> bool``, ``write(data)`` and ``read(count)``. ``reset``
+    starts a new command; ``write`` adds to it; ``read`` answers from where the
+    last read stopped. ``copy_fails`` makes the chip refuse to copy (no strong pull-up).
+    """
+
+    def __init__(self, family=0x2D, data=None, rom=None):
+        _, self.size, self.row = _OW_FAMILIES[family]
+        self.mem = bytearray(data if data is not None
+                             else bytes((i * 3 + 1) & 0xFF for i in range(self.size)))
+        if len(self.mem) != self.size:
+            raise ValueError("a family 0x%02X chip holds %d bytes" % (family, self.size))
+        if rom is None:
+            body = bytes([family, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66])
+            rom = body + bytes([_crc8(body)])
+        self.rom = bytes(rom)
+        self.copy_fails = False
+        self.scratch_ta = b"\x00\x00"
+        self.scratch = b""
+        self._cmd = bytearray()
+        self._sent = 0
+
+    def reset(self):
+        self._cmd, self._sent = bytearray(), 0
+        return True
+
+    def _es(self):
+        return (self.scratch_ta[0] % self.row + len(self.scratch) - 1) & 0x1F
+
+    def write(self, data):
+        self._cmd += data
+        rest = bytes(self._cmd[1:]) if self._cmd[:1] == b"\xcc" else b""
+        if rest[:1] == b"\x0f" and len(rest) >= 3:
+            self.scratch_ta, self.scratch = rest[1:3], rest[3:3 + self.row]
+
+    def _stream(self, at):
+        cmd = bytes(self._cmd)
+        if cmd[:1] == b"\x33":
+            return self.rom
+        rest = cmd[1:] if cmd[:1] == b"\xcc" else b""
+        if rest[:1] == b"\xf0" and len(rest) >= 3:
+            start = rest[1] | rest[2] << 8
+            return bytes(self.mem[start:]) + b"\xff" * 64
+        if rest[:1] == b"\xaa":
+            return self.scratch_ta + bytes([self._es()]) + self.scratch
+        if rest[:1] == b"\x55" and len(rest) >= 4:
+            ok = rest[1:3] == self.scratch_ta and rest[3] == self._es() and not self.copy_fails
+            if ok and at == 0:
+                start = self.scratch_ta[0] | self.scratch_ta[1] << 8
+                self.mem[start:start + len(self.scratch)] = self.scratch
+            return b"\xaa" if ok else b"\x00"
+        return b""
+
+    def read(self, count):
+        out = (self._stream(self._sent) + b"\xff" * count)[self._sent:self._sent + count]
+        self._sent += count
+        return out
+
+
 class FakeSht31:
     """An SHT31: ``F3 2D`` reads the status register, ``24 00`` measures 25 °C and 50 %RH."""
 
@@ -354,6 +416,8 @@ class FakeBp6:
         #: The chip_select_idle of the last SPI mode configuration; False = active-high CS.
         self.spi_cs_idle = True
         self.onewire_rom = DS18B20_ROM
+        #: A 1-Wire chip with reset/write/read (FakeDs2431); None keeps onewire_rom's behaviour.
+        self.onewire_device = None
         self.uart_echo = True
         self._spi_written, self._spi_read = bytearray(), 0
         #: Failures to inject into the next data requests, in order: an error
@@ -625,6 +689,13 @@ class FakeBp6:
                 self.spi_device.exchange(bytes(self._spi_written), 0)
             return self._data_response(data)
         if self.mode == "1WIRE":
+            device = self.onewire_device
+            if device is not None:
+                if started and not device.reset():
+                    return self._data_response(b"", error="Protocol request failed")
+                if written:
+                    device.write(written)
+                return self._data_response(bytes(device.read(count)) if count else b"")
             if started and not self.onewire_rom:
                 return self._data_response(b"", error="Protocol request failed")
             if written[:1] == b"\x33":

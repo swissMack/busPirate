@@ -87,12 +87,12 @@ class Device:
 
 from . import (  # noqa: E402
     ad595, aht20, bmp280, ds18x20, hd44780, max31855, ms5611, sht3x, sht4x, si7021,
-    tcs3472x, tsl2561, names, eeprom24, eeprom25, eeprom93, nmea,
+    tcs3472x, tsl2561, names, eeprom24, eeprom25, eeprom93, onewire_eeprom, nmea,
 )
 
 _MODULES = (
     ad595, aht20, bmp280, ds18x20, hd44780, max31855, ms5611, sht3x, sht4x, si7021,
-    tcs3472x, tsl2561, names, eeprom24, eeprom25, eeprom93, nmea,
+    tcs3472x, tsl2561, names, eeprom24, eeprom25, eeprom93, onewire_eeprom, nmea,
 )
 
 CATALOG: List[Device] = [device for module in _MODULES for device in module.DEVICES]

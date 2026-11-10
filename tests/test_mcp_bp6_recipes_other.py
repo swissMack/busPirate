@@ -399,3 +399,55 @@ def test_microwire_missing_part(session, confirm):
     plan = engine.plan_recipe(session, confirm, "microwire-eeprom", {})
     out = engine.run_recipe(session, confirm, plan["token"], {})
     assert out["stopped"] == "check failed" and "93C46" in out["check"]["error"]
+
+
+# -- 1-Wire EEPROM -------------------------------------------------------------------
+
+def test_onewire_eeprom_registered():
+    assert REGISTRY["onewire-eeprom"].risk == "none"
+    write = REGISTRY["onewire-eeprom-write"]
+    assert write.risk == "destructive" and write.pullups is True
+    assert (write.default_mv, write.min_mv, write.max_mv) == (3300, 3000, 5000)
+
+
+def test_onewire_eeprom_full_flow(session, confirm, tmp_path, monkeypatch):
+    from buspirate.simulator_bp6 import FakeDs2431
+    monkeypatch.setenv("HOME", str(tmp_path))
+    chip = FakeDs2431()
+    _fake(session).onewire_device = chip
+    old = bytes(chip.mem)
+    prepared, done = _plan_prepare_commit(
+        session, confirm, "onewire-eeprom-write", {"offset": 6, "data_hex": "aa bb cc"})
+    assert prepared["commit"]["chip"].startswith("DS2431")
+    result = done["result"]
+    assert result["verified"] is True and result["written"] == 3
+    assert Path(result["backup"]["path"]).read_bytes() == old[0:16]
+    assert bytes(chip.mem[6:9]) == bytes.fromhex("aabbcc")
+    assert bytes(chip.mem[:6]) == old[:6] and bytes(chip.mem[9:]) == old[9:]
+
+
+def test_onewire_eeprom_backup_reads_whole_memory(session, confirm, tmp_path, monkeypatch):
+    from buspirate.simulator_bp6 import FakeDs2431
+    monkeypatch.setenv("HOME", str(tmp_path))
+    chip = FakeDs2431(family=0x23)
+    _fake(session).onewire_device = chip
+    _, out = _run(session, confirm, "onewire-eeprom")
+    assert Path(out["result"]["path"]).read_bytes() == bytes(chip.mem)
+
+
+def test_onewire_eeprom_copy_failure_is_reported(session, confirm, tmp_path, monkeypatch):
+    from buspirate.simulator_bp6 import FakeDs2431
+    monkeypatch.setenv("HOME", str(tmp_path))
+    chip = FakeDs2431()
+    chip.copy_fails = True
+    _fake(session).onewire_device = chip
+    _, done = _plan_prepare_commit(
+        session, confirm, "onewire-eeprom-write", {"offset": 0, "data_hex": "01"})
+    assert "pull-up" in done["result"]["error"] and done["result"]["verified"] is False
+
+
+def test_onewire_eeprom_refuses_thermometer(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "onewire-eeprom", {})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out["stopped"] == "check failed"
+    assert "found family 0x28: that is a thermometer, not an EEPROM" in out["check"]["error"]
