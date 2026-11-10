@@ -451,3 +451,13 @@ def test_onewire_eeprom_refuses_thermometer(session, confirm):
     out = engine.run_recipe(session, confirm, plan["token"], {})
     assert out["stopped"] == "check failed"
     assert "found family 0x28: that is a thermometer, not an EEPROM" in out["check"]["error"]
+
+
+def test_midi_recipe_decodes(session, confirm):
+    fake = _fake(session)
+    fake.uart_echo = False
+    fake.uart_receive(bytes.fromhex("903c64"))
+    _, out = _run(session, confirm, "midi", run_options={"seconds": 0.3})
+    result = out["result"]
+    assert result["count"] == 1 and result["bytes"] == 3
+    assert result["messages"][0]["type"] == "note on" and result["messages"][0]["note"] == "C4"

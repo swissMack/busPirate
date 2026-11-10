@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from ...devices import nmea
+from ...devices import midi, nmea
 from ...mcp import jobs
 from . import Recipe, register
 
@@ -73,3 +73,48 @@ register(Recipe(
     check=_check, action=_gps_action, options={"baud": 9600, "seconds": 3},
     source="https://github.com/swissMack/busPirate (buspirate/devices/nmea.py; "
            "not on docs.buspirate.com)", notes=UART_NOTES))
+
+
+MIDI_WIRING = (("MIDI adapter RX out", "IO5"), ("MIDI adapter TX in", "IO4"),
+               ("5V", "VOUT"), ("GND", "GND"))
+MIDI_NOTES = ("a MIDI port is a 5 mA current loop: wire it through an opto-isolated MIDI "
+              "adapter, never straight to the pins",)
+MIDI_MAX_MESSAGES = 200
+
+
+def _midi_check(bp: Any, opts: Options) -> Dict[str, Any]:
+    seconds = opts["seconds"]
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) \
+            or not 0 < seconds <= 30:
+        return {"ok": False,
+                "error": "seconds must be more than 0 and at most 30, not %r" % (seconds,)}
+    if opts.get("send_hex") is not None:
+        try:
+            jobs._hex_bytes(opts["send_hex"])
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+    return {"ok": True}
+
+
+def _midi_action(bp: Any, opts: Options) -> Dict[str, Any]:
+    """Optionally send bytes, listen at 31250 baud and decode the MIDI stream."""
+    with bp.uart() as m:
+        m.set_baudrate(jobs._baud_index(31250))
+        m.configure()  # 8N1
+        if opts.get("send_hex") is not None:
+            m.write(jobs._hex_bytes(opts["send_hex"]))
+        data = jobs._listen(bp, m, float(opts["seconds"]))
+    out = midi.parse(data)
+    out["count"] = len(out["messages"])
+    out["messages"] = out["messages"][:MIDI_MAX_MESSAGES]
+    out["bytes"] = len(data)
+    return out
+
+
+register(Recipe(
+    name="midi", title="MIDI: listen to a keyboard or synth and decode its notes",
+    words=("midi", "keyboard", "synth", "synthesizer", "notes"),
+    bus="uart", default_mv=5000, min_mv=3300, max_mv=5000, pullups=False, wiring=MIDI_WIRING,
+    check=_midi_check, action=_midi_action, options={"seconds": 5, "send_hex": None},
+    source="https://github.com/swissMack/busPirate (buspirate/devices/midi.py; "
+           "not on docs.buspirate.com)", notes=MIDI_NOTES))
