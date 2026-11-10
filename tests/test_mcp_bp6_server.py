@@ -234,3 +234,46 @@ def test_wiring_tool():
     assert "notes" in out
     assert "jobs" in call(server, "wiring", {"job": "nope"})
     assert session.board is None    # wiring needs no board
+
+
+def _powered(session, server):
+    plan = call(server, "power_plan", {"millivolts": 3300, "voltage_source": "owner"})
+    assert call(server, "power_apply", {"token": plan["token"]})["applied"] is True
+    assert session.power is not None
+
+
+@pytest.mark.parametrize("fault", ["tripped", "switched_off"])
+def test_bus_tool_does_not_switch_a_lost_supply_back_on(fault):
+    session = BoardSession(simulated="bp6")
+    server = build_server(session)
+    _powered(session, server)
+    fake = _fake(session)
+    fake.psu_enabled = False
+    fake.psu_tripped = fault == "tripped"
+    out = call(server, "i2c_scan")
+    assert fake.psu_enabled is False
+    assert session.power is None
+    assert "supply_lost" in out and "power_plan" in out["supply_lost"]
+
+
+def test_bus_tool_with_supply_on_keeps_the_plan():
+    session = BoardSession(simulated="bp6")
+    server = build_server(session)
+    _powered(session, server)
+    out = call(server, "i2c_scan")
+    assert "supply_lost" not in out and session.power is not None
+    assert _fake(session).psu_enabled is True
+
+
+def test_run_stdio_exit_puts_board_in_hiz(monkeypatch):
+    seen = {}
+
+    def fake_run(self, transport="stdio", **kwargs):
+        session = server_module._SESSIONS[self]
+        _powered(session, self)
+        seen["fake"] = _fake(session)
+        assert seen["fake"].psu_enabled and seen["fake"].pullups
+
+    monkeypatch.setattr(server_module.MCPServer, "run", fake_run)
+    server_module.run_stdio(demo=True)
+    assert seen["fake"].psu_enabled is False and seen["fake"].pullups is False

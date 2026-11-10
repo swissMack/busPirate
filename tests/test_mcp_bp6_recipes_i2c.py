@@ -131,10 +131,28 @@ def test_check_fails_lists_found(session, confirm):
     assert fake.psu_enabled is True  # the power is left as the engine set it
 
 
-def test_recipes_never_call_configure_peripherals(session, confirm, monkeypatch):
-    from buspirate.bp6.modes import Bp6I2C
-    monkeypatch.setattr(Bp6I2C, "configure_peripherals",
-                        lambda *a, **k: pytest.fail("a recipe set the power or pull-ups"))
+def test_recipes_never_touch_power(session, confirm, monkeypatch):
+    """The engine sets power and pull-ups; a recipe's check and action must not."""
+    import dataclasses
+    from buspirate.bp6.device import BusPirate6
+    from buspirate.bp6.modes import _Bp6Mode
+
+    def forbid(what):
+        return lambda *a, **k: pytest.fail("a recipe called " + what)
+
+    def guarded(fn):
+        def call(bp, opts):
+            with monkeypatch.context() as inner:
+                inner.setattr(BusPirate6, "set_power", forbid("set_power"))
+                inner.setattr(BusPirate6, "set_pullups", forbid("set_pullups"))
+                inner.setattr(_Bp6Mode, "configure_peripherals", forbid("configure_peripherals"))
+                return fn(bp, opts)
+        return call
+
+    for name in ("aht20", "lcd"):
+        recipe = REGISTRY[name]
+        monkeypatch.setitem(REGISTRY, name, dataclasses.replace(
+            recipe, check=guarded(recipe.check), action=guarded(recipe.action)))
     _, out = _run(session, confirm, "aht20")  # nothing at 0x38: the check stops
     assert out["stopped"] == "check failed"
     _, out = _run(session, confirm, "lcd")

@@ -206,28 +206,57 @@ def build_server(session: BoardSession) -> MCPServer:
         return {"job": job, "steps": [s.to_dict() for s in steps],
                 "notes": job_notes(VARIANT, job)}
 
+    SUPPLY_LOST = ("the target supply was found off or tripped, so this ran unpowered; "
+                   "make a new power_plan (or recipe_plan) and get the owner's yes to "
+                   "switch it on again")
+
+    def _unpowered_if_lost() -> bool:
+        """Forget the approved power if the supply is no longer on.
+
+        Primitive bus tools reassert ``session.power``; with the supply tripped or
+        switched off on the board that would switch it back on into the fault.
+        """
+        def check(bp: Any) -> bool:
+            if session.power is None:
+                return False
+            status = bp.status()
+            if status.psu_tripped or not status.psu_enabled:
+                session.power = None
+                return True
+            return False
+        return session.run(check)
+
+    async def bus(job: Callable[[], Dict[str, Any]]) -> Dict[str, Any]:
+        def run() -> Dict[str, Any]:
+            lost = _unpowered_if_lost()
+            out = job()
+            if lost and isinstance(out, dict):
+                out["supply_lost"] = SUPPLY_LOST
+            return out
+        return await guard(run)
+
     async def i2c_scan(speed_khz: int = 100) -> Dict[str, Any]:
-        return await guard(lambda: jobs.i2c_scan(session, speed_khz))
+        return await bus(lambda: jobs.i2c_scan(session, speed_khz))
 
     async def i2c_read(address: int, register: int, count: int = 1) -> Dict[str, Any]:
-        return await guard(lambda: jobs.i2c_read(session, address, register, count))
+        return await bus(lambda: jobs.i2c_read(session, address, register, count))
 
     async def i2c_write(address: int, data_hex: str) -> Dict[str, Any]:
-        return await guard(lambda: jobs.i2c_write(session, address, data_hex))
+        return await bus(lambda: jobs.i2c_write(session, address, data_hex))
 
     async def spi_transfer(write_hex: str, read_count: int, mode: int = 0,
                            speed_khz: int = 1000) -> Dict[str, Any]:
-        return await guard(lambda: jobs.spi_transfer(session, write_hex, read_count, mode,
+        return await bus(lambda: jobs.spi_transfer(session, write_hex, read_count, mode,
                                                      speed_khz))
 
     async def uart_send(text: str, baud: int = 115200) -> Dict[str, Any]:
-        return await guard(lambda: jobs.uart_send(session, text, baud))
+        return await bus(lambda: jobs.uart_send(session, text, baud))
 
     async def uart_listen(seconds: float = 2.0, baud: int = 115200) -> Dict[str, Any]:
-        return await guard(lambda: jobs.uart_listen(session, seconds, baud))
+        return await bus(lambda: jobs.uart_listen(session, seconds, baud))
 
     async def onewire_scan() -> Dict[str, Any]:
-        return await guard(lambda: jobs.onewire_scan(session))
+        return await bus(lambda: jobs.onewire_scan(session))
 
     async def pins(set: Optional[dict] = None) -> Dict[str, Any]:  # noqa: A002 (tool arg)
         setting = None
@@ -239,7 +268,7 @@ def build_server(session: BoardSession) -> MCPServer:
                 pin_recipe._masks(setting)  # refuse bad pins before opening the board
             except ValueError as exc:
                 return {"error": str(exc)}
-        return await guard(lambda: session.run(
+        return await bus(lambda: session.run(
             lambda bp: pin_recipe._action(bp, {"set": setting, "read": True})))
 
     async def bp6_notes() -> Dict[str, Any]:
