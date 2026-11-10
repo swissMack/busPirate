@@ -293,7 +293,7 @@ def test_target_powered_run_refused_if_target_went_out_of_range(session, confirm
     assert fake._pointer[LCD] == 0
 
 
-def _destructive(recipes, calls, identity=None):
+def _destructive(recipes, calls, identity=None, result=None):
     ident = identity if identity is not None else ["toy-1"]
 
     def check(bp, opts):
@@ -307,7 +307,7 @@ def _destructive(recipes, calls, identity=None):
 
     def commit(bp, opts, prepared):
         calls.append(("commit", prepared["_data"], prepared["_identity"]))
-        return {"written": 4}
+        return dict(result) if result is not None else {"written": 4}
 
     return recipes(name="toy-write", risk="destructive", check=check, action=prepare,
                    commit=commit, default_mv=3300, max_mv=3600)
@@ -344,6 +344,24 @@ def test_commit_runs_once(session, confirm, recipes):
     assert out == {"recipe": "toy-write", "committed": True, "result": {"written": 4}}
     assert calls[-1] == ("commit", b"abcd", "toy-1")
     assert "error" in engine.commit_recipe(session, confirm, token)
+    assert len(calls) == 2
+
+
+def test_commit_unverified_not_committed(session, confirm, recipes):
+    calls = []
+    _destructive(recipes, calls, result={"verified": False})
+    token = _prepared(session, confirm)["commit"]["token"]
+    out = engine.commit_recipe(session, confirm, token)
+    assert out["committed"] is False and out["result"] == {"verified": False}
+    assert len(calls) == 2
+
+
+def test_commit_error_not_committed(session, confirm, recipes):
+    calls = []
+    _destructive(recipes, calls, result={"error": "x", "verified": False})
+    token = _prepared(session, confirm)["commit"]["token"]
+    out = engine.commit_recipe(session, confirm, token)
+    assert out["committed"] is False and out["result"] == {"error": "x", "verified": False}
     assert len(calls) == 2
 
 

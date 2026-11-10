@@ -365,6 +365,8 @@ def commit_recipe(session: Any, confirm: ConfirmStore, token: str) -> Dict[str, 
         if not (isinstance(ident, str) and ident) or ident != prepared.get("_identity"):
             return {"error": "plan again: the chip is not the one that was prepared "
                     "(%s, was %s)" % (check.get("identity"), prepared.get("_identity"))}
-        return {"recipe": recipe.name, "committed": True,
-                "result": recipe.commit(bp, options, prepared)}
+        result = recipe.commit(bp, options, prepared)
+        # A change that failed or did not verify (e.g. a write-protected chip) is not a commit.
+        committed = "error" not in result and result.get("verified") is not False
+        return {"recipe": recipe.name, "committed": committed, "result": result}
     return session.run(go)

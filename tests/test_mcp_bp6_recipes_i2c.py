@@ -204,4 +204,9 @@ def test_eeprom_write_protected_unverified(session, confirm, tmp_path, monkeypat
     chip.protected = True
     _, done = _plan_prepare_commit(session, confirm, "i2c-eeprom-write",
                                    {"data_hex": "ff 00 ff 00"})
-    assert done["result"]["verified"] is False
+    result = done["result"]
+    assert result["verified"] is False
+    assert done["committed"] is False
+    assert result["mismatches"] > 0
+    assert "WP" in result["hint"]
+    assert "error" not in result
