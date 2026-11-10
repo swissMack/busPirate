@@ -50,8 +50,8 @@ def _action(bp: Any, opts: Dict[str, Any]) -> Dict[str, Any]:
 
 register(Recipe(
     name="ds18b20", title="DS18B20 1-Wire thermometer",
-    words=("ds18b20", "ds18x20", "1-wire", "onewire", "thermometer", "dallas", "maxim"),
-    bus="onewire", default_mv=5000, min_mv=3000, max_mv=5500, pullups=True,
+    words=("ds18b20", "ds18x20", "1-wire", "onewire", "thermometer", "temperature", "dallas", "maxim"),
+    bus="onewire", default_mv=3300, min_mv=3000, max_mv=5000, pullups=True,
     wiring=ONEWIRE_WIRING, check=_check, action=_action, options={},
     source=DOCS + "devices/ds18b20/",
     notes=("the Bus Pirate 6 can list only one device on the bus",)))

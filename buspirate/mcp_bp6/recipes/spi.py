@@ -118,7 +118,7 @@ def _max31855_action(bp: Any, opts: Options) -> Dict[str, Any]:
 
 register(Recipe(
     name="max31855", title="MAX31855 thermocouple converter",
-    words=("max31855", "thermocouple", "k-type"),
+    words=("max31855", "thermocouple", "temperature", "k-type"),
     bus="spi", default_mv=3300, min_mv=3000, max_mv=3600, pullups=False,
     wiring=(("SCK", "IO6"), ("SO", "IO4"), ("CS", "IO5"), ("GND", "GND"), ("VCC", "VOUT")),
     check=lambda bp, opts: {"ok": True}, action=_max31855_action, options={},

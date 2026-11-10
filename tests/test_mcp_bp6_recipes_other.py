@@ -48,9 +48,11 @@ def test_every_recipe_is_registered():
              "onboard-leds", "pins", "identify"}
     assert names <= set(REGISTRY)
     assert all(REGISTRY[n].source for n in names)
+    assert all(r.max_mv <= 5000 for r in REGISTRY.values())
     assert REGISTRY["spi-flash"].default_mv == 3300 and REGISTRY["spi-flash"].risk == "none"
     assert (REGISTRY["led-strip"].default_mv, REGISTRY["led-strip"].milliamps) == (5000, 300)
     assert REGISTRY["ds18b20"].pullups is True
+    assert (REGISTRY["ds18b20"].default_mv, REGISTRY["ds18b20"].min_mv) == (3300, 3000)
     for n in ("pins", "identify"):
         assert REGISTRY[n].default_mv == 0 and REGISTRY[n].max_mv > 0
 

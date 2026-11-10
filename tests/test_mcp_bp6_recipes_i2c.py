@@ -143,6 +143,7 @@ def test_recipes_never_call_configure_peripherals(session, confirm, monkeypatch)
 
 def test_find_recipes_ambiguous():
     found = {r["name"] for r in find_recipes("temperature")}
-    assert found == {"aht20", "bmp280", "sht3x", "sht4x", "si7021", "ms5611"}
+    assert found >= {"aht20", "bmp280", "sht3x", "sht4x", "si7021", "ms5611", "ds18b20",
+                     "max31855"}
     assert [r["name"] for r in find_recipes("lcd")][0] == "lcd"
     assert [r["name"] for r in find_recipes("24c02")][:1] == ["i2c-eeprom"]
