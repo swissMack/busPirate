@@ -16,7 +16,7 @@ from buspirate.mcp_bp6.server import TOOL_NAMES, build_server  # noqa: E402
 EXPECTED = {
     "recipes", "recipe_plan", "recipe_run", "board_status", "connect", "hiz", "power_off",
     "measure_voltages", "power_plan", "power_apply", "i2c_scan", "i2c_read", "i2c_write",
-    "spi_transfer", "uart_send", "uart_listen", "onewire_scan", "pins", "bp6_notes",
+    "spi_transfer", "uart_send", "uart_listen", "onewire_scan", "pins", "bp6_notes", "wiring",
 }
 
 
@@ -156,7 +156,7 @@ def test_power_plan_then_apply_and_off():
     assert call(server, "power_apply", {"token": plan["token"]})["applied"] is True
     assert _fake(session).psu_enabled
     assert call(server, "power_off")["psu_enabled"] is False
-    call(server, "power_apply", {"token": "nope"})
+    assert "error" in call(server, "power_apply", {"token": "nope"})
     assert call(server, "hiz") == {"hiz": True}
 
 
@@ -212,3 +212,25 @@ def test_instructions_are_short_and_state_the_rules():
     for word in ("recipes", "recipe_plan", "recipe_run", "needs_extra_confirmation",
                  "target-powered", "hint", "hiz"):
         assert word in text
+
+
+def test_power_plan_is_tied_to_its_board():
+    session = _two_bp6s()
+    server = build_server(session)
+    plan = call(server, "power_plan", {"millivolts": 3300, "voltage_source": "owner"})
+    assert session.port == "/dev/bp-a"
+    call(server, "connect", {"port": "/dev/bp-b"})
+    out = call(server, "power_apply", {"token": plan["token"]})
+    assert "/dev/bp-a" in out["error"]
+    assert _fake(session).psu_enabled is False
+
+
+def test_wiring_tool():
+    session = BoardSession(simulated="bp6")
+    server = build_server(session)
+    out = call(server, "wiring", {"job": "i2c"})
+    pins = {s["pin"]: s["colour"] for s in out["steps"]}
+    assert pins["IO0"] == "orange" and pins["IO1"] == "yellow"
+    assert "notes" in out
+    assert "jobs" in call(server, "wiring", {"job": "nope"})
+    assert session.board is None    # wiring needs no board

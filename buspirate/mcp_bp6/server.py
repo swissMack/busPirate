@@ -24,6 +24,7 @@ from ..mcp.power import (
 )
 from ..mcp.server import _BP6_STATUS_FIELDS, BOARD_GONE, POWER_ACTION
 from ..mcp.session import BoardGone, BoardSession, NotConnected
+from ..mcp.wiring import JOBS, job_notes, wiring_steps
 from . import engine
 from .recipes import find_recipes
 from .recipes import pins as pin_recipe
@@ -170,18 +171,24 @@ def build_server(session: BoardSession) -> MCPServer:
             except PowerRefused as exc:
                 return {"refused": str(exc)}
             out = p.to_dict()
-            out["token"] = confirm.issue(POWER_ACTION, p)
+            out["token"] = confirm.issue(POWER_ACTION, (session.port, p))
             return out
         return await guard(plan)
 
     async def power_apply(token: str) -> Dict[str, Any]:
         def apply() -> Dict[str, Any]:
             try:
-                p = confirm.redeem(token, POWER_ACTION)
+                port, p = confirm.redeem(token, POWER_ACTION)
             except ConfirmError as exc:
                 return {"error": str(exc)}
 
             def switch(bp: Any) -> Dict[str, Any]:
+                # Checked under the session lock: the board may have been swapped
+                # since the plan.
+                if session.port != port:
+                    return {"error": "this plan was made for the board on %s, but %s is "
+                                     "connected; nothing was switched — plan again"
+                                     % (port, session.port)}
                 try:
                     return apply_plan(bp, session, p)
                 except PowerRefused as exc:
@@ -190,6 +197,14 @@ def build_server(session: BoardSession) -> MCPServer:
         return await guard(apply)
 
     # -- bus tools (buspirate.mcp.jobs) -------------------------------------------
+
+    async def wiring(job: str) -> Dict[str, Any]:
+        try:
+            steps = wiring_steps(VARIANT, job)
+        except KeyError:
+            return {"error": "no wiring for %r on this board" % (job,), "jobs": list(JOBS)}
+        return {"job": job, "steps": [s.to_dict() for s in steps],
+                "notes": job_notes(VARIANT, job)}
 
     async def i2c_scan(speed_khz: int = 100) -> Dict[str, Any]:
         return await guard(lambda: jobs.i2c_scan(session, speed_khz))
@@ -258,6 +273,9 @@ def build_server(session: BoardSession) -> MCPServer:
          "is switched."),
         ("power_apply", power_apply, "Switch on the supply from a power_plan token. Only "
          "after the owner's yes; ask a second time when needs_extra_confirmation is true."),
+        ("wiring", wiring, "The wires to connect for a job (%s), each with pin and colour, "
+         "plus notes. Recipes carry their own wiring; use this for the primitive bus tools "
+         "and give the owner every step." % ", ".join(JOBS)),
         ("i2c_scan", i2c_scan, "Find the I2C devices (SDA IO0, SCL IO1), named and read in "
          "real units where known." + unpowered),
         ("i2c_read", i2c_read, "Read `count` bytes from one register of an I2C device "
@@ -286,7 +304,7 @@ def build_server(session: BoardSession) -> MCPServer:
 
 #: The tool names, in the order they are registered.
 TOOL_NAMES = ("recipes", "recipe_plan", "recipe_run", "board_status", "connect", "hiz",
-              "power_off", "measure_voltages", "power_plan", "power_apply", "i2c_scan",
+              "power_off", "measure_voltages", "power_plan", "power_apply", "wiring", "i2c_scan",
               "i2c_read", "i2c_write", "spi_transfer", "uart_send", "uart_listen",
               "onewire_scan", "pins", "bp6_notes")
 

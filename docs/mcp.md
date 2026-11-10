@@ -115,7 +115,7 @@ How it differs from `buspirate`:
   *target-powered*: the supply stays off. If the check fails, power stays as
   planned so you can fix the wiring and re-run with `recipe_run(token=None)`
   within 5 minutes.
-- **Primitive tools:** `board_status`, `connect`, `hiz`, `power_off`,
+- **Primitive tools:** `board_status`, `connect`, `wiring`, `hiz`, `power_off`,
   `measure_voltages`, `power_plan`, `power_apply`, `i2c_scan`, `i2c_read`,
   `i2c_write`, `spi_transfer`, `uart_send`, `uart_listen`, `onewire_scan`,
   `pins` (drive IO pins with 1, 0 or `"in"` and read every pin's level and
