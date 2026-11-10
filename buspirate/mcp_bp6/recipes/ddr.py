@@ -10,10 +10,11 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from ...devices import spd
+from ...exceptions import NackError
 from ...mcp import jobs
 from .. import backup
 from . import Recipe, register
-from .i2c import DOCS, _hex, _make_check, _open
+from .i2c import DOCS, _hex, _open
 
 Options = Dict[str, Any]
 
@@ -22,19 +23,42 @@ SPD_ADDRESSES = tuple(range(0x50, 0x58))
 
 
 def _make_ddr_check(kind: str, type_byte: int, pointer: bytes):
-    base = _make_check("%s module" % kind, (), SPD_ADDRESSES, 400)
+    """The address answers and byte 2 names the right memory type.
+
+    Only 0x50-0x57 are ever addressed here: 0x30-0x35 are the EE1004 write-protection
+    commands, so unlike the generic I2C check this one never scans the whole bus.
+    """
+    question = "is this a %s module, seated fully in the %s plank?" % (kind, kind)
 
     def check(bp: Any, opts: Options) -> Dict[str, Any]:
-        out = base(bp, opts)
-        if not out.get("ok"):
-            return out
-        address = jobs.check_address(opts["address"])
+        try:
+            address = jobs.check_address(opts["address"])
+            if address not in SPD_ADDRESSES:
+                raise ValueError("an SPD answers at 0x50-0x57, not %s" % _hex(address))
+        except (ValueError, TypeError) as exc:
+            return {"ok": False, "error": str(exc)}
         with _open(bp, 400) as m:
-            found = m.read_after_write(address, pointer, 1)[0]
-        if found != type_byte:
-            return {"ok": False, "error": "the SPD at %s says memory type 0x%02X, not %s "
-                    "(0x%02X): is this a %s module, seated fully in the %s plank?"
-                    % (_hex(address), found, kind, type_byte, kind, kind)}
+            if address not in m.scan([address]):
+                found = [{"address": _hex(a), "label": ""} for a in m.scan(SPD_ADDRESSES)]
+                hint = ("nothing answers at %s; SPD addresses that answer: %s"
+                        % (_hex(address), ", ".join(f["address"] for f in found) or "none")
+                        if found else "nothing answers on 0x50-0x57: check the wiring and "
+                        "that the module is seated, then re-run with token=None")
+                return {"ok": False, "error": "nothing answers at %s: %s" % (_hex(address), question),
+                        "found": found, "hint": hint}
+            try:
+                if kind == "DDR4":
+                    # The page survives between runs while the plank stays powered.
+                    spd._select_page(m, 0)
+                else:
+                    m.write(address, bytes([0x0B, 0]))  # MR11: page 0
+                found_type = m.read_after_write(address, pointer, 1)[0]
+            except (NackError, spd.SpdError):
+                found_type = -1
+        if found_type != type_byte:
+            seen = "no memory type" if found_type < 0 else "memory type 0x%02X" % found_type
+            return {"ok": False, "error": "the SPD at %s says %s, not %s (0x%02X): %s"
+                    % (_hex(address), seen, kind, type_byte, question)}
         return {"ok": True, "address": _hex(address)}
     return check
 

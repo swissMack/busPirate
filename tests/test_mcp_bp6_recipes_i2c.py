@@ -293,3 +293,35 @@ def test_ddr5_recipe_wrong_module(session, confirm):
     _, out = _run(session, confirm, "ddr5-spd")
     assert out["stopped"] == "check failed"
     assert "DDR5" in out["check"]["error"]
+
+
+def test_ddr_check_never_touches_protection_addresses(session, confirm):
+    fake = _fake(session)
+    seen = []
+    original = fake._data
+
+    def spy(request):
+        written = bytes(request.DataWrite(i) for i in range(request.DataWriteLength()))
+        if written:
+            seen.append((written[0] >> 1, written[1:], request.BytesRead()))
+        return original(request)
+    fake._data = spy
+    for name in ("ddr4-spd", "ddr5-spd"):
+        fake.i2c_devices.pop(0x50, None)  # no module at 0x50
+        engine.plan_recipe(session, confirm, name, {})
+        plan = engine.plan_recipe(session, confirm, name, {})
+        out = engine.run_recipe(session, confirm, plan["token"], {})
+        assert out["stopped"] == "check failed"
+    assert seen
+    assert not [a for a, _, _ in seen if 0x30 <= a <= 0x35], seen
+    assert not [s for s in seen if s[0] == 0x37]  # 0x37 only ever as a page select
+
+
+def test_ddr4_check_after_failed_scan_reads_page0(session, confirm, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _, ddr4_image, _ = _ddr_fakes()
+    fake = _fake(session)
+    _install_ddr4(fake, ddr4_image())
+    fake.i2c_handlers[0x37](b"", 0)  # leave the module on page 1, as a failed scan used to
+    _, out = _run(session, confirm, "ddr4-spd")
+    assert out["check"]["ok"] is True and out["result"]["memory_type"] == "DDR4"
