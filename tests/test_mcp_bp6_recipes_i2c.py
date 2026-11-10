@@ -165,3 +165,43 @@ def test_find_recipes_ambiguous():
                      "max31855"}
     assert [r["name"] for r in find_recipes("lcd")][0] == "lcd"
     assert [r["name"] for r in find_recipes("24c02")][:1] == ["i2c-eeprom"]
+
+
+# -- writes -------------------------------------------------------------------------
+
+def _plan_prepare_commit(session, confirm, name, options):
+    plan = engine.plan_recipe(session, confirm, name, options)
+    assert "error" not in plan, plan
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out.get("commit"), out
+    return out, engine.commit_recipe(session, confirm, out["commit"]["token"])
+
+
+def test_eeprom_write_full_flow(session, confirm, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    old = bytes(_fake(session).i2c_devices[0x50])
+    prepared, done = _plan_prepare_commit(
+        session, confirm, "i2c-eeprom-write", {"offset": 8, "data_hex": "de ad be ef 01 02 03 04 05"})
+    assert prepared["commit"]["chip"] == "24C02 at 0x50"
+    result = done["result"]
+    assert result["verified"] is True and result["written"] == 9
+    saved = Path(result["backup"]["path"])
+    assert saved.read_bytes() == old[8:17]
+    now = bytes(_fake(session).i2c_devices[0x50])
+    assert now[8:17] == bytes.fromhex("deadbeef0102030405")
+    assert now[:8] == old[:8] and now[17:] == old[17:]
+
+
+def test_eeprom_write_bad_offset_no_token(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "i2c-eeprom-write", {})
+    out = engine.run_recipe(session, confirm, plan["token"], {"offset": 300, "data_hex": "00"})
+    assert out["stopped"] == "check failed" and "commit" not in out
+
+
+def test_eeprom_write_protected_unverified(session, confirm, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    chip = _fake(session).add_eeprom24(0x50, "24C02")
+    chip.protected = True
+    _, done = _plan_prepare_commit(session, confirm, "i2c-eeprom-write",
+                                   {"data_hex": "ff 00 ff 00"})
+    assert done["result"]["verified"] is False

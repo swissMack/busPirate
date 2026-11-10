@@ -72,3 +72,66 @@ def test_whole_part_by_default_and_bounds():
         eeprom24.read(i2c, 0x50, "24C02", offset=250, length=10)
     with pytest.raises(ValueError):
         eeprom24.read(i2c, 0x50, "24C99")
+
+
+# -- writes, against the simulator's FakeEeprom24 ----------------------------------
+
+from buspirate.exceptions import NackError  # noqa: E402
+from buspirate.simulator_bp6 import FakeEeprom24, FakeNack  # noqa: E402
+
+
+class _Bus:
+    """The I2C mode object, backed by a FakeEeprom24 at 0x50."""
+
+    def __init__(self, chip, base=0x50):
+        self.chip, self.base = chip, base
+
+    def write(self, address, data=b""):
+        try:
+            self.chip.handle(address - self.base, bytes(data), 0)
+        except FakeNack:
+            raise NackError("busy")
+
+    def read(self, address, count):
+        return self.chip.handle(address - self.base, b"", count)
+
+
+def test_write_respects_pages():
+    chip = FakeEeprom24("24C02")
+    data = bytes(range(1, 21))
+    eeprom24.write(_Bus(chip), 0x50, "24C02", 5, data)
+    assert bytes(chip.mem[5:25]) == data
+    assert all(o // 8 == (o + n - 1) // 8 for o, n in chip.writes)
+    assert len(chip.writes) == 4
+
+
+def test_write_block_bits():
+    chip = FakeEeprom24("24C16")
+    eeprom24.write(_Bus(chip), 0x50, "24C16", 0x0FE, b"\x01\x02\x03\x04")
+    assert bytes(chip.mem[0xFE:0x102]) == b"\x01\x02\x03\x04"
+    assert chip.writes == [(0xFE, 2), (0x100, 2)]
+
+
+def test_write_two_byte_pointer():
+    chip = FakeEeprom24("24C256")
+    eeprom24.write(_Bus(chip), 0x50, "24C256", 0x7FFE, b"\xaa\xbb")
+    assert bytes(chip.mem[0x7FFE:]) == b"\xaa\xbb"
+
+
+def test_write_polls_busy():
+    chip = FakeEeprom24("24C02", busy_polls=3)
+    eeprom24.write(_Bus(chip), 0x50, "24C02", 0, b"\x55" * 4)
+    assert bytes(chip.mem[:4]) == b"\x55" * 4
+
+
+def test_write_timeout():
+    chip = FakeEeprom24("24C02", busy_polls=10 ** 6)
+    with pytest.raises(eeprom24.WriteTimeout):
+        eeprom24.write(_Bus(chip), 0x50, "24C02", 0, b"\x01", timeout=0.01)
+
+
+def test_fram_write():
+    chip = FakeEeprom24("MB85RC256V")
+    data = bytes(range(100))
+    eeprom24.write(_Bus(chip), 0x50, "MB85RC256V", 10, data, chunk=61)
+    assert bytes(chip.mem[10:110]) == data

@@ -23,6 +23,7 @@ from .bp6.bpio.RequestPacketContents import RequestPacketContents
 from .bp6.bpio.ResponsePacketContents import ResponsePacketContents
 from .bp6.framing import FrameReader, cobs_decode, frame
 from .devices.aht20 import crc8
+from .devices.eeprom24 import PAGES as _EEPROM_PAGES, SIZES as _EEPROM_SIZES
 from .simulator import FakeFlash
 
 MODES = ("HiZ", "1WIRE", "UART", "HDUART", "I2C", "SPI", "2WIRE", "3WIRE",
@@ -116,6 +117,51 @@ class _BinaryPort(_Port):
         super().close()
 
 
+class FakeNack(Exception):
+    """Raised by an I2C handler to answer as a missing address does."""
+
+
+class FakeEeprom24:
+    """A 24xx EEPROM / FRAM: memory, a pointer, page wrap and a busy time after a write."""
+
+    def __init__(self, part: str, data=None, busy_polls: int = 2) -> None:
+        self.part = part.upper()
+        self.size, self.addr_bytes = _EEPROM_SIZES[self.part]
+        self.page = _EEPROM_PAGES[self.part]
+        self.mem = bytearray(data if data is not None else bytes(self.size))
+        if len(self.mem) < self.size:
+            self.mem += bytes(self.size - len(self.mem))
+        self.pointer = 0
+        self.busy_polls = busy_polls
+        self.busy = 0
+        self.writes = []  # (offset, length) of each data write
+        self.protected = False
+
+    def handle(self, block: int, written: bytes, count: int) -> bytes:
+        if self.busy > 0:
+            self.busy -= 1
+            raise FakeNack()
+        width = self.addr_bytes
+        if len(written) >= width:
+            self.pointer = ((block << (8 * width)) | int.from_bytes(written[:width], "big")) % self.size
+            data = written[width:]
+            if data:
+                self.writes.append((self.pointer, len(data)))
+                pos = self.pointer
+                for byte in data:
+                    if not self.protected:
+                        self.mem[pos] = byte
+                    start = pos - pos % self.page
+                    pos = start + (pos + 1 - start) % self.page
+                self.pointer = pos
+                self.busy = self.busy_polls
+        out = bytearray()
+        for _ in range(count):
+            out.append(self.mem[self.pointer])
+            self.pointer = (self.pointer + 1) % self.size
+        return bytes(out)
+
+
 class FakeSht31:
     """An SHT31: ``F3 2D`` reads the status register, ``24 00`` measures 25 °C and 50 %RH."""
 
@@ -180,7 +226,7 @@ class FakeBp6:
         # A PCF8574 LCD backpack, an SHT31 and a 24C02 holding a recognisable pattern.
         self.add_i2c_device(0x27)
         self.add_i2c_device(0x44, handler=FakeSht31())
-        self.add_i2c_device(0x50, bytes((i * 7 + 3) & 0xFF for i in range(256)))
+        self.add_eeprom24(0x50, "24C02", bytes((i * 7 + 3) & 0xFF for i in range(256)))
         self.flash = FakeFlash()
         self.onewire_rom = DS18B20_ROM
         self.uart_echo = True
@@ -234,6 +280,18 @@ class FakeBp6:
         self._pointer[address] = 0
         if handler is not None:
             self.i2c_handlers[address] = handler
+        else:
+            self.i2c_handlers.pop(address, None)
+
+    def add_eeprom24(self, address: int, part: str, data=None) -> "FakeEeprom24":
+        """Answer at ``address`` (and the block addresses above it) as a 24xx part."""
+        chip = FakeEeprom24(part, data)
+        blocks = max(1, chip.size >> (8 * chip.addr_bytes))
+        for block in range(blocks):
+            self.add_i2c_device(address + block, bytes(256),
+                                lambda w, c, b=block: chip.handle(b, w, c))
+            self.i2c_devices[address + block] = chip.mem  # the same bytes, for tests to inspect
+        return chip
 
     def set_load(self, milliamps: int) -> None:
         """Change what the target draws, as when a part is plugged in."""
@@ -410,7 +468,11 @@ class FakeBp6:
                 return self._data_response(b"", error="Protocol request failed")
             handler = self.i2c_handlers.get(address)
             if handler is not None:
-                return self._data_response(handler(written[1:], count))
+                try:
+                    reply = handler(written[1:], count)
+                except FakeNack:
+                    return self._data_response(b"", error="Protocol request failed")
+                return self._data_response(reply)
             if len(written) > 1:
                 self._pointer[address] = written[1]
                 for offset, byte in enumerate(written[2:]):

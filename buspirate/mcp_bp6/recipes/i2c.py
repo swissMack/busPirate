@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from ... import devices
 from ...devices import eeprom24, hd44780
 from ...mcp import jobs
-from .. import backup
+from .. import backup, memory
 from . import Recipe, register
 
 DOCS = "https://docs.buspirate.com/docs/"
@@ -219,6 +219,81 @@ register(Recipe(
     check=_make_check("MB85RC256V FRAM", (), EEPROM_ADDRESSES, 400, _validate_part),
     action=_backup_action(400), options={"address": 0x50, "part": "MB85RC256V"},
     source=DOCS + "devices/mb85rc256v/"))
+
+
+# -- serial memories: writes --------------------------------------------------------
+
+def _write_check(khz: int, title: str):
+    """The memory check, plus the job options; the identity makes a commit token possible."""
+    def validate(opts: Options) -> None:
+        _validate_part(opts)
+        part = str(opts["part"]).upper()
+        memory.parse_job(opts, eeprom24.SIZES[part][0])
+    base = _make_check(title, (), EEPROM_ADDRESSES, khz, validate)
+
+    def check(bp: Any, opts: Options) -> Dict[str, Any]:
+        out = base(bp, opts)
+        if out.get("ok"):
+            out["identity"] = "%s@%s" % (str(opts["part"]).upper(), _hex(opts["address"]))
+        return out
+    return check
+
+
+def _write_prepare(khz: int):
+    def action(bp: Any, opts: Options) -> Dict[str, Any]:
+        """Read what the chip holds now, save it as a backup, and describe the change."""
+        address, part = opts["address"], str(opts["part"]).upper()
+        job = memory.parse_job(opts, eeprom24.SIZES[part][0])
+        chunk = bp.status().max_read or 256
+        with _open(bp, khz) as m:
+            return memory.prepare(
+                job, lambda start, length: eeprom24.read(m, address, part, start, length, chunk),
+                chip="%s at %s" % (part, _hex(address)),
+                label="i2c-%s-%s" % (part, _hex(address)), keep_backup=opts["backup"])
+    return action
+
+
+def _write_commit(khz: int):
+    def commit(bp: Any, opts: Options, prepared: Dict[str, Any]) -> Dict[str, Any]:
+        """Check the chip is unchanged, write the new bytes, read them back and compare."""
+        address, part = opts["address"], str(opts["part"]).upper()
+        status = bp.status()
+        read_chunk = status.max_read or 256
+        write_chunk = max(1, (status.max_write or 64) - 3)
+        with _open(bp, khz) as m:
+            return memory.commit(
+                prepared,
+                lambda start, length: eeprom24.read(m, address, part, start, length, read_chunk),
+                lambda start, image: eeprom24.write(m, address, part, start, image, write_chunk))
+    return commit
+
+
+_WRITE_WORDS = ("write", "erase", "program", "restore")
+_WP_NOTE = "WP must be low (or unconnected) for the write to take"
+
+register(Recipe(
+    name="i2c-eeprom-write", title="24xx I2C EEPROM: write or erase its contents",
+    words=("i2c-eeprom-write",) + _WRITE_WORDS + (
+        "eeprom", "24c02", "24c04", "24c08", "24c16", "24c32", "24c64", "24c256", "at24c256",
+        "24lc", "24xx", "memory"),
+    bus="i2c", default_mv=3300, min_mv=1800, max_mv=5000, pullups=True, wiring=I2C_WIRING,
+    risk="destructive",
+    check=_write_check(100, "I2C EEPROM"), action=_write_prepare(100),
+    commit=_write_commit(100),
+    options=dict({"address": 0x50, "part": "24C02"}, **memory.WRITE_OPTIONS),
+    source=DOCS + "devices/at24c256/",
+    notes=(_WP_NOTE, "name the part: a wrong size silently wraps")))
+
+register(Recipe(
+    name="fram-write", title="MB85RC256V I2C FRAM: write or erase its contents",
+    words=("fram-write",) + _WRITE_WORDS + ("fram", "mb85rc256v", "mb85rc", "ferroelectric",
+                                           "memory"),
+    bus="i2c", default_mv=3300, min_mv=2700, max_mv=5000, pullups=True, wiring=I2C_WIRING,
+    risk="destructive",
+    check=_write_check(400, "MB85RC256V FRAM"), action=_write_prepare(400),
+    commit=_write_commit(400),
+    options=dict({"address": 0x50, "part": "MB85RC256V"}, **memory.WRITE_OPTIONS),
+    source=DOCS + "devices/mb85rc256v/", notes=(_WP_NOTE,)))
 
 
 # -- the character LCD and the scan, registered last so the sensors rank first ------

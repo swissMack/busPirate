@@ -12,7 +12,10 @@ Addressing: parts up to 24C16 take a 1-byte pointer; the 24C04/08/16 (and the
 
 from __future__ import annotations
 
+import time
 from typing import Dict, Optional, Tuple
+
+from ..exceptions import BusPirateError, NackError
 
 # part -> (bytes, address bytes)
 SIZES: Dict[str, Tuple[int, int]] = {
@@ -29,6 +32,21 @@ SIZES: Dict[str, Tuple[int, int]] = {
     "24M02": (262144, 2),
     "MB85RC256V": (32768, 2),
 }
+
+# Smallest write-page size across makers; a smaller page is always safe.
+PAGES: Dict[str, int] = {
+    "24C01": 8, "24C02": 8,
+    "24C04": 16, "24C08": 16, "24C16": 16,
+    "24C32": 32, "24C64": 32,
+    "24C128": 64, "24C256": 64,
+    "24C512": 128,
+    "24M02": 256,
+    "MB85RC256V": 32768,
+}
+
+
+class WriteTimeout(BusPirateError):
+    """The chip did not finish its internal write in time."""
 
 
 def read(i2c, address: int, part: str, offset: int = 0,
@@ -61,6 +79,48 @@ def read(i2c, address: int, part: str, offset: int = 0,
         out += i2c.read(address | block, n)
         pos += n
     return bytes(out)
+
+def _ack_poll(i2c, address: int, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            i2c.write(address, b"")
+            return
+        except NackError:
+            if time.monotonic() >= deadline:
+                raise WriteTimeout("the chip at 0x%02X was still busy %.0f ms after a write"
+                                   % (address, timeout * 1000))
+            time.sleep(0.0005)
+
+
+def write(i2c, address: int, part: str, offset: int, data: bytes, chunk: int = 64,
+          timeout: float = 0.025) -> None:
+    """Write ``data`` at ``offset``, never across a page or a block, ACK-polling after each.
+
+    ``chunk`` is the most data bytes per request (the board's ``max_write`` less the
+    address and pointer bytes). Raises ``WriteTimeout`` if the chip stays busy.
+    """
+    key = part.upper()
+    if key not in SIZES:
+        raise ValueError("unknown part %r; known: %s" % (part, ", ".join(sorted(SIZES))))
+    size, addr_bytes = SIZES[key]
+    data = bytes(data)
+    if offset < 0 or offset + len(data) > size:
+        raise ValueError("%s has %d bytes; cannot write %d at offset %d"
+                         % (key, size, len(data), offset))
+    if chunk < 1:
+        raise ValueError("chunk must be at least 1")
+    page = PAGES[key]
+    block_size = 1 << (8 * addr_bytes)
+    pos, end = offset, offset + len(data)
+    while pos < end:
+        block, within = divmod(pos, block_size)
+        n = min(chunk, end - pos, block_size - within, page - pos % page)
+        pointer = within.to_bytes(addr_bytes, "big")
+        i2c.write(address | block, pointer + data[pos - offset:pos - offset + n])
+        _ack_poll(i2c, address | block, timeout)
+        pos += n
+
 
 # Reader modules, not catalogue entries (see devices/__init__ _MODULES).
 DEVICES: list = []
