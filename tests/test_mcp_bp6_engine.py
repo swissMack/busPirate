@@ -293,15 +293,123 @@ def test_target_powered_run_refused_if_target_went_out_of_range(session, confirm
     assert fake._pointer[LCD] == 0
 
 
-def test_destructive_refused(session, confirm, recipes):
-    recipes(name="toy-erase", risk="destructive")
-    plan = engine.plan_recipe(session, confirm, "toy-erase", {})
-    assert plan["error"] == "erase and write recipes arrive in phase 2" and "token" not in plan
-    session.last_recipe = {"name": "toy-erase", "options": {"address": LCD, "byte": 8},
-                           "mv": 0, "supply": "none", "until": float("inf")}
-    result = engine.run_recipe(session, confirm, None, {})
-    assert result == {"error": "erase and write recipes arrive in phase 2"}
-    assert _fake(session).psu_enabled is False
+def _destructive(recipes, calls, identity=None):
+    ident = identity if identity is not None else ["toy-1"]
+
+    def check(bp, opts):
+        return {"ok": True, "identity": ident[0]}
+
+    def prepare(bp, opts):
+        """Read what would change."""
+        calls.append("prepare")
+        return {"chip": "toy", "operation": "write", "start": 0, "length": 4,
+                "summary": "s", "backup": None, "_data": b"abcd"}
+
+    def commit(bp, opts, prepared):
+        calls.append(("commit", prepared["_data"], prepared["_identity"]))
+        return {"written": 4}
+
+    return recipes(name="toy-write", risk="destructive", check=check, action=prepare,
+                   commit=commit, default_mv=3300, max_mv=3600)
+
+
+def _prepared(session, confirm, **options):
+    token = engine.plan_recipe(session, confirm, "toy-write", options)["token"]
+    return engine.run_recipe(session, confirm, token, {})
+
+
+def test_destructive_plan_warns(session, confirm, recipes):
+    _destructive(recipes, [])
+    plan = engine.plan_recipe(session, confirm, "toy-write", {})
+    assert engine.PREPARE_NOTE in plan["warnings"] and "token" in plan
+    assert engine.NO_BACKUP_NOTE not in plan["warnings"]
+    plan = engine.plan_recipe(session, confirm, "toy-write", {"backup": False})
+    assert engine.NO_BACKUP_NOTE in plan["warnings"]
+
+
+def test_destructive_run_prepares_only(session, confirm, recipes):
+    calls = []
+    _destructive(recipes, calls)
+    out = _prepared(session, confirm)
+    assert out["commit"]["token"] and "_data" not in out["commit"]
+    assert out["commit"]["chip"] == "toy" and out["stopped"] == "the change needs its own yes"
+    assert calls == ["prepare"]
+
+
+def test_commit_runs_once(session, confirm, recipes):
+    calls = []
+    _destructive(recipes, calls)
+    token = _prepared(session, confirm)["commit"]["token"]
+    out = engine.commit_recipe(session, confirm, token)
+    assert out == {"recipe": "toy-write", "committed": True, "result": {"written": 4}}
+    assert calls[-1] == ("commit", b"abcd", "toy-1")
+    assert "error" in engine.commit_recipe(session, confirm, token)
+    assert len(calls) == 2
+
+
+def test_commit_refused_after_hiz(session, confirm, recipes):
+    calls = []
+    _destructive(recipes, calls)
+    token = _prepared(session, confirm)["commit"]["token"]
+    session.run(lambda bp: bp.hiz())
+    assert "error" in engine.commit_recipe(session, confirm, token)
+    assert _fake(session).psu_enabled is False and calls == ["prepare"]
+
+
+def test_commit_never_powers(session, confirm, recipes, monkeypatch):
+    calls = []
+    _destructive(recipes, calls)
+    token = _prepared(session, confirm)["commit"]["token"]
+
+    def boom(*a, **k):
+        raise AssertionError("commit switched something")
+
+    monkeypatch.setattr(type(session.board), "set_power", boom, raising=False)
+    monkeypatch.setattr(type(session.board), "set_pullups", boom, raising=False)
+    assert engine.commit_recipe(session, confirm, token)["committed"] is True
+
+
+def test_commit_refused_identity_changed(session, confirm, recipes):
+    calls, ident = [], ["toy-1"]
+    _destructive(recipes, calls, ident)
+    token = _prepared(session, confirm)["commit"]["token"]
+    ident[0] = "toy-2"
+    assert "error" in engine.commit_recipe(session, confirm, token)
+    assert calls == ["prepare"]
+
+
+def test_commit_refused_other_port(session, confirm, recipes):
+    calls = []
+    _destructive(recipes, calls)
+    token = _prepared(session, confirm)["commit"]["token"]
+    session.port = "/dev/other"
+    assert "error" in engine.commit_recipe(session, confirm, token)
+    assert calls == ["prepare"]
+
+
+def test_tokens_not_interchangeable(session, confirm, recipes):
+    calls = []
+    _destructive(recipes, calls)
+    power_token = engine.plan_recipe(session, confirm, "toy-write", {})["token"]
+    assert "error" in engine.commit_recipe(session, confirm, power_token)
+    power_token = engine.plan_recipe(session, confirm, "toy-write", {})["token"]
+    commit_token = engine.run_recipe(session, confirm, power_token, {})["commit"]["token"]
+    assert "error" in engine.run_recipe(session, confirm, commit_token, {})
+
+
+def test_rerun_destructive_new_token(session, confirm, recipes):
+    calls = []
+    _destructive(recipes, calls)
+    first = _prepared(session, confirm)["commit"]["token"]
+    again = engine.run_recipe(session, confirm, None, {})["commit"]["token"]
+    assert again and again != first and calls == ["prepare", "prepare"]
+
+
+def test_recipe_commit_required():
+    with pytest.raises(ValueError):
+        _toy(name="x", risk="destructive", commit=None)
+    with pytest.raises(ValueError):
+        _toy(name="y", risk="none", commit=lambda bp, o, p: {})
 
 
 # -- re-running without a token -----------------------------------------------------

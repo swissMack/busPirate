@@ -30,7 +30,10 @@ SUPPLY_BP6 = "bp6"        # our supply, from the plan
 SUPPLY_TARGET = "target"  # the target's own supply; ours stays off
 SUPPLY_NONE = "none"      # the recipe needs no supply (max_mv 0)
 
-DESTRUCTIVE = "erase and write recipes arrive in phase 2"
+COMMIT_ACTION = "recipe_commit"  #: the ConfirmStore action commit tokens are issued for
+PREPARE_NOTE = ("this recipe changes the chip: after the power yes it reads what it will "
+                "change, saves a backup, and stops; the change needs its own yes")
+NO_BACKUP_NOTE = "the owner declined the backup: nothing is saved before the change"
 ASK_VOLTAGE = "ask the owner for the target's voltage (3.3 V is usual)"
 CHECK_HINT = ("check the wiring and the address; the power is left as it is, so fix it "
               "and re-run with token=None")
@@ -95,8 +98,6 @@ def plan_recipe(session: Any, confirm: ConfirmStore, name: str,
         recipe = _recipe(name)
     except ValueError as exc:
         return {"error": str(exc)}
-    if recipe.risk == "destructive":
-        return {"error": DESTRUCTIVE}
     if session.variant is None:
         raise NotConnected("no board is connected — call connect first")
     if session.variant != "bp6":
@@ -111,6 +112,10 @@ def plan_recipe(session: Any, confirm: ConfirmStore, name: str,
     warnings = list(recipe.notes)
     if recipe.risk == "owner-only":
         warnings.append("ask the owner to confirm the device is theirs before running this")
+    if recipe.risk == "destructive":
+        warnings.append(PREPARE_NOTE)
+        if merged.get("backup") is False:
+            warnings.append(NO_BACKUP_NOTE)
 
     target_mv = None  # type: Optional[int]
     plan = None  # type: Optional[power.PowerPlan]
@@ -181,7 +186,8 @@ def _changed_locked(before: Dict[str, Any], options: Dict[str, Any]) -> Optional
 
 
 def _check_then_act(bp: Any, recipe: Recipe, options: Dict[str, Any],
-                    power_out: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+                    power_out: Optional[Dict[str, Any]], confirm: ConfirmStore,
+                    port: Any, mv: int, supply: str) -> Dict[str, Any]:
     out = {"recipe": recipe.name, "power": power_out}  # type: Dict[str, Any]
     try:
         check = recipe.check(bp, options)
@@ -191,8 +197,40 @@ def _check_then_act(bp: Any, recipe: Recipe, options: Dict[str, Any],
     if not check.get("ok", False):
         out.update(stopped="check failed", hint=check.get("hint") or CHECK_HINT)
         return out
-    out["result"] = recipe.action(bp, options)
+    result = recipe.action(bp, options)
+    if recipe.risk != "destructive":
+        out["result"] = result
+        return out
+    # The action only prepared. Keep the private keys here, with the check's
+    # identity, and hand the caller the public ones and a commit token.
+    prepared = dict(result)
+    prepared["_identity"] = check.get("identity")
+    public = {k: v for k, v in result.items() if not k.startswith("_")}
+    out["result"] = public
+    payload = {"name": recipe.name, "options": options, "prepared": prepared,
+               "port": port, "mv": mv, "supply": supply,
+               "expires": time.monotonic() + WINDOW_S}
+    out["commit"] = dict(public, token=confirm.issue(COMMIT_ACTION, payload))
+    out["stopped"] = "the change needs its own yes"
     return out
+
+
+def _power_error(bp: Any, session: Any, recipe: Recipe, mv: int,
+                 supply: str) -> Optional[str]:
+    """Why the power is no longer as a run left it, or None if it is."""
+    if supply == SUPPLY_BP6:
+        plan = session.power
+        if plan is None or plan.millivolts != mv:
+            return "plan again: the supply is no longer on at %d mV" % mv
+        st = bp.status()
+        if not st.psu_enabled or st.psu_tripped:
+            return "plan again: the supply is off (it may have tripped)"
+    elif supply == SUPPLY_TARGET:
+        target_mv = _target_mv(bp)
+        if target_mv is None or _range_error(recipe, target_mv, "the target"):
+            return ("plan again: the target's own voltage is gone or out of range "
+                    "(now %s mV)" % target_mv)
+    return None
 
 
 def _remember(session: Any, recipe: Recipe, options: Dict[str, Any], mv: int,
@@ -201,8 +239,8 @@ def _remember(session: Any, recipe: Recipe, options: Dict[str, Any], mv: int,
                            "supply": supply, "until": time.monotonic() + WINDOW_S}
 
 
-def _run_planned(session: Any, recipe: Recipe, payload: Dict[str, Any],
-                 options: Dict[str, Any]) -> Dict[str, Any]:
+def _run_planned(session: Any, confirm: ConfirmStore, recipe: Recipe,
+                 payload: Dict[str, Any], options: Dict[str, Any]) -> Dict[str, Any]:
     def go(bp: Any) -> Dict[str, Any]:
         session.last_recipe = None
         if payload["port"] != session.port:
@@ -237,11 +275,12 @@ def _run_planned(session: Any, recipe: Recipe, payload: Dict[str, Any],
                     return {"recipe": recipe.name, "power": power_out,
                             "error": power_out.get("error", "the supply did not start")}
         _remember(session, recipe, options, payload["mv"], supply)
-        return _check_then_act(bp, recipe, options, power_out)
+        return _check_then_act(bp, recipe, options, power_out, confirm, session.port,
+                               payload["mv"], supply)
     return session.run(go)
 
 
-def _rerun(session: Any, options: Dict[str, Any]) -> Dict[str, Any]:
+def _rerun(session: Any, confirm: ConfirmStore, options: Dict[str, Any]) -> Dict[str, Any]:
     def go(bp: Any) -> Dict[str, Any]:
         last = session.last_recipe
         if last is None:
@@ -251,36 +290,25 @@ def _rerun(session: Any, options: Dict[str, Any]) -> Dict[str, Any]:
         recipe = REGISTRY.get(last["name"])
         if recipe is None:
             return {"error": "plan again: recipe %r is gone" % last["name"]}
-        if recipe.risk == "destructive":
-            return {"error": DESTRUCTIVE}
         key = _changed_locked(last["options"], options)
         if key:
             return {"error": "plan again: a re-run cannot change %s" % key}
         supply = last["supply"]
-        if supply == SUPPLY_BP6:
-            plan = session.power
-            if plan is None or plan.millivolts != last["mv"]:
-                return {"error": "plan again: the supply is no longer on at %d mV"
-                        % last["mv"]}
-            st = bp.status()
-            if not st.psu_enabled or st.psu_tripped:
-                return {"error": "plan again: the supply is off (it may have tripped)"}
-        elif supply == SUPPLY_TARGET:
-            target_mv = _target_mv(bp)
-            if target_mv is None or _range_error(recipe, target_mv, "the target"):
-                return {"error": "plan again: the target's own voltage is gone or out "
-                        "of range (now %s mV)" % target_mv}
+        error = _power_error(bp, session, recipe, last["mv"], supply)
+        if error:
+            return {"error": error}
         merged = dict(last["options"])
         merged.update(options)
         power_out = session.power.to_dict() if supply == SUPPLY_BP6 else None
-        return _check_then_act(bp, recipe, merged, power_out)
+        return _check_then_act(bp, recipe, merged, power_out, confirm, session.port,
+                               last["mv"], supply)
     return session.run(go)
 
 
 def run_recipe(session: Any, confirm: ConfirmStore, token: Optional[str],
                options: Dict[str, Any]) -> Dict[str, Any]:
     if token is None:
-        return _rerun(session, options)
+        return _rerun(session, confirm, options)
     try:
         payload = confirm.redeem(token, ACTION)
     except ConfirmError as exc:
@@ -290,11 +318,45 @@ def run_recipe(session: Any, confirm: ConfirmStore, token: Optional[str],
     recipe = REGISTRY.get(payload["name"])
     if recipe is None:
         return {"error": "plan again: recipe %r is gone" % payload["name"]}
-    if recipe.risk == "destructive":
-        return {"error": DESTRUCTIVE}
     key = _changed_locked(payload["options"], options)
     if key:
         return {"error": "plan again: %s was fixed by the plan" % key}
     merged = dict(payload["options"])
     merged.update(options)
-    return _run_planned(session, recipe, payload, merged)
+    return _run_planned(session, confirm, recipe, payload, merged)
+
+
+def commit_recipe(session: Any, confirm: ConfirmStore, token: str) -> Dict[str, Any]:
+    """Make the change a prepare described. Never switches power on or changes it."""
+    try:
+        payload = confirm.redeem(token, COMMIT_ACTION)
+    except ConfirmError as exc:
+        return {"error": str(exc)}
+    if time.monotonic() > payload["expires"]:
+        return {"error": "plan again: the commit token has expired"}
+    recipe = REGISTRY.get(payload["name"])
+    if recipe is None or recipe.risk != "destructive" or recipe.commit is None:
+        return {"error": "plan again: recipe %r is gone or no longer changes the chip"
+                % payload["name"]}
+
+    def go(bp: Any) -> Dict[str, Any]:
+        if payload["port"] != session.port:
+            return {"error": "plan again: this was prepared for another board (%s)"
+                    % payload["port"]}
+        error = _power_error(bp, session, recipe, payload["mv"], payload["supply"])
+        if error:
+            return {"error": error}
+        options, prepared = payload["options"], payload["prepared"]
+        try:
+            check = recipe.check(bp, options)
+        except NackError as exc:
+            check = {"ok": False, "error": str(exc)}
+        if not check.get("ok", False):
+            return {"error": "plan again: the chip no longer answers the check (%s)"
+                    % (check.get("error") or check.get("hint") or "check failed")}
+        if check.get("identity") != prepared.get("_identity"):
+            return {"error": "plan again: the chip is not the one that was prepared "
+                    "(%s, was %s)" % (check.get("identity"), prepared.get("_identity"))}
+        return {"recipe": recipe.name, "committed": True,
+                "result": recipe.commit(bp, options, prepared)}
+    return session.run(go)

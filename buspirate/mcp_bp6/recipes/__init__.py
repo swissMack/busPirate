@@ -22,6 +22,11 @@ class Recipe:
     ``check`` returns ``{"ok": False, ...}`` to stop before the action. A
     recipe whose ``max_mv`` is 0 needs no supply at all. ``default_mv`` 0 means
     there is no safe default: the owner must state the voltage.
+
+    A destructive recipe's ``action`` only prepares (it never writes) and
+    returns the public keys ``chip``, ``operation``, ``start``, ``length``,
+    ``summary`` and ``backup`` plus private keys starting with ``_``;
+    ``commit(bp, options, prepared)`` makes the change.
     """
 
     name: str
@@ -40,6 +45,7 @@ class Recipe:
     milliamps: int = 100
     risk: str = "none"
     notes: Tuple[str, ...] = ()
+    commit: Optional[Callable[[Any, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]] = None
 
     def __post_init__(self) -> None:
         if self.bus not in BUSES:
@@ -50,6 +56,9 @@ class Recipe:
             raise ValueError("recipe %r: min_mv is above max_mv" % self.name)
         if self.default_mv and not self.min_mv <= self.default_mv <= self.max_mv:
             raise ValueError("recipe %r: default_mv is outside min_mv..max_mv" % self.name)
+        if (self.risk == "destructive") != (self.commit is not None):
+            raise ValueError("recipe %r: a destructive recipe needs a commit, and only a "
+                             "destructive recipe has one" % self.name)
 
 
 REGISTRY = {}  # type: Dict[str, Recipe]
