@@ -27,7 +27,7 @@ def test_i2c_scan_and_register_read(bp, fake):
     with bp.i2c() as i2c:
         i2c.configure_peripherals(power=True, pullups=True)
         assert fake.mode == "I2C" and fake.psu_enabled and fake.pullups
-        assert i2c.scan() == [0x76]
+        assert i2c.scan() == [0x27, 0x44, 0x50, 0x76]
         assert i2c.read_register(0x76, 0xD0) == b"\x58"
 
 

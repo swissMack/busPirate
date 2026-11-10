@@ -22,6 +22,7 @@ from .bp6.bpio import StatusResponse as _ST
 from .bp6.bpio.RequestPacketContents import RequestPacketContents
 from .bp6.bpio.ResponsePacketContents import ResponsePacketContents
 from .bp6.framing import FrameReader, cobs_decode, frame
+from .devices.aht20 import crc8
 from .simulator import FakeFlash
 
 MODES = ("HiZ", "1WIRE", "UART", "HDUART", "I2C", "SPI", "2WIRE", "3WIRE",
@@ -115,6 +116,25 @@ class _BinaryPort(_Port):
         super().close()
 
 
+class FakeSht31:
+    """An SHT31: ``F3 2D`` reads the status register, ``24 00`` measures 25 °C and 50 %RH."""
+
+    def __init__(self) -> None:
+        self._reply = b""
+
+    @staticmethod
+    def _word(value: int) -> bytes:
+        raw = value.to_bytes(2, "big")
+        return raw + bytes([crc8(raw)])
+
+    def __call__(self, written: bytes, count: int) -> bytes:
+        if written == b"\xf3\x2d":
+            self._reply = self._word(0x8010)
+        elif written == b"\x24\x00":
+            self._reply = self._word(0x6666) + self._word(0x7FFF)
+        return self._reply[:count]
+
+
 class FakeBp6:
     TERMINAL = "/dev/cu.usbmodem6buspirate1"
     BINARY = "/dev/cu.usbmodem6buspirate3"
@@ -155,6 +175,12 @@ class FakeBp6:
         device[0xF7:0xFD] = bytes((0x65, 0x5A, 0xC0, 0x7E, 0xED, 0x00))
         self.i2c_devices = {0x76: device}
         self._pointer = {0x76: 0}
+        #: Devices that are not a plain register file: address -> callable(written, count).
+        self.i2c_handlers = {}
+        # A PCF8574 LCD backpack, an SHT31 and a 24C02 holding a recognisable pattern.
+        self.add_i2c_device(0x27)
+        self.add_i2c_device(0x44, handler=FakeSht31())
+        self.add_i2c_device(0x50, bytes((i * 7 + 3) & 0xFF for i in range(256)))
         self.flash = FakeFlash()
         self.onewire_rom = DS18B20_ROM
         self.uart_echo = True
@@ -198,10 +224,16 @@ class FakeBp6:
     def over_limit(self) -> bool:
         return 0 < self.psu_ma < self.load_ma
 
-    def add_i2c_device(self, address: int, data: bytes = bytes(256)) -> None:
-        """Answer at ``address`` with a 256-byte register file."""
+    def add_i2c_device(self, address: int, data: bytes = bytes(256), handler=None) -> None:
+        """Answer at ``address`` with a 256-byte register file, or with ``handler``.
+
+        A handler is called as ``handler(written, count)`` with the bytes after the
+        address byte and the number to read, and returns the bytes to read.
+        """
         self.i2c_devices[address] = bytearray(data)
         self._pointer[address] = 0
+        if handler is not None:
+            self.i2c_handlers[address] = handler
 
     def set_load(self, milliamps: int) -> None:
         """Change what the target draws, as when a part is plugged in."""
@@ -376,6 +408,9 @@ class FakeBp6:
             device = self.i2c_devices.get(address)
             if device is None:
                 return self._data_response(b"", error="Protocol request failed")
+            handler = self.i2c_handlers.get(address)
+            if handler is not None:
+                return self._data_response(handler(written[1:], count))
             if len(written) > 1:
                 self._pointer[address] = written[1]
                 for offset, byte in enumerate(written[2:]):

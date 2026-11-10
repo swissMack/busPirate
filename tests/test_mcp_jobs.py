@@ -46,7 +46,7 @@ def test_i2c_scan_labels_devices(variant):
 
 def test_i2c_scan_addresses_and_reading_bp6():
     result = i2c_scan(connected("bp6"))
-    device = result["devices"][0]
+    device = next(d for d in result["devices"] if d["address"] == "0x76")
     assert device["address"] == "0x76" and device["address_8bit"] == "0xEC/0xED"
     assert device["reading"]["device"] and device["reading"]["values"]
     assert result["speed_khz"] == 100
@@ -256,7 +256,8 @@ def test_unplug_mid_scan_raises_boardgone():
 
 def test_simulated_bmp280_reads_the_datasheet_example():
     # Bosch BMP280 datasheet §8.1 worked example: 25.08 °C, 1006.53 hPa.
-    values = i2c_scan(connected("bp6"))["devices"][0]["reading"]["values"]
+    bmp = next(d for d in i2c_scan(connected("bp6"))["devices"] if d["address"] == "0x76")
+    values = bmp["reading"]["values"]
     assert values["Temperature"] == "25.08 °C"
     assert values["Pressure"] == "1006.53 hPa"
 

@@ -82,8 +82,10 @@ def test_find_recipes_by_name_word_and_title(recipes):
     recipes()
     recipes(name="toy-sensor", title="Toy temperature sensor", words=("thermometer",))
     assert find_recipes("toy-backpack")[0]["name"] == "toy-backpack"
-    assert [r["name"] for r in find_recipes("pcf8574")] == ["toy-backpack"]
-    assert [r["name"] for r in find_recipes("temperature")] == ["toy-sensor"]
+    toys = lambda query: [r["name"] for r in find_recipes(query)  # noqa: E731
+                          if r["name"].startswith("toy-")]  # the real recipes share the registry
+    assert toys("pcf8574") == ["toy-backpack"]
+    assert toys("temperature") == ["toy-sensor"]
     assert {r["name"] for r in find_recipes("toy")} >= {"toy-backpack", "toy-sensor"}
     assert find_recipes("toy")[0] == {"name": "toy-backpack", "title": "Toy I2C backpack",
                                       "bus": "i2c"}

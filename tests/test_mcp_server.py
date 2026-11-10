@@ -342,7 +342,7 @@ def test_i2c_scan_through_server_reports_power_note():
     server = build_server(BoardSession(simulated="bp6"))
     call(server, "connect")
     out = call(server, "i2c_scan")
-    assert out["devices"][0]["address"] == "0x76"
+    assert "0x76" in [d["address"] for d in out["devices"]]
     assert out["power"] is False and "approve power" in out["note"]
 
 
