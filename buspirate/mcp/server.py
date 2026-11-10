@@ -19,7 +19,10 @@ from .. import boards
 from ..exceptions import BusPirateError
 from . import jobs, knowledge
 from .confirm import ConfirmError, ConfirmStore
-from .power import SOURCE_MEASURED, SOURCE_OWNER, PowerRefused, measure, plan_power, suggest_level
+from .power import (  # noqa: F401  (PSU_TRIPPED, V3_POWER_NOTE re-exported)
+    PSU_TRIPPED, SOURCE_MEASURED, SOURCE_OWNER, V3_POWER_NOTE, PowerRefused, apply_plan,
+    measure, plan_power, suggest_level,
+)
 from .session import BoardGone, BoardSession, NotConnected
 from .wiring import JOBS, job_notes, wiring_steps
 
@@ -60,12 +63,6 @@ BOARD_TOOLS: Dict[str, Tuple[FrozenSet[str], ...]] = {
 RECONNECT_HINT = "If new tools don't appear, run /mcp → reconnect buspirate."
 BOARD_GONE = "board disconnected — plug it back in and call connect"
 POWER_ACTION = "power_apply"
-PSU_TRIPPED = ("the supply tripped (or would not start): the target drew more than the "
-               "%d mA current limit and the Bus Pirate 6 cut it — check the wiring for "
-               "a short, then plan again; the supply is off")
-V3_POWER_NOTE = ("on a v3/v4 the supply is asserted for each bus job and drops when "
-                 "that job's mode exits; \"power\": true in a bus result means approved "
-                 "and applied for that job")
 NO_SOFTWARE_POWER_NOTE = ("software cannot switch this board's supply; ask the owner to "
                           "disconnect VIO or switch the target off")
 _BP6_FAMILY = ("bp6", "bp5")
@@ -255,47 +252,13 @@ def build_server(session: BoardSession) -> MCPServer:
                                  "%s; nothing was switched — plan again"
                                  % (p.variant, session.variant or "none")}
 
-            def supply_off(bp: Any) -> None:
-                try:
-                    bp.set_power(False)  # never leave a half-applied plan on
-                except BusPirateError:
-                    log.warning("could not switch the supply back off", exc_info=True)
-
             def switch(bp: Any) -> Dict[str, Any]:
                 # Checked again under the session lock: the board may have been
                 # swapped between the check above and taking the lock.
-                if bp.profile.variant != p.variant:
-                    return {"error": "this plan was made for a %s, but the connected board "
-                                     "is %s; nothing was switched — plan again"
-                                     % (p.variant, bp.profile.variant)}
-                out = p.to_dict()
-                if p.variant in _BP6_FAMILY:
-                    try:
-                        bp.set_power(True, millivolts=p.millivolts, milliamps=p.milliamps)
-                        st = bp.set_pullups(p.pullups)
-                    except BusPirateError:
-                        supply_off(bp)
-                        session.power = None
-                        raise
-                    if st.psu_tripped or not st.psu_enabled:
-                        # Never record it: every bus tool would re-enable the
-                        # supply into the fault.
-                        supply_off(bp)
-                        session.power = None
-                        return {"error": PSU_TRIPPED % p.milliamps, "applied": False,
-                                "psu_enabled": False, "psu_tripped": st.psu_tripped}
-                    out.update(psu_enabled=st.psu_enabled, psu_mv=st.psu_mv,
-                               psu_ma=st.psu_ma, psu_tripped=st.psu_tripped,
-                               pullups_on=st.pullups)
-                elif p.variant in ("v3", "v4"):
-                    out["pins"] = bp.decode_pins(bp.set_pins(power=True, pullups=p.pullups))
-                    out["note"] = V3_POWER_NOTE
-                else:
-                    out["note"] = ("recorded only: software cannot switch this board's "
-                                   "supply; the owner sets it")
-                session.power = p
-                out["applied"] = True
-                return out
+                try:
+                    return apply_plan(bp, session, p)
+                except PowerRefused as exc:
+                    return {"error": str(exc)}
             return session.run(switch)
         return await guard(ctx, apply)
 
