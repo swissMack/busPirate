@@ -680,6 +680,17 @@ def test_jtag_recipes_registered():
         assert r.options == {"channels": channels, "pulsing": True}
         assert [t for _, t in r.wiring].count("GND") == 1 and ("VREF", "VOUT") in r.wiring
         assert [p for _, p in r.wiring[:8]] == ["IO%d" % n for n in range(8)]
+        assert not any("pin 1" in t for t, _ in r.wiring)
+
+
+def test_wiring_follows_channels(session, confirm):
+    def pins(name, opts):
+        return [w["bp6_pin"] if "bp6_pin" in w else w for w in
+                engine.plan_recipe(session, confirm, name, opts)["wiring"]]
+    swd = pins("swd-pinout", {"channels": 4})
+    jtag = pins("jtag-pinout", {})
+    assert len(swd) == 6 and len(jtag) == 8, (swd, jtag)
+    assert "IO4" not in str(swd) and "IO5" in str(jtag) and "IO6" not in str(jtag)
 
 
 def test_plan_warns_disturbs_target(session, confirm):

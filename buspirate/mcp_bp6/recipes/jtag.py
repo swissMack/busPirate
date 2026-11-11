@@ -27,11 +27,11 @@ def _action(protocol: str):
     return action
 
 
-_WIRING = tuple(("target pin %d" % (n + 1), "IO%d" % n) for n in range(8)) + (
+_WIRING = tuple(("a candidate pad (any order)", "IO%d" % n) for n in range(8)) + (
     ("GND", "GND"), ("VREF", "VOUT"))
 _NOTES = ("blueTag pulses the pins and can disturb a running target",
-          "wire only the first N IO pins (IO0 upward) for the channels option; each on a "
-          "separate pad of the suspected header",
+          "put each IO wire on a separate candidate pad of the suspected header; the order "
+          "does not matter, blueTag finds which pad is which",
           "the scan cannot be interrupted and can take a minute or more")
 
 for _proto, _title, _default in (("jtag", "JTAG", 6), ("swd", "SWD", 4)):

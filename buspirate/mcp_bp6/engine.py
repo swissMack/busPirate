@@ -81,9 +81,15 @@ def _range_error(recipe: Recipe, mv: int, what: str) -> Optional[str]:
             % (what, mv, recipe.name, recipe.min_mv, recipe.max_mv))
 
 
-def _wiring(recipe: Recipe, target_powered: bool) -> List[Dict[str, str]]:
+def _wiring(recipe: Recipe, target_powered: bool,
+            options: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
+    channels = (options or {}).get("channels")
     steps = []
     for target_pin, pin in recipe.wiring:
+        # A recipe with a ``channels`` option wires IO0..IO(channels-1) only.
+        if (isinstance(channels, int) and pin.startswith("IO") and pin[2:].isdigit()
+                and int(pin[2:]) >= channels):
+            continue
         note = ""
         if pin == "VOUT" and target_powered:
             note = ("the target has its own supply: ours stays off, and VOUT reads its "
@@ -176,7 +182,7 @@ def plan_recipe(session: Any, confirm: ConfirmStore, name: str,
     return {
         "recipe": recipe.name,
         "title": recipe.title,
-        "wiring": _wiring(recipe, supply == SUPPLY_TARGET),
+        "wiring": _wiring(recipe, supply == SUPPLY_TARGET, merged),
         "power": plan.to_dict() if plan else None,
         "target_powered": supply == SUPPLY_TARGET,
         "target_mv": target_mv,
