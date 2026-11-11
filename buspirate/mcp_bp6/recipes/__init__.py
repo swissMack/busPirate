@@ -120,7 +120,8 @@ def find_recipes(query: Optional[str]) -> List[Dict[str, str]]:
         ranked = [(rank, r.name, r) for r in REGISTRY.values()
                   for rank in [_rank(r, q)] if rank is not None]
         found = [r for _, _, r in sorted(ranked, key=lambda item: item[:2])]
-    return [{"name": r.name, "title": r.title, "bus": r.bus} for r in found]
+    return [{"name": r.name, "title": r.title, "bus": r.bus, "source": r.source}
+            for r in found]
 
 
 from . import i2c  # noqa: E402,F401  (registers the I2C recipes)

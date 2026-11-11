@@ -87,8 +87,10 @@ def test_find_recipes_by_name_word_and_title(recipes):
     assert toys("pcf8574") == ["toy-backpack"]
     assert toys("temperature") == ["toy-sensor"]
     assert {r["name"] for r in find_recipes("toy")} >= {"toy-backpack", "toy-sensor"}
-    assert find_recipes("toy")[0] == {"name": "toy-backpack", "title": "Toy I2C backpack",
-                                      "bus": "i2c"}
+    first = find_recipes("toy")[0]
+    assert (first["name"], first["title"], first["bus"]) == (
+        "toy-backpack", "Toy I2C backpack", "i2c")
+    assert first["source"]
     assert {"toy-backpack", "toy-sensor"} <= {r["name"] for r in find_recipes(None)}
     assert find_recipes("no-such-thing") == []
 

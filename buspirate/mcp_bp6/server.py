@@ -47,8 +47,12 @@ and the plan in one message.
 - A target-powered plan switches nothing on.
 - If the check fails, read the `hint` to the owner.
 - `hiz` makes everything safe.
-- A hand-off (flashrom, avrdude, pulseview) lends the board to that program: give the \
-owner the `command` and `how_to_return`. Call `connect` or `hiz` to take it back.
+- A hand-off (flashrom, avrdude, pulseview) lends the board to that program until \
+`connect` or `hiz` takes it back; give the owner the `command` and `how_to_return`.
+- The self-test needs nothing on the pins, but the owner must press the board's button.
+- Terminal recipes switch the supply off while they change mode, then switch the \
+confirmed supply back on. Their voltages must be multiples of 10 mV.
+- A blueTag pin scan can take a minute at 8 channels; say so before you start.
 """
 
 #: Each built server's session, for run_stdio and tests.
@@ -472,10 +476,12 @@ def build_server(session: BoardSession) -> MCPServer:
         ("pwm", pwm, "Generate a square wave on an IO pin (0-7): `hz` 8 to 62500000, `duty` "
          "above 0 to 100 percent. IO0/IO1, IO2/IO3, IO4/IO5 and IO6/IO7 share one PWM, so "
          "only one pin of a pair runs. Needs power: planned and applied, or the target's own. "
-         "Runs until pwm_off or hiz. Returns the actual frequency and duty."),
+         "Runs until pwm_off or hiz. Returns the actual frequency and duty. The pin swings "
+         "between 0 V and the supply voltage (3.3 V unless you planned another)."),
         ("pwm_off", pwm_off, "Stop the PWM on an IO pin."),
         ("frequency", frequency, "Measure the frequency and duty cycle of a signal on IO1, "
-         "IO3, IO5 or IO7 (one reading). Needs power like pwm."),
+         "IO3, IO5 or IO7 (one reading). Needs power like pwm. The signal must stay between "
+         "0 V and the supply voltage (3.3 V unless you planned another)."),
         ("bp6_notes", bp6_notes, "The Bus Pirate 6 notes: limits, pin map with wire colours, "
          "the pull-up rule and the risks. Read when unsure."),
     ]

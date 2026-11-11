@@ -142,7 +142,9 @@ register(Recipe(
     words=("flashrom", "spi", "flash", "bios", "handoff", "legacy", "dump"), bus="spi",
     min_mv=1650, max_mv=3600, wiring=SPI_WIRING, check=_flashrom_check,
     action=_flashrom_action, options={}, target_powered_error=LEGACY_REFUSAL,
-    notes=("Legacy mode drives HOLD (IO2) and WP (IO3) high; wire them to the chip if its "
+    notes=("Legacy mode switches the BP6's supply on at 3.3 V (100 mA) unless the plan names "
+           "another voltage; a chip with its own power supply is refused",
+           "Legacy mode drives HOLD (IO2) and WP (IO3) high; wire them to the chip if its "
            "HOLD and WP pins are not tied high",
            "the command reads the chip into backup.bin; anything else flashrom does is "
            "between the owner and flashrom"),
@@ -155,7 +157,10 @@ register(Recipe(
     wiring=(("SCK", "IO6"), ("MOSI", "IO7"), ("MISO", "IO4"), ("RESET", "IO5"),
             ("GND", "GND"), ("VCC", "VOUT")),
     check=_avrdude_check, action=_avrdude_action, options={"part": "m328p"},
-    target_powered_error=LEGACY_REFUSAL, **_COMMON))
+    target_powered_error=LEGACY_REFUSAL,
+    notes=("Legacy mode switches the BP6's supply on at 3.3 V (100 mA) unless the plan names "
+           "another voltage, up to 5 V; a target with its own power supply is refused",),
+    **_COMMON))
 
 register(Recipe(
     name="pulseview", title="Hand the board to PulseView as a logic analyzer",

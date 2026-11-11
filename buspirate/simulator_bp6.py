@@ -1019,6 +1019,9 @@ class FakeBp6:
 
     def _command(self, text: str) -> None:
         words = text.split()
+        if not words:  # a stray space at the prompt: the firmware just redraws it
+            self._say("\n" + self._prompt())
+            return
         name, args = words[0], words[1:]
         if name in ("W", "w", "P", "p", "G", "g") and self.mode == "HiZ":
             self._finish(text, f"\x07{self.HIZ_REFUSAL}\r\n")

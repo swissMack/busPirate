@@ -208,7 +208,7 @@ def test_bp6_notes():
 
 def test_instructions_are_short_and_state_the_rules():
     text = build_server(BoardSession(simulated="bp6")).instructions
-    assert len(text.splitlines()) <= 10
+    assert len(text.splitlines()) <= 16
     for word in ("recipes", "recipe_plan", "recipe_run", "needs_extra_confirmation",
                  "target-powered", "hint", "hiz"):
         assert word in text
@@ -390,3 +390,33 @@ def test_pwm_off_reports_a_supply_trip():
     assert "power supply disabled" in out["error"]
     assert session.power is None
     assert _state.of(session).pwm_pins == set()
+
+
+def test_tool_names_phase3a():
+    i = TOOL_NAMES.index("pwm")
+    assert TOOL_NAMES[i:i + 3] == ("pwm", "pwm_off", "frequency")
+    server = build_server(BoardSession(simulated="bp6"))
+    assert names(server) == set(TOOL_NAMES) == EXPECTED
+
+
+def test_instructions_mention_terminal_rules():
+    text = build_server(BoardSession(simulated="bp6")).instructions
+    assert len(text) < 1800
+    low = text.lower()
+    assert "until" in low and "connect" in low and "lends" in low
+    assert "self-test" in low and "nothing" in low
+    assert "bluetag" in low and "minute" in low
+
+
+def test_recipes_list_new():
+    server = build_server(BoardSession(simulated="bp6"))
+    listed = {r["name"]: r for r in call(server, "recipes")["recipes"]}
+    for name in ("pwm-signal", "frequency-measure", "self-test", "jtag-pinout", "swd-pinout",
+                 "flashrom", "avrdude", "pulseview"):
+        assert listed[name]["source"].startswith("https://docs.buspirate.com/")
+
+
+def test_pwm_and_frequency_descriptions_name_the_voltage():
+    server = build_server(BoardSession(simulated="bp6"))
+    desc = {t.name: t.description for t in asyncio.run(server.list_tools())}
+    assert "3.3 V" in desc["pwm"] and "3.3 V" in desc["frequency"]

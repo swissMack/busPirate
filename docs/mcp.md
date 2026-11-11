@@ -119,6 +119,23 @@ How it differs from `buspirate`:
   `onewire-eeprom`, `ddr4-spd`, `ddr5-spd` and `midi`; changing ones
   `i2c-eeprom-write`, `fram-write`, `spi-flash-write`, `spi-eeprom-write`,
   `microwire-eeprom-write` and `onewire-eeprom-write`.
+- **Signal recipes:** `pwm-signal` (a square wave on one IO pin, 3.3 V unless
+  you plan another voltage) and `frequency-measure` (frequency and duty of a
+  signal on IO1, IO3, IO5 or IO7). The `pwm`, `pwm_off` and `frequency` tools do
+  the same by hand; the pin swings between 0 V and the supply voltage.
+- **Terminal recipes:** `self-test`, `jtag-pinout` and `swd-pinout` (the blueTag
+  pin finder; it can take over a minute at 8 channels, and the pads can be wired
+  in any order) use the board's terminal. They switch mode first, which turns
+  the supply off, then switch the confirmed supply back on. Their voltages must
+  be multiples of 10 mV; anything else is refused when the plan is made. The
+  self-test switches the board's own supply on at 3.3 V and only passes if you
+  press the board's button.
+- **Hand-offs:** `flashrom`, `avrdude` and `pulseview` lend the board to that
+  program. flashrom and avrdude switch the supply on (3.3 V by default) and
+  refuse a target with its own power; PulseView gets 3.3 V at 100 mA while it
+  holds the port. While the board is lent, its tools refuse. `connect` or `hiz`
+  takes it back (reset, supply off). If the reset is not confirmed, the board
+  stays lent and the owner is told to retry or press the board's button.
 - **Two yeses for a change:** `recipe_run` on a changing recipe stops after it
   has saved a backup to your disk and returns a `commit` with a plain summary
   and a token. Nothing is written yet. After your second yes the assistant calls
@@ -130,7 +147,7 @@ How it differs from `buspirate`:
   `measure_voltages`, `power_plan`, `power_apply`, `i2c_scan`, `i2c_read`,
   `i2c_write`, `spi_transfer`, `uart_send`, `uart_listen`, `onewire_scan`,
   `pins` (drive IO pins with 1, 0 or `"in"` and read every pin's level and
-  voltage) and `bp6_notes` (limits, pin map with colours, the pull-up rule and
+  voltage), `pwm`, `pwm_off`, `frequency` and `bp6_notes` (limits, pin map with colours, the pull-up rule and
   the risks).
 - **The supply is capped at 5 V, and goes off when the session ends:** on exit
   the board goes to HiZ, supply and pull-ups off, so an LCD loses its text.

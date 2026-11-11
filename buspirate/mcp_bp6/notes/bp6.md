@@ -64,5 +64,15 @@ Built from the datasheets and the firmware source; all fakes pass. Check on hard
 - I2C EEPROM busy polling by an empty write needs a NACK from a real chip.
 - The MOSI level the BP6 clocks during read-only SPI bytes (the Microwire ready poll).
 - The BP6 keeps one 1-Wire transaction across separate reset, write and read requests.
+- Whether a BPIO2 mode change shows in the terminal prompt.
+- Whether a bare Enter at the main prompt is harmless.
+- The `g` output in HiZ, and the `f` output when there is no signal.
+- Whether the firmware treats the `\r` after `q` as the answer to the Legacy exit question.
+- The Legacy SPI pin map (IO4-IO7), the pin map avrdude needs, and the board's reset timing against the 3 s wait.
+- The exact terminal output: the end-of-reply marker (ETX) and the echo escapes.
+- Whether PWM keeps running after a BPIO2 bus tool changes the mode.
+- How long a blueTag scan takes, and the MCP client's tool timeout.
+- The PulseView driver settings, and which binary mode the owner's unit has saved.
+- The self-test button timing.
 
 Name the exact part for 24xx/25xx/93Cxx writes: a wrong size mis-addresses the backup and the write alike.
