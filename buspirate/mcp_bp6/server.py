@@ -40,6 +40,9 @@ Tools for a Bus Pirate 6.
 and the plan in one message.
 - Call `recipe_run` only after the owner's yes. Ask a second time when \
 `needs_extra_confirmation` is true.
+- A recipe that changes a chip stops after its backup and returns `commit`. Read its \
+`summary` to the owner, and call `recipe_commit` only after a second yes to that change.
+- Never pass backup=False unless the owner asked for no backup.
 - A target-powered plan switches nothing on.
 - If the check fails, read the `hint` to the owner.
 - `hiz` makes everything safe.
@@ -106,6 +109,9 @@ def build_server(session: BoardSession) -> MCPServer:
     async def recipe_run(token: Optional[str] = None,
                          options: Optional[dict] = None) -> Dict[str, Any]:
         return await guard(lambda: engine.run_recipe(session, confirm, token, options or {}))
+
+    async def recipe_commit(token: str) -> Dict[str, Any]:
+        return await guard(lambda: engine.commit_recipe(session, confirm, token))
 
     # -- the board --------------------------------------------------------------
 
@@ -288,6 +294,10 @@ def build_server(session: BoardSession) -> MCPServer:
          "power, runs the check, then the action. Only after the owner's yes; ask a second "
          "time when needs_extra_confirmation is true. token=None re-runs the last recipe "
          "while its power is still on, within 5 minutes."),
+        ("recipe_commit", recipe_commit, "Make the change a recipe_run stopped at, with the "
+         "`commit` token it returned. Only after the owner's second yes to that change. "
+         "Switches no power and touches no pull-ups. `committed` is true only when the "
+         "read-back matches; otherwise the result names the backup."),
         ("board_status", board_status, "The Bus Pirate 6, its port, approved power and live "
          "supply readings."),
         ("connect", connect, "Open the Bus Pirate 6 (give `port` to pick one of several). "
@@ -332,9 +342,9 @@ def build_server(session: BoardSession) -> MCPServer:
 
 
 #: The tool names, in the order they are registered.
-TOOL_NAMES = ("recipes", "recipe_plan", "recipe_run", "board_status", "connect", "hiz",
-              "power_off", "measure_voltages", "power_plan", "power_apply", "wiring", "i2c_scan",
-              "i2c_read", "i2c_write", "spi_transfer", "uart_send", "uart_listen",
+TOOL_NAMES = ("recipes", "recipe_plan", "recipe_run", "recipe_commit", "board_status",
+              "connect", "hiz", "power_off", "measure_voltages", "power_plan", "power_apply",
+              "wiring", "i2c_scan", "i2c_read", "i2c_write", "spi_transfer", "uart_send", "uart_listen",
               "onewire_scan", "pins", "bp6_notes")
 
 

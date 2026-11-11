@@ -115,6 +115,17 @@ How it differs from `buspirate`:
   *target-powered*: the supply stays off. If the check fails, power stays as
   planned so you can fix the wiring and re-run with `recipe_run(token=None)`
   within 5 minutes.
+- **Memory recipes:** read-only `i2c-eeprom`, `spi-eeprom`, `microwire-eeprom`,
+  `onewire-eeprom`, `ddr4-spd`, `ddr5-spd` and `midi`; changing ones
+  `i2c-eeprom-write`, `fram-write`, `spi-flash-write`, `spi-eeprom-write`,
+  `microwire-eeprom-write` and `onewire-eeprom-write`.
+- **Two yeses for a change:** `recipe_run` on a changing recipe stops after it
+  has saved a backup to your disk and returns a `commit` with a plain summary
+  and a token. Nothing is written yet. After your second yes the assistant calls
+  `recipe_commit(token)`, which writes and reads back. A commit is only reported
+  as done (`committed: true`) when the read-back matches; otherwise
+  `committed` is false and the result names the backup file. `recipe_commit`
+  never switches power or touches the pull-ups.
 - **Primitive tools:** `board_status`, `connect`, `wiring`, `hiz`, `power_off`,
   `measure_voltages`, `power_plan`, `power_apply`, `i2c_scan`, `i2c_read`,
   `i2c_write`, `spi_transfer`, `uart_send`, `uart_listen`, `onewire_scan`,

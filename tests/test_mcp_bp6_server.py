@@ -14,7 +14,7 @@ from buspirate.mcp_bp6 import server as server_module  # noqa: E402
 from buspirate.mcp_bp6.server import TOOL_NAMES, build_server  # noqa: E402
 
 EXPECTED = {
-    "recipes", "recipe_plan", "recipe_run", "board_status", "connect", "hiz", "power_off",
+    "recipes", "recipe_plan", "recipe_run", "recipe_commit", "board_status", "connect", "hiz", "power_off",
     "measure_voltages", "power_plan", "power_apply", "i2c_scan", "i2c_read", "i2c_write",
     "spi_transfer", "uart_send", "uart_listen", "onewire_scan", "pins", "bp6_notes", "wiring",
 }
@@ -201,7 +201,7 @@ def test_pins_set_and_read():
 def test_bp6_notes():
     out = call(build_server(BoardSession(simulated="bp6")), "bp6_notes")
     text = out["text"]
-    assert len(text.splitlines()) <= 60
+    assert len(text.splitlines()) < 80
     for word in ("5 V", "pull-up", "orange", "SHT4x", "SLE4442", "owner-only", "HiZ"):
         assert word in text
 
@@ -277,3 +277,26 @@ def test_run_stdio_exit_puts_board_in_hiz(monkeypatch):
     monkeypatch.setattr(server_module.MCPServer, "run", fake_run)
     server_module.run_stdio(demo=True)
     assert seen["fake"].psu_enabled is False and seen["fake"].pullups is False
+
+
+def test_commit_flow_demo():
+    session = BoardSession(simulated="bp6")
+    server = build_server(session)
+    plan = call(server, "recipe_plan", {"name": "i2c-eeprom-write",
+                                        "options": {"data_hex": "de ad"}})
+    assert "error" not in plan, plan
+    chip = _fake(session).i2c_devices[0x50]
+    before = chip[0]
+    assert before != 0xDE
+    ran = call(server, "recipe_run", {"token": plan["token"]})
+    assert ran["commit"]["summary"], ran
+    assert _fake(session).i2c_devices[0x50][0] == before  # nothing changed yet
+    done = call(server, "recipe_commit", {"token": ran["commit"]["token"]})
+    assert done["committed"] is True and done["result"]["verified"] is True, done
+    assert _fake(session).i2c_devices[0x50][0] == 0xDE
+
+
+def test_instructions_name_the_commit_step():
+    assert "`recipe_commit` only after a second yes" in server_module.INSTRUCTIONS
+    assert "Never pass backup=False unless the owner asked for no backup." \
+        in server_module.INSTRUCTIONS

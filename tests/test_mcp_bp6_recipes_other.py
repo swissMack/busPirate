@@ -461,3 +461,51 @@ def test_midi_recipe_decodes(session, confirm):
     result = out["result"]
     assert result["count"] == 1 and result["bytes"] == 3
     assert result["messages"][0]["type"] == "note on" and result["messages"][0]["note"] == "C4"
+
+
+def test_destructive_commits_never_touch_power(session, confirm, tmp_path, monkeypatch):
+    """Only the commit step is guarded: it must not switch power or touch the pull-ups."""
+    from buspirate.simulator_bp6 import FakeEeprom25, FakeMicrowire, FakeDs2431
+    monkeypatch.setenv("HOME", str(tmp_path))
+    fake = _fake(session)
+    cases = {
+        "i2c-eeprom-write": {"data_hex": "01 02"},
+        "fram-write": {"data_hex": "01 02"},
+        "spi-flash-write": {"offset": 0, "data_hex": "01 02"},
+        "spi-eeprom-write": {"part": "25256", "data_hex": "01 02"},
+        "microwire-eeprom-write": {"part": "93C46", "data_hex": "01 02"},
+        "onewire-eeprom-write": {"data_hex": "01 02"},
+    }
+    destructive = {n for n, r in REGISTRY.items() if r.risk == "destructive"}
+    assert destructive == set(cases)
+
+    def forbid(what):
+        def boom(*a, **k):
+            raise AssertionError("commit called " + what)
+        return boom
+
+    committed = []
+    for name, opts in cases.items():
+        if name == "i2c-eeprom-write":
+            fake.add_eeprom24(0x50, "24C02")
+        elif name == "fram-write":
+            fake.add_eeprom24(0x50, "24C256")
+        elif name == "microwire-eeprom-write":
+            fake.spi_device = FakeMicrowire("93C46", 16, bytes((i * 7 + 1) & 0xFF for i in range(128)))
+        elif name == "spi-eeprom-write":
+            fake.spi_device = FakeEeprom25("25256", bytes(range(256)) * 128)
+        elif name == "onewire-eeprom-write":
+            fake.onewire_device = FakeDs2431()
+        session.last_recipe = None
+        plan = engine.plan_recipe(session, confirm, name, opts)
+        assert "error" not in plan, (name, plan)
+        out = engine.run_recipe(session, confirm, plan["token"], {})
+        if not out.get("commit"):
+            continue  # a chip reason stopped it before any commit: nothing to guard
+        committed.append(name)
+        with monkeypatch.context() as inner:
+            inner.setattr(BusPirate6, "set_power", forbid("set_power"))
+            inner.setattr(BusPirate6, "set_pullups", forbid("set_pullups"))
+            done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+        assert "result" in done, (name, done)
+    assert set(committed) == set(cases)

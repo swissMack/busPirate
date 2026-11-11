@@ -19,7 +19,7 @@
 | IO2 | green | free |
 | IO3 | blue | free |
 | IO4 | purple | SPI MISO, UART TX (to the target's RX) |
-| IO5 | brown | SPI CS, UART RX (from the target's TX) |
+| IO5 | brown | SPI CS, UART RX (from the target's TX); Microwire CS, active-high |
 | IO6 | grey | SPI CLK |
 | IO7 | white | SPI MOSI |
 | GND | black | ground: connect it first |
@@ -39,8 +39,10 @@ range is refused.
 ## Risks (decided)
 
 - SHT4x and anything with a lower hard maximum: the recipe caps the supply there.
-- EEPROM, FRAM and flash erase or write: a separate yes naming the chip, address range
-  and size; read a backup to the owner's disk first unless the owner declines.
+- EEPROM, FRAM and flash erase or write (phase 2: `*-write` recipes, then `recipe_commit`):
+  a separate yes naming the chip, address range and size; a backup is read to the owner's
+  disk first unless the owner declines. A commit is reported as done only when the
+  read-back matches; otherwise `committed` is false and the result names the backup.
 - DDR4/DDR5 SPD: read only.
 - SLE4442: read only; a passcode attempt needs its own yes, shows the attempts left,
   and is never retried automatically.
@@ -50,3 +52,15 @@ range is refused.
 - VPP SMPS: not automated.
 
 `hiz` makes everything safe.
+
+## Unverified on a real board
+
+Built from the datasheets and the firmware source; all fakes pass. Check on hardware:
+
+- SPI `chip_select_idle` (active-high CS for Microwire) is honoured over BPIO2.
+- Microwire read alignment: one dummy bit is shifted out of the read.
+- DDR4 page select by an address-only I2C write, and a 256-byte `read_after_write`.
+- DS2431 copy-scratchpad without a strong pull-up.
+- I2C EEPROM busy polling by an empty write needs a NACK from a real chip.
+- The MOSI level the BP6 clocks during read-only SPI bytes (the Microwire ready poll).
+- The BP6 keeps one 1-Wire transaction across separate reset, write and read requests.
