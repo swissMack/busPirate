@@ -95,10 +95,10 @@ index 00000000..c2df1618
 +};
 diff --git a/src/Boards/Common/Views/Lcd1602.cpp b/src/Boards/Common/Views/Lcd1602.cpp
 new file mode 100644
-index 00000000..f3261ed9
+index 00000000..55e7ba84
 --- /dev/null
 +++ b/src/Boards/Common/Views/Lcd1602.cpp
-@@ -0,0 +1,188 @@
+@@ -0,0 +1,220 @@
 +#include "Lcd1602.h"
 +
 +#include <Arduino.h>
@@ -201,8 +201,9 @@ index 00000000..f3261ed9
 +
 +// Latches one nibble already placed on P4..P7 (plus RS/backlight bits).
 +bool Lcd1602::pulse(uint8_t bits) {
-+    bool ok = sendPort(bits | EN);
-+    delayMicroseconds(1);            // E high >= 450 ns
++    // RS/data settle with E low first (tAS), then E rises, then falls.
++    bool ok = sendPort(bits & ~EN);
++    ok = sendPort(bits | EN) && ok;  // each I2C write is far longer than 450 ns
 +    ok = sendPort(bits & ~EN) && ok;
 +    delayMicroseconds(50);           // most commands need > 37 us
 +    return ok;
@@ -236,18 +237,49 @@ index 00000000..f3261ed9
 +    return ok;
 +}
 +
++// True only if both lines read high with the pins released AND still read
++// high with a pull-down enabled, i.e. real external pull-ups exist.
++bool Lcd1602::busHasPullups() {
++    busFree();
++    delayMicroseconds(20);
++    if (!digitalRead(sda) || !digitalRead(scl)) return false;
++    pinMode(sda, INPUT_PULLDOWN);
++    pinMode(scl, INPUT_PULLDOWN);
++    delayMicroseconds(20);
++    bool ok = digitalRead(sda) && digitalRead(scl);
++    busFree();
++    return ok;
++}
++
++// Frees a slave that holds SDA low: up to 9 SCL clocks, then a STOP.
++void Lcd1602::recoverBus() {
++    busFree();
++    delayMicroseconds(HALF_US);
++    for (uint8_t i = 0; i < 9 && digitalRead(sda) == LOW; i++) {
++        sclLow();
++        delayMicroseconds(HALF_US);
++        sclHigh();
++        delayMicroseconds(HALF_US);
++    }
++    stop();
++}
++
 +bool Lcd1602::begin(uint8_t sdaPin, uint8_t sclPin) {
 +    sda = sdaPin;
 +    scl = sclPin;
 +    found = false;
-+    busFree();
-+    delayMicroseconds(HALF_US);
++    recoverBus();
++    if (!busHasPullups()) return false;   // nothing attached, or no pull-ups
 +    for (uint8_t a : {uint8_t(0x27), uint8_t(0x3F)}) {
-+        if (probe(a)) {
-+            addr = a;
-+            found = initLcd();
-+            return found;
-+        }
++        if (!probe(a)) continue;
++        addr = a;
++        // ACK alone is not proof: a port write must read back (P3 masked).
++        uint8_t back = 0;
++        const uint8_t pattern = 0xA0 | BACKLIGHT;
++        if (!sendPort(pattern) || !readPort(back) ||
++            (back & ~BACKLIGHT) != (pattern & ~BACKLIGHT)) continue;
++        found = initLcd();
++        return found;
 +    }
 +    return false;
 +}
@@ -289,10 +321,10 @@ index 00000000..f3261ed9
 +}
 diff --git a/src/Boards/Common/Views/Lcd1602.h b/src/Boards/Common/Views/Lcd1602.h
 new file mode 100644
-index 00000000..c235fc20
+index 00000000..d1a9752d
 --- /dev/null
 +++ b/src/Boards/Common/Views/Lcd1602.h
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,52 @@
 +#pragma once
 +
 +#include <stdint.h>
@@ -322,6 +354,8 @@ index 00000000..c235fc20
 +
 +private:
 +    void busFree();
++    bool busHasPullups();
++    void recoverBus();
 +    void sdaHigh();
 +    void sdaLow();
 +    void sclHigh();
@@ -541,10 +575,10 @@ index ec5f8b7c..f1ead9e1 100644
  
 diff --git a/src/Transformers/LcdScreenTransformer.cpp b/src/Transformers/LcdScreenTransformer.cpp
 new file mode 100644
-index 00000000..ffd71f38
+index 00000000..46b0eede
 --- /dev/null
 +++ b/src/Transformers/LcdScreenTransformer.cpp
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,97 @@
 +#include "LcdScreenTransformer.h"
 +
 +namespace {
@@ -569,13 +603,12 @@ index 00000000..ffd71f38
 +    for (const auto& m : config.getMappings()) {
 +        size_t pos = m.find(marker);
 +        if (pos == std::string::npos || pos == 0) continue;
-+        std::string num = m.substr(pos + marker.size());
-+        if (num.empty()) continue;
-+        bool digits = true;
-+        for (char c : num) {
-+            if (c < '0' || c > '9') { digits = false; break; }
-+        }
-+        if (!digits) continue;
++        // Leading digits only: PinoutTransformer may append " ..." to a line.
++        size_t start = pos + marker.size();
++        size_t end = start;
++        while (end < m.size() && m[end] >= '0' && m[end] <= '9') end++;
++        if (end == start) continue;
++        std::string num = m.substr(start, end - start);
 +        std::string name = m.substr(0, pos);
 +        size_t sp = name.rfind(' ');
 +        if (sp != std::string::npos) name = name.substr(sp + 1);  // multi-word: last word
@@ -673,10 +706,10 @@ index 00000000..fb30f243
 +};
 diff --git a/test/Transformers/test_LcdScreenTransformer.cpp b/test/Transformers/test_LcdScreenTransformer.cpp
 new file mode 100644
-index 00000000..2bb93e9f
+index 00000000..35259513
 --- /dev/null
 +++ b/test/Transformers/test_LcdScreenTransformer.cpp
-@@ -0,0 +1,161 @@
+@@ -0,0 +1,170 @@
 +#include <unity.h>
 +
 +#include "Transformers/LcdScreenTransformer.h"
@@ -760,9 +793,9 @@ index 00000000..2bb93e9f
 +}
 +
 +void test_three_pins() {
-+    auto p = LcdScreenTransformer::pinPages(cfg("2WIRE", {"IO GPIO 11", "CLK GPIO 12", "RST GPIO 14"}));
++    auto p = LcdScreenTransformer::pinPages(cfg("2WIRE", {"DATA GPIO 11", "CLK GPIO 12", "RST GPIO 14"}));
 +    TEST_ASSERT_EQUAL_UINT32(1, p.size());
-+    expectScreen("IO IO11 CK IO12 ", "RS IO14         ", p[0]);
++    expectScreen("DI IO11 CK IO12 ", "RS IO14         ", p[0]);
 +}
 +
 +void test_abbreviations() {
@@ -782,6 +815,14 @@ index 00000000..2bb93e9f
 +    TEST_ASSERT_EQUAL_UINT32(2, p.size());
 +    expectScreen("SC IO5          ", "                ", p[1]);
 +    expectScreen("SC IO1  SC IO2  ", "SC IO3  SC IO4  ", p[0]);
++}
++
++void test_jtag_ellipsis_keeps_fourth_pin() {
++    // PinoutTransformer appends " ..." to the 4th JTAG line when more pins exist.
++    auto p = LcdScreenTransformer::pinPages(
++        cfg("JTAG", {"SCAN GPIO 4", "SCAN GPIO 5", "SCAN GPIO 6", "SCAN GPIO 7 ..."}));
++    TEST_ASSERT_EQUAL_UINT32(1, p.size());
++    expectScreen("SC IO4  SC IO5  ", "SC IO6  SC IO7  ", p[0]);
 +}
 +
 +void test_multiword_two_pins_use_last_word() {
@@ -832,6 +873,7 @@ index 00000000..2bb93e9f
 +    RUN_TEST(test_three_pins);
 +    RUN_TEST(test_abbreviations);
 +    RUN_TEST(test_five_pins_two_pages);
++    RUN_TEST(test_jtag_ellipsis_keeps_fourth_pin);
 +    RUN_TEST(test_multiword_two_pins_use_last_word);
 +    RUN_TEST(test_multiword_many_pins_use_last_word);
 +    RUN_TEST(test_hduart_single_word_slash_name);

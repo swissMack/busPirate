@@ -111,7 +111,7 @@ git apply /path/to/busPirate/firmware/bitpirate-1.8-dock-pins.patch
 `webui start`, which the app's **Switch to Web CLI** button uses: it saves a
 one-shot flag and restarts, and the next boot goes straight to WiFi Connect
 without the button. It suits every board, Dock or not; apply it the same way
-(`git am` keeps its commit message).
+(`git apply`, as in the install block below).
 
 To keep the Wi-Fi network the board has saved, flash only the app
 (`$B/firmware.bin` at `0x10000`) rather than the merged image: the merged
@@ -154,7 +154,9 @@ does not matter. Leave the Dock's POWER header alone.
 
 **Resistors.** The FC-113 pulls SDA and SCL up to its 5 V. Remove those two
 pull-ups from the backpack, and fit 4.7 kΩ from SDA and from SCL to 3V3 (the
-top of the same header row), so the ESP32 never sees 5 V.
+top of the same header row), so the ESP32 never sees 5 V. The firmware only accepts an LCD when both
+lines have working pull-ups, so a backpack with its pull-ups removed and no
+4.7 kΩ fitted is treated as absent.
 
 **Level fallback.** The PCF8574 at 5 V wants a high of at least 3.5 V and the
 ESP32 only gives 3.3 V, so wire it directly first. If the screen shows
@@ -189,7 +191,9 @@ self-test firmware:
 PLATFORMIO_BUILD_FLAGS="-DLCD_SELFTEST=10000" pio run -e s3-devkit-n16-r8
 ```
 
-For 5 s at boot it shows `LCD selftest` and `errors <E>` on the LCD, and
+The 10000-round test runs for some seconds at boot before the result appears,
+so the board can look hung until then. The result screen then stays for 5 s:
+it shows `LCD selftest` and `errors <E>` on the LCD, and
 prints the same on the UART0 log. With 0 errors, keep the direct wiring;
 otherwise fit the diode. Flash the normal build afterwards.
 
