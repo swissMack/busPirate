@@ -102,10 +102,20 @@ def test_read_ddr5_eight_pages():
 def test_decode_ddr4():
     out = spd.decode(ddr4_image())
     assert out["memory_type"] == "DDR4" and out["module_type"] == "UDIMM"
-    assert out["manufacturer"].startswith("bank 1, 0xCE")
+    assert out["manufacturer"] == "bank 1, 0xCE (Samsung)"
     assert out["part_number"] == "M378A1K43DB2-CTD"
     assert out["serial"] == "12345678"
     assert out["crc_ok"] == [True, True] and "warning" not in out
+
+
+def test_decode_manufacturer_sk_hynix_and_kingston():
+    image = bytearray(ddr4_image())
+    image[320], image[321] = 0x80, 0xAD
+    assert spd.decode(bytes(image))["manufacturer"] == "bank 1, 0xAD (SK hynix)"
+    image[320], image[321] = 0x81, 0x98
+    assert spd.decode(bytes(image))["manufacturer"] == "bank 2, 0x98 (Kingston)"
+    image[320], image[321] = 0x81, 0xAD  # right code, wrong bank: unnamed
+    assert spd.decode(bytes(image))["manufacturer"] == "bank 2, 0xAD"
 
 
 def test_decode_ddr5():

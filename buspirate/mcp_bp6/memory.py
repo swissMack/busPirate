@@ -102,6 +102,7 @@ def commit(prepared: Dict[str, Any], read: Callable[[int, int], bytes],
     job, old = prepared["_job"], prepared["_old"]
     start, length = prepared["span_start"], prepared["span_length"]
     backup = prepared["backup"]
+    writing = False
     try:
         now = bytes(read(start, length))
         if len(now) != length:
@@ -114,6 +115,7 @@ def commit(prepared: Dict[str, Any], read: Callable[[int, int], bytes],
         fill = job.data if job.data is not None else b"\xff" * job.length
         at = job.offset - start
         image = old[:at] + fill + old[at + job.length:]
+        writing = True
         write_span(start, image)
         after = bytes(read(start, length))
         if len(after) != length:
@@ -121,7 +123,9 @@ def commit(prepared: Dict[str, Any], read: Callable[[int, int], bytes],
     except BusPirateError as exc:
         return {"error": str(exc), "verified": False, "backup": backup,
                 "hint": _hint(backup, "the write failed part-way, so the chip may hold "
-                                      "partial data; check the wiring and power")}
+                                      "partial data; check the wiring and power") if writing
+                else _hint(backup, "nothing was written; check the wiring and power, then "
+                                   "plan again")}
     bad = [i for i in range(length) if after[i:i + 1] != image[i:i + 1]]
     result = {"written": job.length, "span_start": start, "span_length": length,
               "verified": not bad, "mismatches": len(bad),

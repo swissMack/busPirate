@@ -112,10 +112,34 @@ SECTOR = 4096
 _WRITE_WORDS = ("write", "erase", "program", "restore")
 
 
-def _flash_job(opts: Options, size: Optional[int]) -> memory.WriteJob:
+def _chip_bytes(opts: Options) -> Optional[int]:
+    value = opts.get("chip_bytes")
+    if value is None:
+        return None
+    if (isinstance(value, bool) or not isinstance(value, int)
+            or not 65536 <= value <= 134217728 or value & (value - 1)):
+        raise ValueError("chip_bytes must be a power of two from 65536 to 134217728, not %r"
+                         % (value,))
+    return value
+
+
+def _flash_size(opts: Options, info: Dict[str, Any]) -> int:
+    """The chip size: from the JEDEC ID if it gives one, else from the chip_bytes option."""
+    given = _chip_bytes(opts)
+    size = info["capacity_bytes"]
     if size is None:
-        raise ValueError("the JEDEC ID does not give the chip's size: pass length")
-    return memory.parse_job(opts, size)
+        if given is None:
+            raise ValueError("the JEDEC ID (%s) does not give the chip's size: pass chip_bytes "
+                             "from the datasheet" % info["jedec"].upper())
+        return given
+    if given is not None and given != size:
+        raise ValueError("chip_bytes %d does not match the %d bytes the JEDEC ID (%s) gives"
+                         % (given, size, info["jedec"].upper()))
+    return size
+
+
+def _flash_job(opts: Options, info: Dict[str, Any]) -> memory.WriteJob:
+    return memory.parse_job(opts, _flash_size(opts, info))
 
 
 def _flash_write_check(bp: Any, opts: Options) -> Dict[str, Any]:
@@ -125,7 +149,7 @@ def _flash_write_check(bp: Any, opts: Options) -> Dict[str, Any]:
         return {"ok": False, "error": "no flash chip answers (JEDEC ID %s)" % info["jedec"],
                 "hint": info["warning"]}
     try:
-        _flash_job(opts, info["capacity_bytes"] or _length(opts))
+        _flash_job(opts, info)
     except ValueError as exc:
         return {"ok": False, "error": str(exc), "jedec": info["jedec"]}
     return {"ok": True, "jedec": info["jedec"], "identity": info["jedec"]}
@@ -136,7 +160,7 @@ def _flash_write_prepare(bp: Any, opts: Options) -> Dict[str, Any]:
     with open_spi(bp) as m:
         flash = SPIFlash(m)
         info = describe_jedec(flash.jedec_id())
-        job = _flash_job(opts, info["capacity_bytes"] or _length(opts))
+        job = _flash_job(opts, info)
         start = job.offset - job.offset % SECTOR
         end = -(-(job.offset + job.length) // SECTOR) * SECTOR
         return memory.prepare(job, flash.read, chip="SPI flash %s" % info["jedec"],
@@ -161,11 +185,13 @@ register(Recipe(
         "flash", "spi", "25q", "w25q", "winbond", "bios", "firmware", "memory"),
     bus="spi", default_mv=3300, min_mv=1800, max_mv=3600, pullups=False, wiring=SPI_WIRING,
     risk="destructive", check=_flash_write_check, action=_flash_write_prepare,
-    commit=_flash_write_commit, options=dict(memory.WRITE_OPTIONS),
+    commit=_flash_write_commit, options=dict(memory.WRITE_OPTIONS, chip_bytes=None),
     source=DOCS + "devices/w25q64/",
     notes=("the whole 4 KB sectors the range touches are rewritten; bytes outside the range "
            "are kept",
            "WP and HOLD must be high",
+           "when the JEDEC ID gives no size, pass chip_bytes from the datasheet; length is "
+           "only the erase length",
            "a chip soldered on a board may share its bus: power the board off")))
 
 

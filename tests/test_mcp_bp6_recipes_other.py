@@ -298,6 +298,44 @@ def test_flash_erase_range(session, confirm, tmp_path, monkeypatch):
     assert bytes(flash.memory[:0x1000]) == b"\x5a" * 0x1000
 
 
+def _stops_at_check(session, confirm, options):
+    plan = engine.plan_recipe(session, confirm, "spi-flash-write", {})
+    out = engine.run_recipe(session, confirm, plan["token"], options)
+    assert out["stopped"] == "check failed" and "commit" not in out
+    return out["check"]["error"]
+
+
+def test_flash_write_unknown_size_refused(session, confirm):
+    _fake(session).flash.JEDEC = b"\xbf\x25\x41"
+    error = _stops_at_check(session, confirm, {"offset": 0, "data_hex": "00", "length": 1 << 20})
+    assert "bf 25 41".upper() in error and "chip_bytes" in error
+
+
+def test_flash_write_chip_bytes_used(session, confirm, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    flash = _fake(session).flash
+    flash.JEDEC = b"\xbf\x25\x41"
+    flash.memory[0:0x3000] = b"\x5a" * 0x3000
+    _, done = _plan_prepare_commit(session, confirm, "spi-flash-write",
+                                   {"operation": "erase", "offset": 0x1000, "length": 0x100,
+                                    "chip_bytes": 1 << 20})
+    assert done["committed"] is True
+    assert bytes(flash.memory[0x1000:0x1100]) == b"\xff" * 0x100
+    assert bytes(flash.memory[0x1100:0x2000]) == b"\x5a" * 0xF00
+    error = _stops_at_check(session, confirm, {"offset": 1 << 20, "data_hex": "00",
+                                               "chip_bytes": 1 << 20})
+    assert "offset" in error
+
+
+def test_flash_write_chip_bytes_mismatch_refused(session, confirm):
+    error = _stops_at_check(session, confirm, {"offset": 0, "data_hex": "00",
+                                               "chip_bytes": 1 << 20})
+    assert str(1 << 20) in error and str(1 << 24) in error
+    for bad in (1000, 1 << 28, True, "1048576"):
+        assert "chip_bytes" in _stops_at_check(session, confirm,
+                                               {"offset": 0, "data_hex": "00", "chip_bytes": bad})
+
+
 def test_flash_write_beyond_chip_stops(session, confirm):
     plan = engine.plan_recipe(session, confirm, "spi-flash-write", {})
     out = engine.run_recipe(session, confirm, plan["token"],
@@ -466,6 +504,7 @@ def test_midi_recipe_decodes(session, confirm):
 def test_destructive_commits_never_touch_power(session, confirm, tmp_path, monkeypatch):
     """Only the commit step is guarded: it must not switch power or touch the pull-ups."""
     from buspirate.simulator_bp6 import FakeEeprom25, FakeMicrowire, FakeDs2431
+    from buspirate.bp6.modes import _Bp6Mode
     monkeypatch.setenv("HOME", str(tmp_path))
     fake = _fake(session)
     cases = {
@@ -506,6 +545,7 @@ def test_destructive_commits_never_touch_power(session, confirm, tmp_path, monke
         with monkeypatch.context() as inner:
             inner.setattr(BusPirate6, "set_power", forbid("set_power"))
             inner.setattr(BusPirate6, "set_pullups", forbid("set_pullups"))
+            inner.setattr(_Bp6Mode, "configure_peripherals", forbid("configure_peripherals"))
             done = engine.commit_recipe(session, confirm, out["commit"]["token"])
-        assert "result" in done, (name, done)
+        assert "result" in done and done["committed"] is True, (name, done)
     assert set(committed) == set(cases)

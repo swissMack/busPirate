@@ -190,3 +190,17 @@ def test_commit_short_reread_writes_nothing():
     r = memory.commit(prep, lambda s, n: chip.read(s, n - 1), chip.write_span)
     assert r["verified"] is False and "nothing was written" in r["error"]
     assert prep["backup"]["path"] in r["hint"] and chip.calls == []
+
+
+def test_commit_reread_error_says_nothing_was_written():
+    chip = Chip()
+    job = memory.parse_job({"offset": 4, "data_hex": "aabb"}, 64)
+    prep = memory.prepare(job, chip.read, "c", "l", True)
+
+    def gone(start, length):
+        raise Boom("port gone")
+
+    r = memory.commit(prep, gone, chip.write_span)
+    assert r["error"] == "port gone" and r["verified"] is False
+    assert "nothing was written" in r["hint"] and "part-way" not in r["hint"]
+    assert chip.calls == []

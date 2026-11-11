@@ -114,11 +114,20 @@ def _crc_ok(data: bytes, start: int, end: int) -> bool:
     return len(stored) == 2 and crc16(data[start:end]) == int.from_bytes(stored, "little")
 
 
+# JEP106 (bank, code byte with its parity bit) -> name; bank is 1-based.
+_MAKERS = {
+    (1, 0x2C): "Micron", (1, 0xCE): "Samsung", (1, 0xAD): "SK hynix",
+    (1, 0x20): "STMicroelectronics", (1, 0xFE): "Elpida",
+    (2, 0x98): "Kingston", (3, 0x9E): "Corsair", (4, 0x0B): "Nanya",
+    (5, 0xCD): "G.Skill", (5, 0xCB): "ADATA", (5, 0xEF): "Team Group",
+    (6, 0x9B): "Crucial",
+}
+
+
 def _manufacturer(code_bank: int, code: int) -> str:
-    from . import JEDEC_MANUFACTURERS  # keyed by the code byte with its parity bit
     bank = (code_bank & 0x7F) + 1
     text = "bank %d, 0x%02X" % (bank, code)
-    name = JEDEC_MANUFACTURERS.get(code) if bank == 1 else None
+    name = _MAKERS.get((bank, code))
     return "%s (%s)" % (text, name) if name else text
 
 

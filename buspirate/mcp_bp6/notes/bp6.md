@@ -64,3 +64,5 @@ Built from the datasheets and the firmware source; all fakes pass. Check on hard
 - I2C EEPROM busy polling by an empty write needs a NACK from a real chip.
 - The MOSI level the BP6 clocks during read-only SPI bytes (the Microwire ready poll).
 - The BP6 keeps one 1-Wire transaction across separate reset, write and read requests.
+
+Name the exact part for 24xx/25xx/93Cxx writes: a wrong size mis-addresses the backup and the write alike.
