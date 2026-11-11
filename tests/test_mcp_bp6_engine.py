@@ -703,3 +703,39 @@ def test_hiz_returns_terminal_to_hiz(session, confirm, recipes):
     mark = _mark(session)
     asyncio.run(server.call_tool("hiz", {}))
     assert _fake(session).lines_received()[mark:] == []
+
+
+TRIP = "\x07\r\nError: Current over limit, power supply disabled\r\n"
+
+
+def _tripping_action(session, on_call):
+    calls = []
+
+    def action(con, opts):
+        """Trip the supply while the action runs."""
+        calls.append(1)
+        if len(calls) == on_call:
+            fake = _fake(session)
+            fake.psu_enabled, fake.psu_tripped = False, True
+            fake._say(TRIP)  # printed by the board on its own, between commands
+        return {"mode": con.command("i").mode}
+    return action
+
+
+def test_trip_during_action_clears_power(session, confirm, recipes):
+    recipes(**_term(action=_tripping_action(session, 1)))
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "Current over limit" in result["error"] and "plan again" in result["error"]
+    assert result["power"] is None and session.power is None
+    assert session.last_recipe is None
+
+
+def test_trip_during_rerun_action_clears_power(session, confirm, recipes):
+    recipes(**_term(action=_tripping_action(session, 2)))
+    _term_ran(session, confirm)
+    assert session.power is not None
+    result = engine.run_recipe(session, confirm, None, {})
+    assert "Current over limit" in result["error"]
+    assert result["power"] is None and session.power is None
+    assert engine.run_recipe(session, confirm, None, {})["error"].startswith("plan again")

@@ -276,6 +276,32 @@ def _terminal_power(con: Any, plan: power.PowerPlan) -> Dict[str, Any]:
     return dict(plan.to_dict(), applied=True, **readings)
 
 
+class _TripWatch:
+    """A ``Console`` whose replies are watched for the supply cutting out.
+
+    The console carries a trip the board printed on its own into the next
+    ``Reply.error`` instead of raising, so a check or an action could return
+    normally after one. Any such reply clears ``session.power`` at once, so
+    no BPIO2 tool re-asserts the supply into the fault.
+    """
+
+    def __init__(self, con: Any, session: Any) -> None:
+        self._con = con
+        self._session = session
+        self.tripped = None  # type: Optional[str]
+
+    def command(self, *args: Any, **kwargs: Any) -> Any:
+        reply = self._con.command(*args, **kwargs)
+        if reply.error and TRIPPED in reply.error.lower():
+            self._session.power = None
+            self.tripped = self.tripped or (
+                "%s; the supply is off, so plan again" % reply.error)
+        return reply
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._con, name)
+
+
 def _run_terminal(bp: Any, session: Any, confirm: ConfirmStore, recipe: Recipe,
                   options: Dict[str, Any], mv: int, supply: str,
                   plan: Optional[power.PowerPlan], rerun: bool = False) -> Dict[str, Any]:
@@ -292,9 +318,12 @@ def _run_terminal(bp: Any, session: Any, confirm: ConfirmStore, recipe: Recipe,
                 "stopped": "check failed", "hint": pre.get("hint") or CHECK_HINT}
     want = recipe.terminal_mode or "hiz"
     try:
-        with bp.console() as con:
+        with bp.console() as raw:
+            con = _TripWatch(raw, session)
             if rerun:
                 now = con.command("").mode  # Enter: a fresh prompt names the mode
+                if con.tripped:
+                    return {"recipe": recipe.name, "power": None, "error": con.tripped}
                 if now.upper() != want.upper():
                     return {"error": "plan again: the board is in %s mode now" % now}
             else:
@@ -308,8 +337,15 @@ def _run_terminal(bp: Any, session: Any, confirm: ConfirmStore, recipe: Recipe,
                 if recipe.pullups:
                     console_power.pullups(con, True)
                 _remember(session, recipe, options, mv, supply)
-            return _check_then_act(con, recipe, options, power_out, confirm, session.port,
-                                   mv, supply)
+            out = _check_then_act(con, recipe, options, power_out, confirm, session.port,
+                                  mv, supply)
+            if con.tripped:
+                # The supply cut out while the check or action ran: report it,
+                # and never hand a re-run the old power.
+                out["power"] = None
+                out.setdefault("error", con.tripped)
+                session.last_recipe = None
+            return out
     except TerminalError as exc:
         if TRIPPED in str(exc).lower():
             session.power = None
