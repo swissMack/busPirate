@@ -668,3 +668,34 @@ def test_selftest_reports_error_lines(session, confirm):
 def test_selftest_bad_button_s_stops(session, confirm):
     _, out = _run(session, confirm, "self-test", run_options={"button_s": 99})
     assert out["check"]["ok"] is False
+
+
+# -- blueTag (terminal) -----------------------------------------------------------
+
+def test_jtag_recipes_registered():
+    for name, channels in (("jtag-pinout", 6), ("swd-pinout", 4)):
+        r = REGISTRY[name]
+        assert (r.bus, r.transport, r.terminal_mode, r.default_mv) == ("jtag", "terminal", "jtag", 3300)
+        assert (r.min_mv, r.max_mv, r.milliamps, r.pullups) == (1200, 5000, 100, False)
+        assert r.options == {"channels": channels, "pulsing": True}
+        assert [t for _, t in r.wiring].count("GND") == 1 and ("VREF", "VOUT") in r.wiring
+        assert [p for _, p in r.wiring[:8]] == ["IO%d" % n for n in range(8)]
+
+
+def test_plan_warns_disturbs_target(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "jtag-pinout", {})
+    assert any("blueTag pulses the pins and can disturb a running target" in w
+               for w in plan["warnings"])
+
+
+def test_jtag_pinout_recipe_runs(session, confirm):
+    _fake(session).bluetag_hit = {"jtag": type(_fake(session)).BLUETAG_JTAG_HIT}
+    _, out = _run(session, confirm, "jtag-pinout", {"channels": 6})
+    assert out["result"]["pinout"]["TCK"] == "IO4", out
+    assert _fake(session).mode == "JTAG"
+
+
+def test_swd_recipe_channel_range_refused(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "swd-pinout", {"channels": 1})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out["check"]["ok"] is False and "SWD needs 2 to 8 channels" in str(out)

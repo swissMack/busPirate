@@ -452,6 +452,8 @@ class FakeBp6:
         self._pwm_hz = None
         #: Signals the target drives into the pins, for ``f``: pin -> (Hz, duty %).
         self.signals = {}
+        #: What ``bluetag`` finds per protocol, e.g. {"jtag": BLUETAG_JTAG_HIT}; empty: nothing.
+        self.bluetag_hit = {}
         self._terminal_lines = []
         #: Self-test (``~``): whether a human presses the button, whether the NAND
         #: has a file system, and extra failing lines to print (each is one error).
@@ -884,6 +886,8 @@ class FakeBp6:
             self._cmd_freq(text, args)
         elif name == "~":
             self._cmd_selftest(text)
+        elif name == "bluetag" and self.mode == "JTAG":
+            self._cmd_bluetag(text, args)
         else:
             self._finish(text, f"Invalid command: {text}. Type ? for help.\r\n")
 
@@ -1059,6 +1063,36 @@ class FakeBp6:
                       f"{ns / 1e3:.2f}us" if ns >= 1e3 else f"{ns:.2f}ns")
             self._finish(text, f"Frequency IO{pin}: {self._friendly(hz)} {period} "
                          f"({hz:.0f}Hz), Duty cycle: {duty:.1f}%\r\n")
+
+    BLUETAG_JTAG_HIT = {
+        "pinout": "TDI=IO0 TDO=IO3 TCK=IO4 TMS=IO2 TRST=N/A",
+        "device": "0x59602093 (mfg: 'Xilinx', part: 0x9602, ver: 0x5)"}
+    BLUETAG_SWD_HIT = {
+        "pinout": "SWDIO=IO5 SWCLK=IO6",
+        "device": "0x0BC12477 (mfg: 'ARM Ltd', part: 0xbc1, ver: 0x0)"}
+
+    def _cmd_bluetag(self, text: str, args) -> None:
+        """``bluetag jtag|swd -c <n> [-d]`` (research doc section 5)."""
+        proto = args[0] if args and args[0] in ("jtag", "swd") else None
+        if proto is None or "-c" not in args or args.index("-c") + 1 >= len(args):
+            self._finish(text, "Specify the number of channels with the -c flag, -h for help\r\n")
+            return
+        low, high = (4, 8) if proto == "jtag" else (2, 8)
+        count = int(args[args.index("-c") + 1]) if args[args.index("-c") + 1].isdigit() else 0
+        if not low <= count <= high:
+            self._finish(text, f"Invalid number of {proto.upper()} channels (min {low}, max {high})\r\n")
+            return
+        body = ("Disabled pin pulsing\r\n" if "-d" in args and proto == "jtag" else "")
+        body += f"Number of channels set to: {count}\r\n"
+        body += "\r     Progress: [" + "#" * 25 + " " * 25 + "] 50.00%"
+        body += "\r     Progress: [" + "#" * 50 + "] 100.00%"
+        hit = self.bluetag_hit.get(proto)
+        if hit is None:
+            body += f"\r\n\r\n\tNo {proto.upper()} devices found. Please try again.\r\n"
+        else:
+            body += (f"\r\n\r\n     [  Pinout  ]  {hit['pinout']} \r\n\r\n"
+                     f"     [ Device 0 ]  {hit['device']}\r\n\n")
+        self._finish(text, body)
 
     def _cmd_pwm_off(self, text: str, args) -> None:
         if not self.pwm:
