@@ -169,15 +169,18 @@ mode-LED, dock-pins, webui-start, then LCD. No other order is supported.
 ```sh
 git apply /path/to/busPirate/firmware/bitpirate-1.8-mode-led.patch
 git apply /path/to/busPirate/firmware/bitpirate-1.8-dock-pins.patch
-git am    /path/to/busPirate/firmware/bitpirate-1.8-webui-start.patch
+git apply /path/to/busPirate/firmware/bitpirate-1.8-webui-start.patch
 git apply /path/to/busPirate/firmware/bitpirate-1.8-lcd.patch
 pio run -e s3-devkit-n16-r8
 ```
 
-(`git am` needs a clean index: commit the two `git apply` changes first, or
-use `git apply` for webui-start too.) Build and flash as above, but flash only
-the app, `$B/firmware.bin` at `0x10000`, over the UART port (the CP2102,
-`/dev/cu.usbserial-0001`, `--baud 460800`), so the saved Wi-Fi stays.
+Flash only the app over the UART port (the CP2102), so the saved Wi-Fi stays:
+
+```sh
+B=.pio/build/s3-devkit-n16-r8
+python3 -m esptool --chip esp32s3 --port /dev/cu.usbserial-0001 \
+  --baud 460800 write_flash 0x10000 $B/firmware.bin
+```
 
 **Bring-up check.** To decide between direct wiring and the diode, build a
 self-test firmware:
