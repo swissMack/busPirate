@@ -16,7 +16,7 @@ from buspirate.mcp_bp6.server import TOOL_NAMES, build_server  # noqa: E402
 EXPECTED = {
     "recipes", "recipe_plan", "recipe_run", "recipe_commit", "board_status", "connect", "hiz", "power_off",
     "measure_voltages", "power_plan", "power_apply", "i2c_scan", "i2c_read", "i2c_write",
-    "spi_transfer", "uart_send", "uart_listen", "onewire_scan", "pins", "bp6_notes", "wiring",
+    "spi_transfer", "uart_send", "uart_listen", "onewire_scan", "pins", "bp6_notes", "wiring", "pwm", "pwm_off", "frequency",
 }
 
 
@@ -208,7 +208,7 @@ def test_bp6_notes():
 
 def test_instructions_are_short_and_state_the_rules():
     text = build_server(BoardSession(simulated="bp6")).instructions
-    assert len(text.splitlines()) <= 10
+    assert len(text.splitlines()) <= 16
     for word in ("recipes", "recipe_plan", "recipe_run", "needs_extra_confirmation",
                  "target-powered", "hint", "hiz"):
         assert word in text
@@ -300,3 +300,161 @@ def test_instructions_name_the_commit_step():
     assert "`recipe_commit` only after a second yes" in server_module.INSTRUCTIONS
     assert "Never pass backup=False unless the owner asked for no backup." \
         in server_module.INSTRUCTIONS
+
+
+# -- pwm / frequency tools ------------------------------------------------------------
+
+from buspirate.mcp import power as _power  # noqa: E402
+from buspirate.mcp_bp6 import state as _state  # noqa: E402
+
+
+def _sent(session, since=0):
+    return [ln for ln in _fake(session).lines_received()[since:] if ln != b"\r"]
+
+
+def _powered_server():
+    session = BoardSession(simulated="bp6")
+    server = build_server(session)
+    call(server, "connect")
+    session.power = _power.plan_power("bp6", 3300, _power.SOURCE_OWNER, False, 100)
+    return session, server
+
+
+def test_pwm_tool_needs_power_or_target():
+    session = BoardSession(simulated="bp6")
+    server = build_server(session)
+    out = call(server, "pwm", {"pin": 2, "hz": 1000, "duty": 50})
+    assert out == {"error": "plan power first (power_plan, then power_apply) or power the target"}
+    assert call(server, "frequency", {"pin": 1}) == out
+    assert _fake(session).pwm == {}
+
+
+def test_pwm_tool_reasserts_confirmed_power():
+    session, server = _powered_server()
+    mark = len(_fake(session).lines_received())
+    out = call(server, "pwm", {"pin": 2, "hz": 1000, "duty": 50})
+    assert out["pin"] == 2 and out["actual_hz"] == 1000, out
+    assert _sent(session, mark) == [b"m dio\r", b"W 3.30 100\r", b"G 2\r", b"1000hz\r", b"50%\r"]
+    assert _fake(session).psu_enabled and _state.of(session).pwm_pins == {2}
+    mark = len(_fake(session).lines_received())
+    out = call(server, "pwm", {"pin": 4, "hz": 500, "duty": 10})
+    assert out["pin"] == 4, out
+    assert _sent(session, mark) == [b"G 4\r", b"500hz\r", b"10%\r"]
+
+
+def test_pwm_tool_refuses_bad_range_and_partner():
+    session, server = _powered_server()
+    assert "8 Hz to 62.5 MHz" in call(server, "pwm", {"pin": 2, "hz": 5})["error"]
+    assert "duty" in call(server, "pwm", {"pin": 2, "duty": 0})["error"]
+    assert "error" not in call(server, "pwm", {"pin": 2})
+    assert "share one PWM" in call(server, "pwm", {"pin": 3})["error"]
+
+
+def test_pwm_off_tool():
+    session, server = _powered_server()
+    call(server, "pwm", {"pin": 2})
+    mark = len(_fake(session).lines_received())
+    out = call(server, "pwm_off", {"pin": 2})
+    assert out == {"pin": 2, "stopped": True}
+    assert _sent(session, mark) == [b"g 2\r"]
+    assert _state.of(session).pwm_pins == set() and _fake(session).pwm == {}
+
+
+def test_frequency_tool():
+    session, server = _powered_server()
+    _fake(session).signals[1] = (1000.0, 50.0)
+    assert call(server, "frequency", {"pin": 1}) == {"pin": 1, "hz": 1000, "duty_percent": 50.0}
+    assert "only IO1, IO3, IO5 and IO7" in call(server, "frequency", {"pin": 2})["error"]
+
+
+def test_pwm_tool_keeps_confirmed_zero_milliamps():
+    session = BoardSession(simulated="bp6")
+    server = build_server(session)
+    call(server, "connect")
+    session.power = _power.plan_power("bp6", 3300, _power.SOURCE_OWNER, False, 0)
+    assert session.power.milliamps == 0
+    mark = len(_fake(session).lines_received())
+    out = call(server, "pwm", {"pin": 2})
+    assert "error" not in out, out
+    assert _sent(session, mark)[:2] == [b"m dio\r", b"W 3.30 0\r"]
+
+
+def test_pwm_off_reports_a_supply_trip():
+    session, server = _powered_server()
+    call(server, "pwm", {"pin": 2})
+    fake = _fake(session)
+    fake._cmd_pwm_off = lambda text, args: fake._finish(
+        text, "Generate frequency: Disabled on IO2\r\n"
+        "\x07\r\nError: Current over limit, power supply disabled\r\n")
+    out = call(server, "pwm_off", {"pin": 2})
+    assert "power supply disabled" in out["error"]
+    assert session.power is None
+    assert _state.of(session).pwm_pins == set()
+
+
+def test_tool_names_phase3a():
+    i = TOOL_NAMES.index("pwm")
+    assert TOOL_NAMES[i:i + 3] == ("pwm", "pwm_off", "frequency")
+    server = build_server(BoardSession(simulated="bp6"))
+    assert names(server) == set(TOOL_NAMES) == EXPECTED
+
+
+def test_instructions_mention_terminal_rules():
+    text = build_server(BoardSession(simulated="bp6")).instructions
+    assert len(text) < 1800
+    low = text.lower()
+    assert "until" in low and "connect" in low and "lends" in low
+    assert "self-test" in low and "nothing" in low
+    assert "bluetag" in low and "minute" in low
+
+
+def test_recipes_list_new():
+    server = build_server(BoardSession(simulated="bp6"))
+    listed = {r["name"]: r for r in call(server, "recipes")["recipes"]}
+    for name in ("pwm-signal", "frequency-measure", "self-test", "jtag-pinout", "swd-pinout",
+                 "flashrom", "avrdude", "pulseview"):
+        assert listed[name]["source"].startswith("https://docs.buspirate.com/")
+
+
+def test_pwm_and_frequency_descriptions_name_the_voltage():
+    server = build_server(BoardSession(simulated="bp6"))
+    desc = {t.name: t.description for t in asyncio.run(server.list_tools())}
+    assert "3.3 V" in desc["pwm"] and "3.3 V" in desc["frequency"]
+
+
+# -- final review: _in_dio power and the PWM pins ----------------------------------------
+
+def test_pwm_tool_refuses_a_confirmed_voltage_off_the_terminal_step():
+    session, server = _powered_server()
+    session.power = _power.plan_power("bp6", 3333, _power.SOURCE_OWNER, False, 100)
+    mark = len(_fake(session).lines_received())
+    out = call(server, "pwm", {"pin": 2})
+    assert "3333 mV" in out["error"] and "3330 mV" in out["error"], out
+    assert "power_plan" in out["error"]
+    assert _sent(session, mark) == []
+    assert not _fake(session).psu_enabled
+
+
+def test_pwm_tool_forgets_the_supply_when_switching_it_on_fails(monkeypatch):
+    from buspirate.bp6.console import TerminalError
+    from buspirate.mcp_bp6 import engine as _engine
+    session, server = _powered_server()
+
+    def refuse(con, mv, ma):
+        raise TerminalError("W was not accepted")
+    monkeypatch.setattr(_engine.console_power, "power_on", refuse)
+    out = call(server, "pwm", {"pin": 2})
+    assert "W was not accepted" in out["error"], out
+    assert session.power is None
+
+
+def test_mode_switch_forgets_the_pwm_pins():
+    session, server = _powered_server()
+    assert "error" not in call(server, "pwm", {"pin": 2})
+    plan = call(server, "recipe_plan", {"name": "frequency-measure", "options": {"pin": 3}})
+    assert "token" in plan, plan
+    out = call(server, "recipe_run", {"token": plan["token"]})
+    assert "error" not in out, out
+    assert _state.of(session).pwm_pins == set()  # m dio switched the PWM off
+    out = call(server, "pwm", {"pin": 2})
+    assert "error" not in out, out

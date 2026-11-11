@@ -91,3 +91,25 @@ def test_run_returns_value_and_disconnect_closes():
     assert s.run(lambda bp: 7) == 7
     s.disconnect()
     assert closed == [1]
+
+
+def test_auto_port_stores_the_real_device():
+    # "auto" is resolved here, so later port checks (a BP6 hand-back waiting
+    # for its board's port to vanish) compare real device names.
+    from buspirate.connect import open_simulated
+
+    opened = []
+
+    def opener(port):
+        opened.append(port)
+        return open_simulated("bp6")
+
+    s = BoardSession(opener=opener, discover=lambda include_unlikely=False: [_cand("/dev/a")])
+    info = s.connect("auto")
+    assert info["port"] == "/dev/a" and s.port == "/dev/a" and opened == ["/dev/a"]
+    s.disconnect()
+
+
+def test_auto_port_with_two_boards_asks():
+    s = BoardSession(discover=lambda include_unlikely=False: [_cand("/dev/a"), _cand("/dev/b")])
+    assert s.connect("auto") == {"connected": False, "choose_from": ["/dev/a", "/dev/b"]}

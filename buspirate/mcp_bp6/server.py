@@ -9,6 +9,7 @@ This is the only module in ``buspirate.mcp_bp6`` that imports the ``mcp`` SDK
 (Python 3.10+).
 """
 
+import sys
 import weakref
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -25,7 +26,8 @@ from ..mcp.power import (
 from ..mcp.server import _BP6_STATUS_FIELDS, BOARD_GONE, POWER_ACTION
 from ..mcp.session import BoardGone, BoardSession, NotConnected
 from ..mcp.wiring import JOBS, job_notes, wiring_steps
-from . import engine
+from ..bp6 import signals
+from . import console_power, engine, handoff, state
 from .recipes import find_recipes
 from .recipes import pins as pin_recipe
 
@@ -46,6 +48,12 @@ and the plan in one message.
 - A target-powered plan switches nothing on.
 - If the check fails, read the `hint` to the owner.
 - `hiz` makes everything safe.
+- A hand-off (flashrom, avrdude, pulseview) lends the board to that program until \
+`connect` or `hiz` takes it back; give the owner the `command` and `how_to_return`.
+- The self-test needs nothing on the pins, but the owner must press the board's button.
+- Terminal recipes switch the supply off while they change mode, then switch the \
+confirmed supply back on. Their voltages must be multiples of 10 mV.
+- A blueTag pin scan can take a minute at 8 channels; say so before you start.
 """
 
 #: Each built server's session, for run_stdio and tests.
@@ -79,8 +87,14 @@ def build_server(session: BoardSession) -> MCPServer:
     measured: Dict[str, Any] = {"board": None}  # the board measure_voltages last read
 
     async def guard(fn: Callable[[], Dict[str, Any]],
-                    connect_first: bool = True) -> Dict[str, Any]:
-        """Open the board if needed, run ``fn`` in a worker thread, turn errors into results."""
+                    connect_first: bool = True, lent_ok: bool = False) -> Dict[str, Any]:
+        """Open the board if needed, run ``fn`` in a worker thread, turn errors into results.
+
+        While the board is lent to another program, only a ``lent_ok`` tool runs.
+        """
+        lent = state.of(session).lent
+        if lent is not None and not lent_ok:
+            return {"error": handoff.lent_error(lent)}
         try:
             opened = None
             if connect_first and session.board is None:
@@ -115,9 +129,39 @@ def build_server(session: BoardSession) -> MCPServer:
 
     # -- the board --------------------------------------------------------------
 
+    def _take_back(port: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Take a lent board back (None if none was lent), connecting again if needed.
+
+        A board that cannot be reached is no longer lent: a board found now is
+        connected fresh, and with none found the result is the board-gone error.
+        """
+        if state.of(session).lent is None:
+            return None
+        back = handoff.reclaim(session)
+        out = {"reclaimed": back["reclaimed"]}  # type: Dict[str, Any]
+        if "warning" in back:
+            out["warnings"] = [back["warning"]]
+        if "error" in back:
+            return dict(out, error=back["error"])  # still lent
+        if back["reconnect"]:
+            try:
+                # After a reset, the lent board's own port: not another board.
+                out.update(_open(session, port or back.get("port")))
+            except (NotConnected, OSError):  # gone, or its port never came back
+                out.update(connected=False, error=BOARD_GONE)
+        return out
+
     async def connect(port: Optional[str] = None) -> Dict[str, Any]:
         measured["board"] = None
-        out = await guard(lambda: _open(session, port), connect_first=False)
+
+        def go() -> Dict[str, Any]:
+            back = _take_back(port)
+            if back is None:
+                return _open(session, port)
+            if "connected" in back or "error" in back:
+                return back
+            return dict(back, **_open(session, port))
+        out = await guard(go, connect_first=False, lent_ok=True)
         out.setdefault("connected", False)
         return out
 
@@ -130,19 +174,53 @@ def build_server(session: BoardSession) -> MCPServer:
                 "port": session.port,
                 "power": session.power.to_dict() if session.power else None,
             }
+            lent = state.of(session).lent
+            if lent is not None:
+                # The BPIO2 port is the other program's: nothing is asked on it.
+                out["lent"] = dict(lent, how_to_return=handoff.how_to_return(lent["to"]))
+                return out
             st = bp.status()
             for key in _BP6_STATUS_FIELDS:
                 value = getattr(st, key)
                 out[key] = list(value) if isinstance(value, tuple) else value
             return out
-        return await guard(lambda: session.run(read))
+        return await guard(lambda: session.run(read), lent_ok=True)
 
     async def hiz() -> Dict[str, Any]:
         def safe(bp: Any) -> Dict[str, Any]:
+            out = {"hiz": True}  # type: Dict[str, Any]
+            st = state.of(session)
+            if st.terminal_mode is not None or st.pwm_pins:
+                # The terminal's PWM and mode outlive BPIO2: stop them there first.
+                problems = []
+                try:
+                    with bp.console() as con:
+                        for pin in sorted(st.pwm_pins):
+                            reply = con.command("g %d" % pin)
+                            if reply.error:
+                                problems.append(reply.error)
+                        reply = con.command("m hiz")
+                        if reply.error:
+                            problems.append(reply.error)
+                except BusPirateError as exc:
+                    problems.append(str(exc))
+                st.pwm_pins.clear()
+                st.terminal_mode = None
+                if problems:
+                    out["warnings"] = ["the terminal said: %s" % p for p in problems]
             bp.hiz()
             session.power = None
-            return {"hiz": True}
-        return await guard(lambda: session.run(safe))
+            return out
+
+        def go() -> Dict[str, Any]:
+            back = _take_back()
+            if back is not None and "error" in back:
+                return dict(back, hiz=False)
+            out = session.run(safe)
+            if back is not None:
+                out.update(back)
+            return out
+        return await guard(go, lent_ok=True)
 
     async def power_off() -> Dict[str, Any]:
         def off(bp: Any) -> Dict[str, Any]:
@@ -277,6 +355,81 @@ def build_server(session: BoardSession) -> MCPServer:
         return await bus(lambda: session.run(
             lambda bp: pin_recipe._action(bp, {"set": setting, "read": True})))
 
+    # -- signals (terminal) --------------------------------------------------------
+
+    NEEDS_POWER = "plan power first (power_plan, then power_apply) or power the target"
+
+    def _in_dio(bp: Any, work: Callable[[Any], Dict[str, Any]]) -> Dict[str, Any]:
+        """Run ``work(console)`` with the terminal in DIO and the confirmed power on.
+
+        A tool has no plan of its own: it needs the confirmed ``session.power``
+        (re-applied after ``m dio``, which switches the supply off) or a target
+        that powers itself.
+        """
+        plan = session.power
+        if plan is None and engine._target_mv(bp) is None:
+            return {"error": NEEDS_POWER}
+        step = engine.TERMINAL_STEP_MV
+        if plan is not None and plan.millivolts % step:
+            return {"error": "the confirmed supply is %d mV, but the terminal sets the voltage "
+                    "in steps of %d mV; call power_plan again in %d mV steps (%d mV is the "
+                    "nearest). Nothing was sent" % (plan.millivolts, step, step,
+                                                    (plan.millivolts + step // 2) // step * step)}
+        with bp.console() as raw:
+            con = engine._TripWatch(raw, session)
+            if con.command("").mode.upper() != "DIO":
+                st = state.of(session)
+                st.terminal_mode = "dio"
+                session.power = None  # m switches the supply off ...
+                st.pwm_pins.clear()  # ... and every PWM
+                console_power.set_mode(con, "dio")
+                if plan is not None:
+                    engine._terminal_power(con, plan)  # checks VOUT too
+                    session.power = plan
+            out = work(con)
+            if con.tripped:
+                out = dict(out, error=con.tripped)
+            return out
+
+    async def pwm(pin: int = 0, hz: float = 1000, duty: float = 50) -> Dict[str, Any]:
+        def run() -> Dict[str, Any]:
+            signals.check_pwm(pin, hz, duty)  # refuse before touching the board
+
+            def work(con: Any) -> Dict[str, Any]:
+                other = next((p for p in sorted(state.of(session).pwm_pins)
+                              if p // 2 == pin // 2), None)
+                if other is not None:
+                    return {"error": "IO%d and IO%d share one PWM, and IO%d already has one "
+                            "running; call pwm_off first" % (pin - pin % 2, pin - pin % 2 + 1,
+                                                              other)}
+                out = signals.pwm_start(con, pin, hz, duty)
+                state.of(session).pwm_pins.add(pin)
+                return out
+            return session.run(lambda bp: _in_dio(bp, work))
+        return await guard(run)
+
+    async def pwm_off(pin: int) -> Dict[str, Any]:
+        def run() -> Dict[str, Any]:
+            def stop(bp: Any) -> Dict[str, Any]:
+                with bp.console() as raw:  # g needs no mode change
+                    con = engine._TripWatch(raw, session)
+                    try:
+                        out = signals.pwm_stop(con, pin)
+                    finally:
+                        state.of(session).pwm_pins.discard(pin)
+                    if con.tripped:
+                        out = dict(out, error=con.tripped)
+                    return out
+            return session.run(stop)
+        return await guard(run)
+
+    async def frequency(pin: int = 1) -> Dict[str, Any]:
+        def run() -> Dict[str, Any]:
+            signals.check_frequency_pin(pin)
+            return session.run(lambda bp: _in_dio(
+                bp, lambda con: signals.measure_frequency(con, pin)))
+        return await guard(run)
+
     async def bp6_notes() -> Dict[str, Any]:
         return {"text": NOTES.read_text(encoding="utf-8")}
 
@@ -332,6 +485,15 @@ def build_server(session: BoardSession) -> MCPServer:
         ("pins", pins, "Drive IO pins and read every pin's direction, level and voltage. "
          "`set` maps pins to 1, 0 or \"in\", e.g. {\"IO2\": 1, \"IO3\": \"in\"}; omit it to "
          "only read." + unpowered),
+        ("pwm", pwm, "Generate a square wave on an IO pin (0-7): `hz` 8 to 62500000, `duty` "
+         "above 0 to 100 percent. IO0/IO1, IO2/IO3, IO4/IO5 and IO6/IO7 share one PWM, so "
+         "only one pin of a pair runs. Needs power: planned and applied, or the target's own. "
+         "Runs until pwm_off or hiz. Returns the actual frequency and duty. The pin swings "
+         "between 0 V and the supply voltage (3.3 V unless you planned another)."),
+        ("pwm_off", pwm_off, "Stop the PWM on an IO pin."),
+        ("frequency", frequency, "Measure the frequency and duty cycle of a signal on IO1, "
+         "IO3, IO5 or IO7 (one reading). Needs power like pwm. The signal must stay between "
+         "0 V and the supply voltage (3.3 V unless you planned another)."),
         ("bp6_notes", bp6_notes, "The Bus Pirate 6 notes: limits, pin map with wire colours, "
          "the pull-up rule and the risks. Read when unsure."),
     ]
@@ -345,7 +507,23 @@ def build_server(session: BoardSession) -> MCPServer:
 TOOL_NAMES = ("recipes", "recipe_plan", "recipe_run", "recipe_commit", "board_status",
               "connect", "hiz", "power_off", "measure_voltages", "power_plan", "power_apply",
               "wiring", "i2c_scan", "i2c_read", "i2c_write", "spi_transfer", "uart_send", "uart_listen",
-              "onewire_scan", "pins", "bp6_notes")
+              "onewire_scan", "pins", "pwm", "pwm_off", "frequency", "bp6_notes")
+
+
+def shut_down(session: BoardSession) -> None:
+    """On exit: take a lent board back (its supply goes off), then HiZ and close.
+
+    A board that could not be taken back is reported on stderr (stdout is the
+    MCP stream).
+    """
+    try:
+        if state.of(session).lent is not None:
+            back = handoff.reclaim(session)
+            problem = back.get("error") or back.get("warning")
+            if problem:
+                print("bp6: on exit, %s" % problem, file=sys.stderr)
+    finally:
+        session.disconnect()
 
 
 def run_stdio(demo: bool = False) -> None:
@@ -355,4 +533,4 @@ def run_stdio(demo: bool = False) -> None:
     try:
         server.run("stdio")
     finally:
-        session.disconnect()
+        shut_down(session)

@@ -14,11 +14,13 @@ import dataclasses
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..bp6.console import TerminalError
 from ..exceptions import BusPirateError, NackError
 from ..mcp import power
 from ..mcp.confirm import ConfirmError, ConfirmStore
 from ..mcp.session import NotConnected
 from ..mcp.wiring import WiringStep, cable_colour
+from . import console_power, state
 from .recipes import REGISTRY, Recipe
 
 ACTION = "recipe_run"  #: the ConfirmStore action recipe tokens are issued for
@@ -38,6 +40,8 @@ NO_BACKUP_NOTE = "the owner declined the backup: nothing is saved before the cha
 ASK_VOLTAGE = "ask the owner for the target's voltage (3.3 V is usual)"
 CHECK_HINT = ("check the wiring and the address; the power is left as it is, so fix it "
               "and re-run with token=None")
+VOUT_TOLERANCE = 0.10  #: how far the terminal's VOUT reading may be from the plan
+TRIPPED = "power supply disabled"  #: in every firmware error that switched the supply off
 
 
 def _recipe(name: str) -> Recipe:
@@ -77,9 +81,31 @@ def _range_error(recipe: Recipe, mv: int, what: str) -> Optional[str]:
             % (what, mv, recipe.name, recipe.min_mv, recipe.max_mv))
 
 
-def _wiring(recipe: Recipe, target_powered: bool) -> List[Dict[str, str]]:
+TERMINAL_STEP_MV = 10  #: the terminal takes volts with two decimals
+
+
+def _step_error(recipe: Recipe, mv: int) -> Optional[str]:
+    """Why ``mv`` cannot be typed into the terminal, or None if it can."""
+    if recipe.transport != "terminal" or mv % TERMINAL_STEP_MV == 0:
+        return None
+    step = TERMINAL_STEP_MV
+    below, above = mv - mv % step, mv - mv % step + step
+    candidates = [c for c in (below, above) if recipe.min_mv <= c <= recipe.max_mv]
+    nearest = min(candidates, key=lambda c: (abs(c - mv), c)) if candidates else below
+    return ("%d mV cannot be set through the terminal, which takes the voltage in steps "
+            "of %d mV (0.01 V); plan again with %d mV. Nothing was planned"
+            % (mv, step, nearest))
+
+
+def _wiring(recipe: Recipe, target_powered: bool,
+            options: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
+    channels = (options or {}).get("channels")
     steps = []
     for target_pin, pin in recipe.wiring:
+        # A recipe with a ``channels`` option wires IO0..IO(channels-1) only.
+        if (isinstance(channels, int) and pin.startswith("IO") and pin[2:].isdigit()
+                and int(pin[2:]) >= channels):
+            continue
         note = ""
         if pin == "VOUT" and target_powered:
             note = ("the target has its own supply: ours stays off, and VOUT reads its "
@@ -125,6 +151,13 @@ def plan_recipe(session: Any, confirm: ConfirmStore, name: str,
     else:
         target_mv = session.run(_target_mv)
         if target_mv is not None:
+            if not recipe.target_powered_ok and recipe.target_powered_error:
+                return {"error": "the target already has its own supply (%d mV measured): "
+                        "%s; nothing was planned" % (target_mv, recipe.target_powered_error)}
+            if not recipe.target_powered_ok:
+                return {"error": "the target already has its own supply (%d mV measured), "
+                        "but %s must power it from the Bus Pirate: disconnect the target's "
+                        "supply and plan again; nothing was planned" % (target_mv, recipe.name)}
             error = _range_error(recipe, target_mv, "the target is already powered at")
             if error:
                 return {"error": error}
@@ -138,7 +171,7 @@ def plan_recipe(session: Any, confirm: ConfirmStore, name: str,
             if recipe.default_mv == 0 and "millivolts" not in options:
                 return {"error": ASK_VOLTAGE}
             mv = int(merged.get("millivolts", recipe.default_mv))
-            error = _range_error(recipe, mv, "the voltage")
+            error = _range_error(recipe, mv, "the voltage") or _step_error(recipe, mv)
             if error:
                 return {"error": error}
             try:
@@ -168,7 +201,7 @@ def plan_recipe(session: Any, confirm: ConfirmStore, name: str,
     return {
         "recipe": recipe.name,
         "title": recipe.title,
-        "wiring": _wiring(recipe, supply == SUPPLY_TARGET),
+        "wiring": _wiring(recipe, supply == SUPPLY_TARGET, merged),
         "power": plan.to_dict() if plan else None,
         "target_powered": supply == SUPPLY_TARGET,
         "target_mv": target_mv,
@@ -246,6 +279,107 @@ def _remember(session: Any, recipe: Recipe, options: Dict[str, Any], mv: int,
                            "supply": supply, "until": time.monotonic() + WINDOW_S}
 
 
+def _failed_precheck(bp: Any, recipe: Recipe,
+                     options: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The precheck's result if it stopped the run, else None. Runs over BPIO2."""
+    if recipe.precheck is None:
+        return None
+    try:
+        pre = recipe.precheck(bp, options)
+    except NackError as exc:
+        pre = {"ok": False, "error": str(exc)}
+    return None if pre.get("ok", False) else pre
+
+
+def _terminal_power(con: Any, plan: power.PowerPlan) -> Dict[str, Any]:
+    """Switch the planned supply on with ``W`` and check what VOUT reads."""
+    readings = console_power.power_on(con, plan.millivolts, plan.milliamps)
+    if abs(readings["vout_mv"] - plan.millivolts) > plan.millivolts * VOUT_TOLERANCE:
+        con.command("w")
+        raise TerminalError("VOUT reads %d mV, not the planned %d mV; the supply was "
+                            "switched off again" % (readings["vout_mv"], plan.millivolts))
+    return dict(plan.to_dict(), applied=True, **readings)
+
+
+class _TripWatch:
+    """A ``Console`` whose replies are watched for the supply cutting out.
+
+    The console carries a trip the board printed on its own into the next
+    ``Reply.error`` instead of raising, so a check or an action could return
+    normally after one. Any such reply clears ``session.power`` at once, so
+    no BPIO2 tool re-asserts the supply into the fault.
+    """
+
+    def __init__(self, con: Any, session: Any) -> None:
+        self._con = con
+        self._session = session
+        #: For recipes that keep per-session state (``state.of(con.session)``).
+        self.session = session
+        self.tripped = None  # type: Optional[str]
+
+    def command(self, *args: Any, **kwargs: Any) -> Any:
+        reply = self._con.command(*args, **kwargs)
+        if reply.error and TRIPPED in reply.error.lower():
+            self._session.power = None
+            self.tripped = self.tripped or (
+                "%s; the supply is off, so plan again" % reply.error)
+        return reply
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._con, name)
+
+
+def _run_terminal(bp: Any, session: Any, confirm: ConfirmStore, recipe: Recipe,
+                  options: Dict[str, Any], mv: int, supply: str,
+                  plan: Optional[power.PowerPlan], rerun: bool = False) -> Dict[str, Any]:
+    """A terminal recipe, once the BPIO2 checks of the power have passed.
+
+    A first run switches to the recipe's mode (which switches the supply and
+    pull-ups off), then applies the plan and the pull-ups. A re-run changes
+    neither: it refuses unless the terminal is still in the recipe's mode.
+    """
+    power_out = plan.to_dict() if (rerun and plan is not None) else None
+    pre = _failed_precheck(bp, recipe, options)
+    if pre is not None:
+        return {"recipe": recipe.name, "power": power_out, "check": pre,
+                "stopped": "check failed", "hint": pre.get("hint") or CHECK_HINT}
+    want = recipe.terminal_mode or "hiz"
+    try:
+        with bp.console() as raw:
+            con = _TripWatch(raw, session)
+            if rerun:
+                now = con.command("").mode  # Enter: a fresh prompt names the mode
+                if con.tripped:
+                    return {"recipe": recipe.name, "power": None, "error": con.tripped}
+                if now.upper() != want.upper():
+                    return {"error": "plan again: the board is in %s mode now" % now}
+            else:
+                session.power = None  # m switches the supply, the pull-ups and PWM off
+                # Recorded first, so hiz cleans up even after a switch that failed.
+                state.of(session).terminal_mode = recipe.terminal_mode
+                state.of(session).pwm_pins.clear()
+                console_power.set_mode(con, want)
+                if supply == SUPPLY_BP6 and recipe.supply_by == "engine":
+                    power_out = _terminal_power(con, plan)
+                    session.power = plan
+                if recipe.pullups:
+                    console_power.pullups(con, True)
+                _remember(session, recipe, options, mv, supply)
+            out = _check_then_act(con, recipe, options, power_out, confirm, session.port,
+                                  mv, supply)
+            if con.tripped:
+                # The supply cut out while the check or action ran: report it,
+                # and never hand a re-run the old power.
+                out["power"] = None
+                out.setdefault("error", con.tripped)
+                session.last_recipe = None
+            return out
+    except TerminalError as exc:
+        if TRIPPED in str(exc).lower():
+            session.power = None
+        return {"recipe": recipe.name, "power": power_out, "error": str(exc)}
+
+
 def _run_planned(session: Any, confirm: ConfirmStore, recipe: Recipe,
                  payload: Dict[str, Any], options: Dict[str, Any]) -> Dict[str, Any]:
     def go(bp: Any) -> Dict[str, Any]:
@@ -264,7 +398,7 @@ def _run_planned(session: Any, confirm: ConfirmStore, recipe: Recipe,
                 # Never leave a stale plan behind: every bus tool re-asserts
                 # session.power, which would feed our supply into the target.
                 session.power = None
-                if recipe.pullups:
+                if recipe.pullups and recipe.transport != "terminal":
                     bp.set_pullups(True)  # fed from the target's VOUT
             else:
                 plan = payload["plan"]
@@ -273,14 +407,18 @@ def _run_planned(session: Any, confirm: ConfirmStore, recipe: Recipe,
                 if target_mv is not None:
                     return {"error": "plan again: the target now has its own supply "
                             "(%d mV); ours was not switched on" % target_mv}
-                try:
-                    power_out = power.apply_plan(bp, session, plan)
-                except (BusPirateError, power.PowerRefused) as exc:
-                    session.power = None
-                    return {"recipe": recipe.name, "power": None, "error": str(exc)}
-                if not power_out.get("applied"):
-                    return {"recipe": recipe.name, "power": power_out,
-                            "error": power_out.get("error", "the supply did not start")}
+        if recipe.transport == "terminal":
+            return _run_terminal(bp, session, confirm, recipe, options, payload["mv"],
+                                 supply, payload["plan"])
+        if supply == SUPPLY_BP6:
+            try:
+                power_out = power.apply_plan(bp, session, payload["plan"])
+            except (BusPirateError, power.PowerRefused) as exc:
+                session.power = None
+                return {"recipe": recipe.name, "power": None, "error": str(exc)}
+            if not power_out.get("applied"):
+                return {"recipe": recipe.name, "power": power_out,
+                        "error": power_out.get("error", "the supply did not start")}
         _remember(session, recipe, options, payload["mv"], supply)
         return _check_then_act(bp, recipe, options, power_out, confirm, session.port,
                                payload["mv"], supply)
@@ -306,6 +444,9 @@ def _rerun(session: Any, confirm: ConfirmStore, options: Dict[str, Any]) -> Dict
             return {"error": error}
         merged = dict(last["options"])
         merged.update(options)
+        if recipe.transport == "terminal":
+            return _run_terminal(bp, session, confirm, recipe, merged, last["mv"], supply,
+                                 session.power, rerun=True)
         power_out = session.power.to_dict() if supply == SUPPLY_BP6 else None
         return _check_then_act(bp, recipe, merged, power_out, confirm, session.port,
                                last["mv"], supply)

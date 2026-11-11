@@ -12,7 +12,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from ...mcp.wiring import JOBS
 
 RISKS = ("none", "destructive", "owner-only")
-BUSES = JOBS + ("led",)
+BUSES = JOBS + ("led", "jtag", "board")
+TRANSPORTS = ("bpio2", "terminal")
+SUPPLIED_BY = ("engine", "action")
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,16 @@ class Recipe:
     returns the public keys ``chip``, ``operation``, ``start``, ``length``,
     ``summary`` and ``backup`` plus private keys starting with ``_``;
     ``commit(bp, options, prepared)`` makes the change.
+
+    A ``transport="terminal"`` recipe runs in the board's text terminal: its
+    ``check`` and ``action`` get the ``Console`` in place of the board. The
+    engine first switches to ``terminal_mode`` (the ``m`` argument; None stays
+    in HiZ), then applies the planned supply (unless ``supply_by="action"``,
+    when the firmware's own prompt sets it) and the pull-ups. ``precheck``,
+    if given, runs over BPIO2 with the board before the terminal opens. A
+    recipe with ``target_powered_ok`` False refuses a target that has its own
+    supply, giving ``target_powered_error`` as the reason when it is set. No
+    terminal recipe may be destructive.
     """
 
     name: str
@@ -46,6 +58,12 @@ class Recipe:
     risk: str = "none"
     notes: Tuple[str, ...] = ()
     commit: Optional[Callable[[Any, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]] = None
+    transport: str = "bpio2"
+    terminal_mode: Optional[str] = None
+    precheck: Optional[Callable[[Any, Dict[str, Any]], Dict[str, Any]]] = None
+    supply_by: str = "engine"
+    target_powered_ok: bool = True
+    target_powered_error: str = ""
 
     def __post_init__(self) -> None:
         if self.bus not in BUSES:
@@ -59,6 +77,16 @@ class Recipe:
         if (self.risk == "destructive") != (self.commit is not None):
             raise ValueError("recipe %r: a destructive recipe needs a commit, and only a "
                              "destructive recipe has one" % self.name)
+        if self.transport not in TRANSPORTS:
+            raise ValueError("recipe %r: transport must be one of %s" % (self.name, TRANSPORTS))
+        if self.supply_by not in SUPPLIED_BY:
+            raise ValueError("recipe %r: supply_by must be one of %s" % (self.name, SUPPLIED_BY))
+        if self.transport != "terminal" and (self.terminal_mode or self.precheck
+                                             or self.supply_by != "engine"):
+            raise ValueError("recipe %r: terminal_mode, precheck and supply_by are for "
+                             "terminal recipes" % self.name)
+        if self.transport == "terminal" and self.risk == "destructive":
+            raise ValueError("recipe %r: a terminal recipe may not change a chip" % self.name)
 
 
 REGISTRY = {}  # type: Dict[str, Recipe]
@@ -92,8 +120,9 @@ def find_recipes(query: Optional[str]) -> List[Dict[str, str]]:
         ranked = [(rank, r.name, r) for r in REGISTRY.values()
                   for rank in [_rank(r, q)] if rank is not None]
         found = [r for _, _, r in sorted(ranked, key=lambda item: item[:2])]
-    return [{"name": r.name, "title": r.title, "bus": r.bus} for r in found]
+    return [{"name": r.name, "title": r.title, "bus": r.bus, "source": r.source}
+            for r in found]
 
 
 from . import i2c  # noqa: E402,F401  (registers the I2C recipes)
-from . import ddr, identify, led, onewire, pins, spi, uart  # noqa: E402,F401  (the other buses)
+from . import board, ddr, handoff, identify, jtag, led, onewire, pins, signals, spi, uart  # noqa: E402,F401  (the other buses)
