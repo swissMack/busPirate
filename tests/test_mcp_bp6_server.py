@@ -420,3 +420,41 @@ def test_pwm_and_frequency_descriptions_name_the_voltage():
     server = build_server(BoardSession(simulated="bp6"))
     desc = {t.name: t.description for t in asyncio.run(server.list_tools())}
     assert "3.3 V" in desc["pwm"] and "3.3 V" in desc["frequency"]
+
+
+# -- final review: _in_dio power and the PWM pins ----------------------------------------
+
+def test_pwm_tool_refuses_a_confirmed_voltage_off_the_terminal_step():
+    session, server = _powered_server()
+    session.power = _power.plan_power("bp6", 3333, _power.SOURCE_OWNER, False, 100)
+    mark = len(_fake(session).lines_received())
+    out = call(server, "pwm", {"pin": 2})
+    assert "3333 mV" in out["error"] and "3330 mV" in out["error"], out
+    assert "power_plan" in out["error"]
+    assert _sent(session, mark) == []
+    assert not _fake(session).psu_enabled
+
+
+def test_pwm_tool_forgets_the_supply_when_switching_it_on_fails(monkeypatch):
+    from buspirate.bp6.console import TerminalError
+    from buspirate.mcp_bp6 import engine as _engine
+    session, server = _powered_server()
+
+    def refuse(con, mv, ma):
+        raise TerminalError("W was not accepted")
+    monkeypatch.setattr(_engine.console_power, "power_on", refuse)
+    out = call(server, "pwm", {"pin": 2})
+    assert "W was not accepted" in out["error"], out
+    assert session.power is None
+
+
+def test_mode_switch_forgets_the_pwm_pins():
+    session, server = _powered_server()
+    assert "error" not in call(server, "pwm", {"pin": 2})
+    plan = call(server, "recipe_plan", {"name": "frequency-measure", "options": {"pin": 3}})
+    assert "token" in plan, plan
+    out = call(server, "recipe_run", {"token": plan["token"]})
+    assert "error" not in out, out
+    assert _state.of(session).pwm_pins == set()  # m dio switched the PWM off
+    out = call(server, "pwm", {"pin": 2})
+    assert "error" not in out, out

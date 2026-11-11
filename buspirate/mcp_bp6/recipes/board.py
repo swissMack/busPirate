@@ -18,8 +18,16 @@ _ERRORS = re.compile(r"ERRORS:\s*(\d+)")
 
 
 def _precheck(bp: Any, opts: Options) -> Dict[str, Any]:
-    """Refuse to start while anything puts a voltage on the pins or on VOUT."""
+    """Refuse to start while anything puts a voltage on the pins or on VOUT.
+
+    The self-test switches the supply on at 3.3 V with no current limit and
+    drives the pins, so the supply must be off too: with it on, VOUT cannot
+    tell whether a target is still wired to it.
+    """
     st = bp.status()
+    if st.psu_enabled:
+        return {"ok": False, "error": "the Bus Pirate's supply is on: switch the supply off "
+                "and disconnect everything from the Bus Pirate's pins first"}
     live = ["IO%d" % i for i, mv in enumerate(st.adc_mv) if mv > CONNECTED_MV]
     if not st.psu_enabled and st.psu_mv > CONNECTED_MV:
         live.append("VOUT")
@@ -74,7 +82,8 @@ register(Recipe(
     wiring=(), check=_check, action=_action, precheck=_precheck,
     options={"button_s": 20}, bus="board", transport="terminal", terminal_mode=None,
     min_mv=0, max_mv=0, default_mv=0, milliamps=0, pullups=False, source=DOCS + "command-reference/",
-    notes=("the self-test switches the Bus Pirate's own supply on at 3.3 V",
+    notes=("the self-test switches the Bus Pirate's own supply on at 3.3 V with no current "
+           "limit",
            "press the board's button (twice: press and release) within button_s seconds, "
            "or the button test is skipped and the run reports a failure",
            "disconnect everything from the pins first")))

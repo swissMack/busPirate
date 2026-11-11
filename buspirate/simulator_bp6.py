@@ -496,12 +496,15 @@ class FakeBp6:
         self._sump_powered = False
         #: How long a reset takes the ports away; how many resets so far.
         self.reset_seconds = 0.3
+        #: How long the ports stay listed after "Resetting" before they vanish.
+        self.reset_lag_s = 0.0
         self.resets = 0
         #: Legacy's exit question never gets its answer: no reset follows ``q``, ``y``.
         self.exit_answer_lost = False
         #: (mV, mA) Legacy sets in place of the answers given; None: the answers.
         self.legacy_psu = None
         self.was_gone = False
+        self._gone_from = 0.0
         self._gone_until = 0.0
         self.binary = _BinaryPort(self)
         self.terminal = _Port(self._on_terminal)
@@ -509,14 +512,14 @@ class FakeBp6:
     @property
     def present(self) -> bool:
         """Whether the board's USB ports are there (not unplugged, not resetting)."""
-        if time.monotonic() < self._gone_until:
+        if self._gone_from <= time.monotonic() < self._gone_until:
             self.was_gone = True
             return False
         return True
 
     def unplug(self) -> None:
         """Take the board away for good."""
-        self._gone_until = float("inf")
+        self._gone_from, self._gone_until = 0.0, float("inf")
 
     def factory(self, terminal_port: str = TERMINAL, binary_port: str = BINARY):
         def make(port, baudrate, timeout):
@@ -1015,7 +1018,8 @@ class FakeBp6:
         self.binary.out.clear()
         self.binary.pending.clear()
         self.color_prompt = True  # a fresh boot asks again
-        self._gone_until = time.monotonic() + self.reset_seconds
+        self._gone_from = time.monotonic() + self.reset_lag_s
+        self._gone_until = self._gone_from + self.reset_seconds
 
     def _command(self, text: str) -> None:
         words = text.split()

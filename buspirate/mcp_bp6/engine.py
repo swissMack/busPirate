@@ -354,9 +354,10 @@ def _run_terminal(bp: Any, session: Any, confirm: ConfirmStore, recipe: Recipe,
                 if now.upper() != want.upper():
                     return {"error": "plan again: the board is in %s mode now" % now}
             else:
-                session.power = None  # m switches the supply and the pull-ups off
+                session.power = None  # m switches the supply, the pull-ups and PWM off
                 # Recorded first, so hiz cleans up even after a switch that failed.
                 state.of(session).terminal_mode = recipe.terminal_mode
+                state.of(session).pwm_pins.clear()
                 console_power.set_mode(con, want)
                 if supply == SUPPLY_BP6 and recipe.supply_by == "engine":
                     power_out = _terminal_power(con, plan)

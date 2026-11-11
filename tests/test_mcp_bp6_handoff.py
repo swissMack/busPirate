@@ -298,3 +298,81 @@ def test_reclaim_without_reset_stays_lent(rig, server, monkeypatch):
     assert _sent(rig, mark)[:2] == [b"q\r", b"y\r"]
     assert fake.resets == 1 and state.of(rig.session).lent is None
     assert rig.session.power is None
+
+
+# -- final review: the lent board, not any board ------------------------------------
+
+OTHER, OTHER_TERMINAL = "/dev/cu.usbmodemOTHER3", "/dev/cu.usbmodemOTHER1"
+
+
+@pytest.fixture
+def rig2():
+    """The lent BP6 plus a second BP6 plugged in, listed first."""
+    holder = {"fake": FakeBp6(), "other": FakeBp6()}
+    opened = []
+
+    def discover(include_unlikely=False):
+        found = [SimpleNamespace(device=OTHER, likely_bus_pirate=True)]
+        if holder["fake"].present:
+            found.append(SimpleNamespace(device=FakeBp6.BINARY, likely_bus_pirate=True))
+        return found
+
+    def opener(port):
+        if port == OTHER:
+            opened.append((port, None))
+            return BusPirate6(OTHER, terminal_port=OTHER_TERMINAL,
+                              serial_factory=holder["other"].factory(OTHER_TERMINAL, OTHER),
+                              connect_timeout=0.2, bpio2_settle=0.3).open()
+        fake = holder["fake"]
+        opened.append((port, fake.was_gone))
+        return BusPirate6(FakeBp6.BINARY, terminal_port=FakeBp6.TERMINAL,
+                          serial_factory=fake.factory(), connect_timeout=0.2,
+                          bpio2_settle=0.3).open()
+
+    session = BoardSession(opener=opener, discover=discover)
+    session.connect(FakeBp6.BINARY)
+    r = SimpleNamespace(holder=holder, session=session, confirm=ConfirmStore(), opened=opened)
+    yield r
+    state.of(session).lent = None
+    session.disconnect()
+
+
+def test_reclaim_reconnects_the_lent_board_after_its_ports_vanished(rig2):
+    pytest.importorskip("mcp")
+    from buspirate.mcp_bp6.server import build_server
+    server = build_server(rig2.session)
+    fake = _fake(rig2)
+    fake.reset_lag_s = 0.3  # the real board's ports stay listed for a moment after "Resetting"
+    _lend_by_server(server, "flashrom")
+    del rig2.opened[:]
+    out = call(server, "connect")
+    assert out["connected"] is True and out["port"] == FakeBp6.BINARY, out
+    assert rig2.opened == [(FakeBp6.BINARY, True)]  # opened once, after the ports vanished
+    assert fake.resets == 1 and state.of(rig2.session).lent is None
+
+
+def test_reset_with_another_board_present_is_not_stuck(rig2, monkeypatch):
+    real = handoff._reclaim_legacy
+
+    def reply_lost(bp):
+        real(bp)  # the board resets ...
+        raise handoff.TerminalError("the reply was lost")  # ... but the answer never came
+
+    monkeypatch.setattr(handoff, "_reclaim_legacy", reply_lost)
+    _lend(rig2, "flashrom")
+    out = handoff.reclaim(rig2.session)
+    assert "error" not in out, out
+    assert out["reclaimed"] == "flashrom" and out["reconnect"] is True
+    assert out["port"] == FakeBp6.BINARY
+    assert _fake(rig2).resets == 1
+
+
+def test_exit_reports_a_failed_reclaim(rig, server, monkeypatch, capsys):
+    from buspirate.mcp_bp6 import server as server_module
+    monkeypatch.setattr(handoff, "EXIT_TIMEOUT_S", 0.5)
+    _lend_by_server(server, "flashrom")
+    _fake(rig).exit_answer_lost = True
+    server_module.shut_down(rig.session)
+    err = capsys.readouterr().err
+    assert "did not confirm that it left Legacy mode" in err
+    assert rig.session.board is None

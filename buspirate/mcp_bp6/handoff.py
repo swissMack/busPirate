@@ -86,19 +86,22 @@ def lend(session: Any, bp: Any, to: str) -> Dict[str, Any]:
     return {"lent_to": to, "binary_port": bp.port, "how_to_return": how_to_return(to)}
 
 
-def _ports_vanished(session: Any) -> bool:
-    """Wait up to ``GONE_WAIT_S`` for the board's ports to vanish (a reset)."""
+def _ports_vanished(session: Any, port: str) -> bool:
+    """Wait up to ``GONE_WAIT_S`` for the lent board's port to vanish (a reset).
+
+    Only that port counts: another board plugged in stays listed.
+    """
     deadline = time.monotonic() + GONE_WAIT_S
-    while session.candidates():
+    while port in session.candidates():
         if time.monotonic() >= deadline:
             return False
         time.sleep(0.05)
     return True
 
 
-def _wait_for_return(session: Any) -> None:
+def _wait_for_return(session: Any, port: str) -> None:
     deadline = time.monotonic() + BACK_WAIT_S
-    while time.monotonic() < deadline and not session.candidates():
+    while time.monotonic() < deadline and port not in session.candidates():
         time.sleep(0.1)
 
 
@@ -148,7 +151,9 @@ def reclaim(session: Any) -> Dict[str, Any]:
     """Take a lent board back.
 
     ``reconnect`` True means the session was dropped (the board reset, or
-    could not be reached) and the caller should connect again. A Legacy
+    could not be reached) and the caller should connect again; after a reset,
+    ``port`` names the lent board's port, to connect to that board and not
+    another one plugged in. A Legacy
     board that answered but never confirmed its reset stays lent, with its
     supply counted as on, and the result carries ``error``.
     """
@@ -164,16 +169,22 @@ def reclaim(session: Any) -> Dict[str, Any]:
             # needs no confirmation.
             return _unreachable(session, lent, exc)
         return _released(session, lent, False)
+    port = session.port  # the lent board's, before the session drops it
+    gone = False
     try:
         reset = session.run(_reclaim_legacy)
     except (BoardGone, NotConnected) as exc:
         return _unreachable(session, lent, exc)
     except (BusPirateError, OSError) as exc:
-        if not _ports_vanished(session):
+        if not _ports_vanished(session, port):
             return {"reclaimed": None, "reconnect": False,
                     "error": STUCK % (exc, to)}
-        reset = True  # the ports went away: the board did reset
+        reset = gone = True  # the port went away: the board did reset
     session.disconnect()
     if reset:
-        _wait_for_return(session)
-    return _released(session, lent, True)
+        if not gone:
+            # The port can stay listed for a moment after "Resetting": opening
+            # it then would race the reset.
+            _ports_vanished(session, port)
+        _wait_for_return(session, port)
+    return dict(_released(session, lent, True), port=port)

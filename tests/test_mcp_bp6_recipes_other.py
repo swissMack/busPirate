@@ -578,13 +578,20 @@ def test_pwm_signal_recipe_runs(session, confirm):
 
 
 def test_pwm_pair_partner_refused(session, confirm):
-    plan = engine.plan_recipe(session, confirm, "pwm-signal", {"pin": 3})
-    state.of(session).pwm_pins.add(2)
+    # A re-run sends no m (which would switch IO2's PWM off), so IO2 still runs.
+    _run(session, confirm, "pwm-signal", {"pin": 2})
     mark = len(_fake(session).lines_received())
-    out = engine.run_recipe(session, confirm, plan["token"], {})
+    out = engine.run_recipe(session, confirm, None, {"pin": 3})
     assert out["check"]["ok"] is False
     assert "IO2 and IO3 share one PWM" in out["check"]["error"]
     assert b"G 3\r" not in _sent(session, mark)
+
+
+def test_first_run_forgets_pwm_pins(session, confirm):
+    state.of(session).pwm_pins.add(2)  # m dio switches IO2's PWM off
+    _, out = _run(session, confirm, "pwm-signal", {"pin": 3})
+    assert out["check"]["ok"] is True, out
+    assert state.of(session).pwm_pins == {3}
 
 
 def test_frequency_even_pin_refused(session, confirm):
@@ -625,10 +632,22 @@ def test_selftest_precheck_refuses_live_vout(session, confirm):
     assert "VOUT" in out["check"]["error"]
 
 
+def test_selftest_precheck_refuses_while_the_supply_is_on(session, confirm):
+    fake = _fake(session)
+    fake.psu_enabled = True
+    plan = engine.plan_recipe(session, confirm, "self-test", {})
+    mark = len(fake.lines_received())
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert ("switch the supply off and disconnect everything from the Bus Pirate's pins "
+            "first") in out["check"]["error"], out
+    assert b"~\r" not in _sent(session, mark)
+
+
 def test_selftest_plan_names_its_own_supply(session, confirm):
     plan = engine.plan_recipe(session, confirm, "self-test", {})
     assert plan["power"] is None and plan["wiring"] == []
-    assert "the self-test switches the Bus Pirate's own supply on at 3.3 V" in plan["warnings"]
+    assert ("the self-test switches the Bus Pirate's own supply on at 3.3 V with no current "
+            "limit") in plan["warnings"]
     assert any("press the board's button" in w for w in plan["warnings"])
 
 

@@ -9,6 +9,7 @@ This is the only module in ``buspirate.mcp_bp6`` that imports the ``mcp`` SDK
 (Python 3.10+).
 """
 
+import sys
 import weakref
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -144,8 +145,9 @@ def build_server(session: BoardSession) -> MCPServer:
             return dict(out, error=back["error"])  # still lent
         if back["reconnect"]:
             try:
-                out.update(_open(session, port))
-            except NotConnected:
+                # After a reset, the lent board's own port: not another board.
+                out.update(_open(session, port or back.get("port")))
+            except (NotConnected, OSError):  # gone, or its port never came back
                 out.update(connected=False, error=BOARD_GONE)
         return out
 
@@ -367,13 +369,23 @@ def build_server(session: BoardSession) -> MCPServer:
         plan = session.power
         if plan is None and engine._target_mv(bp) is None:
             return {"error": NEEDS_POWER}
+        step = engine.TERMINAL_STEP_MV
+        if plan is not None and plan.millivolts % step:
+            return {"error": "the confirmed supply is %d mV, but the terminal sets the voltage "
+                    "in steps of %d mV; call power_plan again in %d mV steps (%d mV is the "
+                    "nearest). Nothing was sent" % (plan.millivolts, step, step,
+                                                    (plan.millivolts + step // 2) // step * step)}
         with bp.console() as raw:
             con = engine._TripWatch(raw, session)
             if con.command("").mode.upper() != "DIO":
-                state.of(session).terminal_mode = "dio"
+                st = state.of(session)
+                st.terminal_mode = "dio"
+                session.power = None  # m switches the supply off ...
+                st.pwm_pins.clear()  # ... and every PWM
                 console_power.set_mode(con, "dio")
                 if plan is not None:
-                    console_power.power_on(con, plan.millivolts, plan.milliamps)
+                    engine._terminal_power(con, plan)  # checks VOUT too
+                    session.power = plan
             out = work(con)
             if con.tripped:
                 out = dict(out, error=con.tripped)
@@ -499,10 +511,17 @@ TOOL_NAMES = ("recipes", "recipe_plan", "recipe_run", "recipe_commit", "board_st
 
 
 def shut_down(session: BoardSession) -> None:
-    """On exit: take a lent board back (its supply goes off), then HiZ and close."""
+    """On exit: take a lent board back (its supply goes off), then HiZ and close.
+
+    A board that could not be taken back is reported on stderr (stdout is the
+    MCP stream).
+    """
     try:
         if state.of(session).lent is not None:
-            handoff.reclaim(session)
+            back = handoff.reclaim(session)
+            problem = back.get("error") or back.get("warning")
+            if problem:
+                print("bp6: on exit, %s" % problem, file=sys.stderr)
     finally:
         session.disconnect()
 
