@@ -62,12 +62,16 @@ def _last_line(text: str) -> str:
 
 
 class Console:
+    #: How long output with no ETX must stay silent before it is judged.
+    QUIET_S = 0.05
+
     def __init__(self, serial, notify: Callable[[str, bytes], None], timeout: float = 3.0) -> None:
         self.serial = serial
         self.notify = notify
         self.timeout = timeout
         #: The mode named by the last prompt seen ("" before any command).
         self.mode = ""
+        self._pending_error: Optional[str] = None
 
     # -- io ------------------------------------------------------------------
 
@@ -110,19 +114,31 @@ class Console:
 
     # -- commands ------------------------------------------------------------
 
+    def _drain(self) -> None:
+        """Read what is already waiting. An error the board raised on its own
+        (a tripped supply) is kept for the next reply instead of being lost."""
+        seen = bytearray()
+        for _ in range(100):
+            chunk = self._read()
+            if not chunk:
+                break
+            seen += chunk
+        for ln in clean(seen.decode("utf-8", "replace")).split("\n"):
+            if _ERROR.match(ln.strip()):
+                self._pending_error = self._pending_error or ln.strip()
+
     def command(self, line: str, timeout: float = 3.0,
                 answers: Sequence[Answer] = ()) -> Reply:
         """Run ``line`` and return what it printed. Never sends Ctrl-C."""
-        reset = getattr(self.serial, "reset_input_buffer", None)
-        if reset is not None:
-            reset()
+        self._drain()
         self._write(line.encode() + b"\r")
         unused = list(answers)
         seen = bytearray()
         mark = 0            # start of the output not yet answered
         waiting_since = None
         waiting_for = None
-        deadline = time.monotonic() + timeout
+        last_data = time.monotonic()
+        deadline = last_data + timeout
         text = ""
         while time.monotonic() < deadline:
             chunk = self._read()
@@ -130,7 +146,12 @@ class Console:
                 seen += chunk
                 text = clean(seen.decode("utf-8", "replace"))
                 waiting_since = waiting_for = None
-            if self._at_main_prompt(text):
+                last_data = time.monotonic()
+            # ETX ends every prompt (research doc section 0). Output without one
+            # is judged only once the line has gone quiet.
+            ended = seen.decode("utf-8", "replace").rstrip().endswith("\x03")
+            settled = ended or (bool(seen) and time.monotonic() - last_data >= self.QUIET_S)
+            if settled and self._at_main_prompt(text):
                 return self._reply(text)
             tail = text[mark:]
             due = next((a for a in unused if a.pattern in tail), None)
@@ -144,7 +165,8 @@ class Console:
                     waiting_since = waiting_for = None
                     deadline = max(deadline, time.monotonic() + timeout)
                     continue
-            elif chunk and _SUB_PROMPT.search(_last_line(text).rstrip()) and tail.strip():
+            elif settled and tail.strip() and (
+                    ended or _SUB_PROMPT.search(_last_line(text).rstrip())):
                 self._abort(line, tail)
             if not chunk:
                 time.sleep(0.005)
@@ -163,4 +185,5 @@ class Console:
         lines = text.split("\n")
         body = lines[1:-1]  # drop the echo and the prompt line
         error = next((ln.strip() for ln in body if _ERROR.match(ln.strip())), None)
+        error, self._pending_error = self._pending_error or error, None
         return Reply("\n".join(body).strip("\n"), self.mode, error)

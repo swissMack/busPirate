@@ -7,7 +7,7 @@ import serial
 
 from buspirate.bp6 import BusPirate6
 from buspirate.bp6.console import Answer, Console, TerminalError, clean
-from buspirate.exceptions import BusPirateError
+from buspirate.exceptions import BusPirateError, PortGoneError
 from buspirate.simulator_bp6 import FakeBp6
 
 
@@ -134,9 +134,46 @@ def test_console_does_not_nest(fake):
 
 def test_unplug_mid_command(fake):
     bp = make(fake).open()
-    with pytest.raises(BusPirateError):
+    started = time.monotonic()
+    with pytest.raises(PortGoneError):
         with bp.console() as con:
             def gone(_count):
                 raise serial.SerialException("device disconnected")
             fake.terminal.read = gone
             con.command("m dio")
+    assert time.monotonic() - started < 1
+
+
+class Trickle:
+    """The terminal port, delivering at most ``size`` bytes per read."""
+
+    def __init__(self, port, size):
+        self.port, self.size = port, size
+
+    def read(self, count):
+        return self.port.read(min(count, self.size))
+
+    def __getattr__(self, name):
+        return getattr(self.port, name)
+
+
+def test_prompts_split_across_reads_do_not_abort(fake):
+    fake.saved_modes = {"i2c"}
+    bp = make(fake).open()
+    with bp.console() as con:
+        con.serial = Trickle(con.serial, 3)
+        reply = con.command("m dio")
+        assert reply.mode == "DIO" and "Mode: DIO" in reply.text
+        con.command("m hiz")
+        with pytest.raises(TerminalError, match=r"Use previous settings\?"):
+            con.command("m i2c")
+
+
+def test_an_error_raised_between_commands_is_not_lost(fake):
+    with make(fake).open().console() as con:
+        con.command("m dio")
+        fake.terminal.out += (b"\x07\r\nError: Current over limit, power supply disabled"
+                              b"\r\nDIO> \x03")
+        reply = con.command("i")
+        assert reply.error == "Error: Current over limit, power supply disabled"
+        assert con.command("i").error is None
