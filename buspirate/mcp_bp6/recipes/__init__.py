@@ -37,7 +37,8 @@ class Recipe:
     when the firmware's own prompt sets it) and the pull-ups. ``precheck``,
     if given, runs over BPIO2 with the board before the terminal opens. A
     recipe with ``target_powered_ok`` False refuses a target that has its own
-    supply. No terminal recipe may be destructive.
+    supply, giving ``target_powered_error`` as the reason when it is set. No
+    terminal recipe may be destructive.
     """
 
     name: str
@@ -62,6 +63,7 @@ class Recipe:
     precheck: Optional[Callable[[Any, Dict[str, Any]], Dict[str, Any]]] = None
     supply_by: str = "engine"
     target_powered_ok: bool = True
+    target_powered_error: str = ""
 
     def __post_init__(self) -> None:
         if self.bus not in BUSES:
@@ -122,4 +124,4 @@ def find_recipes(query: Optional[str]) -> List[Dict[str, str]]:
 
 
 from . import i2c  # noqa: E402,F401  (registers the I2C recipes)
-from . import board, ddr, identify, jtag, led, onewire, pins, signals, spi, uart  # noqa: E402,F401  (the other buses)
+from . import board, ddr, handoff, identify, jtag, led, onewire, pins, signals, spi, uart  # noqa: E402,F401  (the other buses)

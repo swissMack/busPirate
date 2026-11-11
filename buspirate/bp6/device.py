@@ -75,6 +75,8 @@ class BusPirate6(SerialLink):
         self._binary = None
         self._terminal_open = False
         self._console_open = False
+        #: True while the BPIO2 port is closed for another program (a hand-off).
+        self._released = False
 
     # -- connection --------------------------------------------------------
 
@@ -350,11 +352,75 @@ class BusPirate6(SerialLink):
             terminal.close()
             self._mode = None
             # The next BPIO2 reply can come seconds late after terminal use.
+            # A released port belongs to another program: nothing is sent on it.
             try:
-                self._status(self.first_reply_timeout)
+                if not self._released:
+                    self._status(self.first_reply_timeout)
             except Exception:
                 if not failed:
                     raise
+
+    @contextmanager
+    def raw_console(self) -> ContextManager[Console]:
+        """The terminal with no wake-up Enter and no BPIO2 read afterwards.
+
+        For a terminal a binary mode has locked (Legacy), which answers no
+        Enter and whose BPIO2 port is in another program's hands.
+        """
+        if self._console_open or self._terminal_open:
+            raise TerminalError("the terminal is already in use")
+        if not self.terminal_port:
+            raise TerminalError("this Bus Pirate 6's terminal port is unknown")
+        terminal = self._make_serial(self.terminal_port)
+        self._console_open = True
+        try:
+            yield Console(terminal, self._notify)
+        finally:
+            self._console_open = False
+            terminal.close()
+
+    # -- hand-offs -----------------------------------------------------------
+
+    @property
+    def released(self) -> bool:
+        """Whether the BPIO2 port is closed for another program."""
+        return self._released
+
+    def release_binary(self) -> None:
+        """Close the BPIO2 port so another program can open it.
+
+        Nothing is sent: no HiZ, no request. Only what is already on its way
+        is read, since closing on a reply hangs the real board.
+        """
+        if self._released:
+            return
+        if self._binary is not None:
+            raise ModeError("stop the stream or the Terminal panel first")
+        try:
+            if self.link is not None and self.serial is not None:
+                self.link.drain(0.2)
+        except OSError:
+            pass
+        if self.serial is not None:
+            self.serial.close()
+        self.serial = None
+        self.link = None
+        self._mode = None
+        self._released = True
+
+    def reattach_binary(self, settle: float = 0.0) -> Status:
+        """Open the BPIO2 port again after ``release_binary``, and read the status.
+
+        ``settle`` is how long BPIO2 needs after it was selected again.
+        """
+        if not self._released:
+            raise ModeError("the BPIO2 port was not released")
+        if settle > 0:
+            time.sleep(settle)
+        self.serial = self._make_serial()
+        self.link = BpioLink(self.serial, self._notify, self.reply_timeout)
+        self._released = False
+        return self._status(self.first_reply_timeout)
 
     def resync(self) -> None:
         self._mode = None

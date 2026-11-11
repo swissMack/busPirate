@@ -26,7 +26,7 @@ from ..mcp.server import _BP6_STATUS_FIELDS, BOARD_GONE, POWER_ACTION
 from ..mcp.session import BoardGone, BoardSession, NotConnected
 from ..mcp.wiring import JOBS, job_notes, wiring_steps
 from ..bp6 import signals
-from . import console_power, engine, state
+from . import console_power, engine, handoff, state
 from .recipes import find_recipes
 from .recipes import pins as pin_recipe
 
@@ -47,6 +47,8 @@ and the plan in one message.
 - A target-powered plan switches nothing on.
 - If the check fails, read the `hint` to the owner.
 - `hiz` makes everything safe.
+- A hand-off (flashrom, avrdude, pulseview) lends the board to that program: give the \
+owner the `command` and `how_to_return`. Call `connect` or `hiz` to take it back.
 """
 
 #: Each built server's session, for run_stdio and tests.
@@ -80,8 +82,14 @@ def build_server(session: BoardSession) -> MCPServer:
     measured: Dict[str, Any] = {"board": None}  # the board measure_voltages last read
 
     async def guard(fn: Callable[[], Dict[str, Any]],
-                    connect_first: bool = True) -> Dict[str, Any]:
-        """Open the board if needed, run ``fn`` in a worker thread, turn errors into results."""
+                    connect_first: bool = True, lent_ok: bool = False) -> Dict[str, Any]:
+        """Open the board if needed, run ``fn`` in a worker thread, turn errors into results.
+
+        While the board is lent to another program, only a ``lent_ok`` tool runs.
+        """
+        lent = state.of(session).lent
+        if lent is not None and not lent_ok:
+            return {"error": handoff.lent_error(lent)}
         try:
             opened = None
             if connect_first and session.board is None:
@@ -116,9 +124,36 @@ def build_server(session: BoardSession) -> MCPServer:
 
     # -- the board --------------------------------------------------------------
 
+    def _take_back(port: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Take a lent board back (None if none was lent), connecting again if needed.
+
+        A board that cannot be reached is no longer lent: a board found now is
+        connected fresh, and with none found the result is the board-gone error.
+        """
+        if state.of(session).lent is None:
+            return None
+        back = handoff.reclaim(session)
+        out = {"reclaimed": back["reclaimed"]}  # type: Dict[str, Any]
+        if "warning" in back:
+            out["warnings"] = [back["warning"]]
+        if back["reconnect"]:
+            try:
+                out.update(_open(session, port))
+            except NotConnected:
+                out.update(connected=False, error=BOARD_GONE)
+        return out
+
     async def connect(port: Optional[str] = None) -> Dict[str, Any]:
         measured["board"] = None
-        out = await guard(lambda: _open(session, port), connect_first=False)
+
+        def go() -> Dict[str, Any]:
+            back = _take_back(port)
+            if back is None:
+                return _open(session, port)
+            if "connected" in back:
+                return back
+            return dict(back, **_open(session, port))
+        out = await guard(go, connect_first=False, lent_ok=True)
         out.setdefault("connected", False)
         return out
 
@@ -131,12 +166,17 @@ def build_server(session: BoardSession) -> MCPServer:
                 "port": session.port,
                 "power": session.power.to_dict() if session.power else None,
             }
+            lent = state.of(session).lent
+            if lent is not None:
+                # The BPIO2 port is the other program's: nothing is asked on it.
+                out["lent"] = dict(lent, how_to_return=handoff.how_to_return(lent["to"]))
+                return out
             st = bp.status()
             for key in _BP6_STATUS_FIELDS:
                 value = getattr(st, key)
                 out[key] = list(value) if isinstance(value, tuple) else value
             return out
-        return await guard(lambda: session.run(read))
+        return await guard(lambda: session.run(read), lent_ok=True)
 
     async def hiz() -> Dict[str, Any]:
         def safe(bp: Any) -> Dict[str, Any]:
@@ -163,7 +203,16 @@ def build_server(session: BoardSession) -> MCPServer:
             bp.hiz()
             session.power = None
             return out
-        return await guard(lambda: session.run(safe))
+
+        def go() -> Dict[str, Any]:
+            back = _take_back()
+            if back is not None and "error" in back:
+                return dict(back, hiz=False)
+            out = session.run(safe)
+            if back is not None:
+                out.update(back)
+            return out
+        return await guard(go, lent_ok=True)
 
     async def power_off() -> Dict[str, Any]:
         def off(bp: Any) -> Dict[str, Any]:
@@ -441,6 +490,15 @@ TOOL_NAMES = ("recipes", "recipe_plan", "recipe_run", "recipe_commit", "board_st
               "onewire_scan", "pins", "pwm", "pwm_off", "frequency", "bp6_notes")
 
 
+def shut_down(session: BoardSession) -> None:
+    """On exit: take a lent board back (its supply goes off), then HiZ and close."""
+    try:
+        if state.of(session).lent is not None:
+            handoff.reclaim(session)
+    finally:
+        session.disconnect()
+
+
 def run_stdio(demo: bool = False) -> None:
     """Serve over stdio. The board opens on first use and goes to HiZ on exit."""
     session = BoardSession(simulated=VARIANT if demo else None)
@@ -448,4 +506,4 @@ def run_stdio(demo: bool = False) -> None:
     try:
         server.run("stdio")
     finally:
-        session.disconnect()
+        shut_down(session)

@@ -135,6 +135,9 @@ def plan_recipe(session: Any, confirm: ConfirmStore, name: str,
     else:
         target_mv = session.run(_target_mv)
         if target_mv is not None:
+            if not recipe.target_powered_ok and recipe.target_powered_error:
+                return {"error": "the target already has its own supply (%d mV measured): "
+                        "%s; nothing was planned" % (target_mv, recipe.target_powered_error)}
             if not recipe.target_powered_ok:
                 return {"error": "the target already has its own supply (%d mV measured), "
                         "but %s must power it from the Bus Pirate: disconnect the target's "

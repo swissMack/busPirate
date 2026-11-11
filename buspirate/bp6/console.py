@@ -128,8 +128,13 @@ class Console:
                 self._pending_error = self._pending_error or ln.strip()
 
     def command(self, line: str, timeout: float = 3.0,
-                answers: Sequence[Answer] = ()) -> Reply:
-        """Run ``line`` and return what it printed. Never sends Ctrl-C."""
+                answers: Sequence[Answer] = (), until: Optional[str] = None) -> Reply:
+        """Run ``line`` and return what it printed. Never sends Ctrl-C.
+
+        ``until`` names text that ends the command when no prompt follows it
+        (a binary mode that locks the terminal); the reply then keeps the mode
+        of the last prompt seen.
+        """
         self._drain()
         self._write(line.encode() + b"\r")
         unused = list(answers)
@@ -153,6 +158,8 @@ class Console:
             settled = ended or (bool(seen) and time.monotonic() - last_data >= self.QUIET_S)
             if settled and self._at_main_prompt(text):
                 return self._reply(text)
+            if settled and until is not None and until in text:
+                return self._reply(text + "\n")
             tail = text[mark:]
             due = next((a for a in unused if a.pattern in tail), None)
             if due is not None:
