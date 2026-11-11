@@ -25,7 +25,7 @@ from ..mcp.power import (
 from ..mcp.server import _BP6_STATUS_FIELDS, BOARD_GONE, POWER_ACTION
 from ..mcp.session import BoardGone, BoardSession, NotConnected
 from ..mcp.wiring import JOBS, job_notes, wiring_steps
-from . import engine
+from . import engine, state
 from .recipes import find_recipes
 from .recipes import pins as pin_recipe
 
@@ -139,9 +139,29 @@ def build_server(session: BoardSession) -> MCPServer:
 
     async def hiz() -> Dict[str, Any]:
         def safe(bp: Any) -> Dict[str, Any]:
+            out = {"hiz": True}  # type: Dict[str, Any]
+            st = state.of(session)
+            if st.terminal_mode is not None or st.pwm_pins:
+                # The terminal's PWM and mode outlive BPIO2: stop them there first.
+                problems = []
+                try:
+                    with bp.console() as con:
+                        for pin in sorted(st.pwm_pins):
+                            reply = con.command("g %d" % pin)
+                            if reply.error:
+                                problems.append(reply.error)
+                        reply = con.command("m hiz")
+                        if reply.error:
+                            problems.append(reply.error)
+                except BusPirateError as exc:
+                    problems.append(str(exc))
+                st.pwm_pins.clear()
+                st.terminal_mode = None
+                if problems:
+                    out["warnings"] = ["the terminal said: %s" % p for p in problems]
             bp.hiz()
             session.power = None
-            return {"hiz": True}
+            return out
         return await guard(lambda: session.run(safe))
 
     async def power_off() -> Dict[str, Any]:

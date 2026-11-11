@@ -551,3 +551,155 @@ def test_millivolts_none_is_absent_and_non_integer_refused(session, confirm, rec
     for bad in ("3300", 3.3, True):
         plan = engine.plan_recipe(session, confirm, "toy-backpack", {"millivolts": bad})
         assert "error" in plan and "token" not in plan
+
+
+# -- terminal recipes -------------------------------------------------------------
+
+from buspirate.mcp import jobs  # noqa: E402
+from buspirate.mcp_bp6 import state  # noqa: E402
+
+
+def _term_check(con, opts):
+    assert con.mode  # the console, not the board
+    return {"ok": True}
+
+
+def _term_action(con, opts):
+    """Ask the terminal for its info."""
+    return {"mode": con.command("i").mode}
+
+
+def _term(**changes):
+    fields = dict(name="toy-term", transport="terminal", terminal_mode="dio",
+                  default_mv=3300, check=_term_check, action=_term_action, options={})
+    fields.update(changes)
+    return fields
+
+
+def _sent(session, since):
+    """The terminal lines sent since ``since``, without the Enters that wake it."""
+    return [ln for ln in _fake(session).lines_received()[since:] if ln != b"\r"]
+
+
+def _mark(session):
+    return len(_fake(session).lines_received())
+
+
+def _term_ran(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "error" not in result, result
+    return plan, result
+
+
+def test_terminal_recipe_powers_after_mode(session, confirm, recipes):
+    recipes(**_term())
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    mark = _mark(session)
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "error" not in result, result
+    assert _sent(session, mark) == [b"m dio\r", b"W 3.30 100\r", b"P\r", b"i\r"]
+    assert result["result"] == {"mode": "DIO"} and result["check"]["ok"] is True
+    assert result["power"]["vout_mv"] == 3300 and result["power"]["applied"] is True
+    assert session.power is not None and session.power.to_dict() == plan["power"]
+    assert _fake(session).psu_enabled and _fake(session).pullups
+    assert state.of(session).terminal_mode == "dio"
+
+
+def test_terminal_recipe_target_powered_sends_no_W(session, confirm, recipes):
+    recipes(**_term())
+    _fake(session).adc_mv = [3300] * 8
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    assert plan["target_powered"] is True
+    mark = _mark(session)
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "error" not in result, result
+    assert _sent(session, mark) == [b"m dio\r", b"P\r", b"i\r"]
+    assert session.power is None and _fake(session).psu_enabled is False
+
+
+def test_target_powered_refused_when_not_ok(session, confirm, recipes):
+    recipes(**_term(target_powered_ok=False))
+    _fake(session).adc_mv = [3300] * 8
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    assert "token" not in plan and "3300" in plan["error"]
+
+
+def test_trip_during_W_clears_power(session, confirm, recipes):
+    recipes(**_term())
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    _fake(session).trip_next_w = True
+    mark = _mark(session)
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "Current over limit" in result["error"]
+    assert session.power is None and _fake(session).psu_enabled is False
+    assert b"i\r" not in _sent(session, mark) and "result" not in result
+    assert session.last_recipe is None
+
+
+def test_rerun_wrong_mode_refused(session, confirm, recipes):
+    recipes(**_term())
+    _term_ran(session, confirm)
+    jobs.i2c_scan(session, 100)
+    mark = _mark(session)
+    result = engine.run_recipe(session, confirm, None, {})
+    assert result["error"] == "plan again: the board is in I2C mode now"
+    assert not any(ln.startswith((b"m ", b"W")) for ln in _sent(session, mark))
+
+
+def test_rerun_same_mode_sends_no_m_or_W(session, confirm, recipes):
+    recipes(**_term())
+    _term_ran(session, confirm)
+    mark = _mark(session)
+    result = engine.run_recipe(session, confirm, None, {})
+    assert "error" not in result, result
+    assert _sent(session, mark) == [b"i\r"]
+    assert result["result"] == {"mode": "DIO"}
+
+
+def test_terminal_destructive_refused():
+    with pytest.raises(ValueError):
+        _toy(**_term(risk="destructive", commit=lambda con, opts, prepared: {}))
+
+
+def test_precheck_runs_over_bpio2_first(session, confirm, recipes):
+    seen = []
+
+    def precheck(bp, opts):
+        seen.append(bp.status().mode)  # BPIO2 answers: the console is not open
+        return {"ok": False, "error": "no target found", "hint": "wire it up"}
+
+    recipes(**_term(precheck=precheck))
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    mark = _mark(session)
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert seen and result["check"]["ok"] is False and result["stopped"] == "check failed"
+    assert result["hint"] == "wire it up" and "result" not in result
+    assert _fake(session).lines_received()[mark:] == []  # the terminal port was never opened
+    assert _fake(session).psu_enabled is False and session.power is None
+
+
+def test_hiz_returns_terminal_to_hiz(session, confirm, recipes):
+    pytest.importorskip("mcp")
+    import asyncio
+    import json
+
+    from buspirate.mcp_bp6.server import build_server
+
+    recipes(**_term())
+    _term_ran(session, confirm)
+    fake = _fake(session)
+    fake.pwm.update({0: (1000.0, 50.0), 2: (2000.0, 25.0)})  # as two G commands leave it
+    state.of(session).pwm_pins.update({2, 0})
+    mark = _mark(session)
+    server = build_server(session)
+    out = json.loads(asyncio.run(server.call_tool("hiz", {})).content[0].text)
+    assert out["hiz"] is True
+    assert _sent(session, mark) == [b"g 0\r", b"g 2\r", b"m hiz\r"]
+    assert fake.mode == "HiZ" and not fake.pwm and fake.psu_enabled is False
+    assert session.power is None
+    assert state.of(session).pwm_pins == set() and state.of(session).terminal_mode is None
+    # With no terminal mode recorded, hiz opens no console.
+    mark = _mark(session)
+    asyncio.run(server.call_tool("hiz", {}))
+    assert _fake(session).lines_received()[mark:] == []
