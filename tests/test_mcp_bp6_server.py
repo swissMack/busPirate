@@ -365,3 +365,28 @@ def test_frequency_tool():
     _fake(session).signals[1] = (1000.0, 50.0)
     assert call(server, "frequency", {"pin": 1}) == {"pin": 1, "hz": 1000, "duty_percent": 50.0}
     assert "only IO1, IO3, IO5 and IO7" in call(server, "frequency", {"pin": 2})["error"]
+
+
+def test_pwm_tool_keeps_confirmed_zero_milliamps():
+    session = BoardSession(simulated="bp6")
+    server = build_server(session)
+    call(server, "connect")
+    session.power = _power.plan_power("bp6", 3300, _power.SOURCE_OWNER, False, 0)
+    assert session.power.milliamps == 0
+    mark = len(_fake(session).lines_received())
+    out = call(server, "pwm", {"pin": 2})
+    assert "error" not in out, out
+    assert _sent(session, mark)[:2] == [b"m dio\r", b"W 3.30 0\r"]
+
+
+def test_pwm_off_reports_a_supply_trip():
+    session, server = _powered_server()
+    call(server, "pwm", {"pin": 2})
+    fake = _fake(session)
+    fake._cmd_pwm_off = lambda text, args: fake._finish(
+        text, "Generate frequency: Disabled on IO2\r\n"
+        "\x07\r\nError: Current over limit, power supply disabled\r\n")
+    out = call(server, "pwm_off", {"pin": 2})
+    assert "power supply disabled" in out["error"]
+    assert session.power is None
+    assert _state.of(session).pwm_pins == set()

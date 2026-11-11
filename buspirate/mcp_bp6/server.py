@@ -318,7 +318,7 @@ def build_server(session: BoardSession) -> MCPServer:
                 state.of(session).terminal_mode = "dio"
                 console_power.set_mode(con, "dio")
                 if plan is not None:
-                    console_power.power_on(con, plan.millivolts, plan.milliamps or 100)
+                    console_power.power_on(con, plan.millivolts, plan.milliamps)
             out = work(con)
             if con.tripped:
                 out = dict(out, error=con.tripped)
@@ -344,10 +344,15 @@ def build_server(session: BoardSession) -> MCPServer:
     async def pwm_off(pin: int) -> Dict[str, Any]:
         def run() -> Dict[str, Any]:
             def stop(bp: Any) -> Dict[str, Any]:
-                with bp.console() as con:  # g works in any mode it matters in; no mode change
-                    out = signals.pwm_stop(con, pin)
-                state.of(session).pwm_pins.discard(pin)
-                return out
+                with bp.console() as raw:  # g needs no mode change
+                    con = engine._TripWatch(raw, session)
+                    try:
+                        out = signals.pwm_stop(con, pin)
+                    finally:
+                        state.of(session).pwm_pins.discard(pin)
+                    if con.tripped:
+                        out = dict(out, error=con.tripped)
+                    return out
             return session.run(stop)
         return await guard(run)
 

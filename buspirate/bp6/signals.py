@@ -82,13 +82,14 @@ def pwm_stop(con: Any, pin: int) -> Dict[str, Any]:
     """``g <pin>``. Already off (or the board in HiZ, which has no PWM) is not an error."""
     _pin(pin)
     reply = con.command("g %d" % pin)
+    error = reply.error or ""
+    if "not active" in reply.text or "not active" in error or "HiZ" in error:
+        return {"pin": pin, "stopped": False, "note": "no PWM was running on IO%d" % pin}
+    if error:
+        raise TerminalError(error)
     if "Disabled on IO%d" % pin in reply.text:
         return {"pin": pin, "stopped": True}
-    if "not active" in reply.text or "not active" in (reply.error or "") \
-            or "HiZ" in (reply.error or ""):
-        return {"pin": pin, "stopped": False, "note": "no PWM was running on IO%d" % pin}
-    raise TerminalError(reply.error or "the PWM on IO%d did not stop: %s"
-                        % (pin, reply.text.strip()[-200:]))
+    raise TerminalError("the PWM on IO%d did not stop: %s" % (pin, reply.text.strip()[-200:]))
 
 
 def measure_frequency(con: Any, pin: int) -> Dict[str, Any]:
