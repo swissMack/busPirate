@@ -549,3 +549,53 @@ def test_destructive_commits_never_touch_power(session, confirm, tmp_path, monke
             done = engine.commit_recipe(session, confirm, out["commit"]["token"])
         assert "result" in done and done["committed"] is True, (name, done)
     assert set(committed) == set(cases)
+
+
+# -- signals (terminal) -----------------------------------------------------------
+
+from buspirate.mcp_bp6 import state  # noqa: E402
+
+
+def _sent(session, since=0):
+    return [ln for ln in _fake(session).lines_received()[since:] if ln != b"\r"]
+
+
+def test_signal_recipes_registered_as_terminal():
+    for name in ("pwm-signal", "frequency-measure"):
+        r = REGISTRY[name]
+        assert (r.bus, r.transport, r.terminal_mode, r.default_mv) == ("pins", "terminal", "dio", 3300)
+        assert (r.min_mv, r.max_mv, r.milliamps, r.pullups) == (1200, 5000, 100, False)
+
+
+def test_pwm_signal_recipe_runs(session, confirm):
+    _, out = _run(session, confirm, "pwm-signal", {"pin": 2, "hz": 2000, "duty": 25})
+    assert out["check"]["ok"] and out["result"]["pin"] == 2
+    assert out["result"]["actual_hz"] == 2000
+    assert abs(out["result"]["actual_duty_percent"] - 25) < 0.5
+    assert state.of(session).pwm_pins == {2}
+    assert _fake(session).pwm == {2: (2000.0, 25.0)}
+    assert any("pwm_off" in n for n in REGISTRY["pwm-signal"].notes)
+
+
+def test_pwm_pair_partner_refused(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "pwm-signal", {"pin": 3})
+    state.of(session).pwm_pins.add(2)
+    mark = len(_fake(session).lines_received())
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out["check"]["ok"] is False
+    assert "IO2 and IO3 share one PWM" in out["check"]["error"]
+    assert b"G 3\r" not in _sent(session, mark)
+
+
+def test_frequency_even_pin_refused(session, confirm):
+    _, out = _run(session, confirm, "frequency-measure", {"pin": 2})
+    assert out["check"]["ok"] is False
+    assert "only IO1, IO3, IO5 and IO7" in out["check"]["error"]
+    assert b"f 2\r" not in _sent(session)
+
+
+def test_frequency_recipe_reads(session, confirm):
+    _fake(session).signals[3] = (1000.0, 50.0)
+    _, out = _run(session, confirm, "frequency-measure", {"pin": 3})
+    assert out["result"] == {"pin": 3, "hz": 1000, "duty_percent": 50.0}
+    assert b"f 3\r" in _sent(session)

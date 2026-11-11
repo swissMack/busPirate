@@ -288,6 +288,8 @@ class _TripWatch:
     def __init__(self, con: Any, session: Any) -> None:
         self._con = con
         self._session = session
+        #: For recipes that keep per-session state (``state.of(con.session)``).
+        self.session = session
         self.tripped = None  # type: Optional[str]
 
     def command(self, *args: Any, **kwargs: Any) -> Any:

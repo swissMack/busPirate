@@ -450,6 +450,8 @@ class FakeBp6:
         self.pwm = {}
         self._pwm_pin = None
         self._pwm_hz = None
+        #: Signals the target drives into the pins, for ``f``: pin -> (Hz, duty %).
+        self.signals = {}
         self._terminal_lines = []
         #: True once Ctrl-C has hit the colour question: nothing answers.
         self.terminal_wedged = False
@@ -865,6 +867,8 @@ class FakeBp6:
             self._cmd_pwm_on(text, args)
         elif name == "g":
             self._cmd_pwm_off(text, args)
+        elif name == "f":
+            self._cmd_freq(text, args)
         else:
             self._finish(text, f"Invalid command: {text}. Type ? for help.\r\n")
 
@@ -945,7 +949,8 @@ class FakeBp6:
             return
         self._pwm_hz = hz
         self._ask(word, f"\r\nFrequency: {hz:.3f}Hz = {hz:.0f}Hz\r\n"
-                  f"\r\nActual frequency: {hz:.0f}Hz\r\n\r\nDuty cycle (%) >", "pwm-duty")
+                  f"\r\nActual frequency: {hz:.0f}Hz\r\n"
+                  f"Actual period: {1e9 / hz:.0f}ns\r\n\r\nDuty cycle (%) >", "pwm-duty")
 
     def _pwm_duty(self, line: str) -> None:
         word = line.strip()
@@ -957,10 +962,42 @@ class FakeBp6:
         if not match or not 0 <= float(match.group(1)) <= 100:
             self._ask(word, "\r\nDuty cycle (%) >", "pwm-duty")
             return
-        self.pwm[self._pwm_pin] = (self._pwm_hz, float(match.group(1)))
+        duty = float(match.group(1))
+        self.pwm[self._pwm_pin] = (self._pwm_hz, duty)
         self._terminal_state = "prompt"
-        self._finish(word, f"\r\nDuty cycle: {float(match.group(1)):.2f}%\r\n"
+        period_ns = 1e9 / self._pwm_hz
+        self._finish(word, f"\r\nDuty cycle: {duty:.2f}% = {period_ns * duty / 100:.0f}ns\r\n"
+                     f"Actual duty cycle: {period_ns * duty / 100:.0f}ns\r\n"
                      f"\r\nGenerate frequency: Enabled on IO{self._pwm_pin}\r\n")
+
+    @staticmethod
+    def _friendly(value_hz: float) -> str:
+        for scale, unit in ((1e6, "MHz"), (1e3, "kHz"), (1.0, "Hz")):
+            if value_hz >= scale:
+                return f"{value_hz / scale:.2f}{unit}"
+        return f"{value_hz:.2f}Hz"
+
+    def _cmd_freq(self, text: str, args) -> None:
+        """``f <pin>``: one measurement of ``self.signals[pin]`` (Hz, duty %)."""
+        if not args or not args[0].isdigit():
+            self._finish(text, "Error: Frequency measurement not active on any IO pins\r\n")
+            return
+        pin = int(args[0])
+        if pin > 7:
+            self._finish(text, f"pin out of range: {pin}, expected 0 to 7\r\n")
+        elif pin % 2 == 0:
+            self._finish(text, f"IO{pin} has no frequency measurement hardware!\r\n"
+                         "Freq. measure is currently only possible on odd pins (1,3,5,7).\r\n")
+        elif any(p // 2 == pin // 2 for p in self.pwm):
+            self._finish(text, f"IO{pin} is unavailable because IO{pin - 1} or IO{pin} is in "
+                         "use as a frequency generator (PWM)!\r\n")
+        else:
+            hz, duty = self.signals.get(pin, (0, 0.0))
+            ns = 1e9 / hz if hz else 0.0
+            period = (f"{ns / 1e6:.2f}ms" if ns >= 1e6 else
+                      f"{ns / 1e3:.2f}us" if ns >= 1e3 else f"{ns:.2f}ns")
+            self._finish(text, f"Frequency IO{pin}: {self._friendly(hz)} {period} "
+                         f"({hz:.0f}Hz), Duty cycle: {duty:.1f}%\r\n")
 
     def _cmd_pwm_off(self, text: str, args) -> None:
         if not self.pwm:

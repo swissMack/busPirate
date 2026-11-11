@@ -25,7 +25,8 @@ from ..mcp.power import (
 from ..mcp.server import _BP6_STATUS_FIELDS, BOARD_GONE, POWER_ACTION
 from ..mcp.session import BoardGone, BoardSession, NotConnected
 from ..mcp.wiring import JOBS, job_notes, wiring_steps
-from . import engine, state
+from ..bp6 import signals
+from . import console_power, engine, state
 from .recipes import find_recipes
 from .recipes import pins as pin_recipe
 
@@ -297,6 +298,66 @@ def build_server(session: BoardSession) -> MCPServer:
         return await bus(lambda: session.run(
             lambda bp: pin_recipe._action(bp, {"set": setting, "read": True})))
 
+    # -- signals (terminal) --------------------------------------------------------
+
+    NEEDS_POWER = "plan power first (power_plan, then power_apply) or power the target"
+
+    def _in_dio(bp: Any, work: Callable[[Any], Dict[str, Any]]) -> Dict[str, Any]:
+        """Run ``work(console)`` with the terminal in DIO and the confirmed power on.
+
+        A tool has no plan of its own: it needs the confirmed ``session.power``
+        (re-applied after ``m dio``, which switches the supply off) or a target
+        that powers itself.
+        """
+        plan = session.power
+        if plan is None and engine._target_mv(bp) is None:
+            return {"error": NEEDS_POWER}
+        with bp.console() as raw:
+            con = engine._TripWatch(raw, session)
+            if con.command("").mode.upper() != "DIO":
+                state.of(session).terminal_mode = "dio"
+                console_power.set_mode(con, "dio")
+                if plan is not None:
+                    console_power.power_on(con, plan.millivolts, plan.milliamps or 100)
+            out = work(con)
+            if con.tripped:
+                out = dict(out, error=con.tripped)
+            return out
+
+    async def pwm(pin: int = 0, hz: float = 1000, duty: float = 50) -> Dict[str, Any]:
+        def run() -> Dict[str, Any]:
+            signals.check_pwm(pin, hz, duty)  # refuse before touching the board
+
+            def work(con: Any) -> Dict[str, Any]:
+                other = next((p for p in sorted(state.of(session).pwm_pins)
+                              if p // 2 == pin // 2), None)
+                if other is not None:
+                    return {"error": "IO%d and IO%d share one PWM, and IO%d already has one "
+                            "running; call pwm_off first" % (pin - pin % 2, pin - pin % 2 + 1,
+                                                              other)}
+                out = signals.pwm_start(con, pin, hz, duty)
+                state.of(session).pwm_pins.add(pin)
+                return out
+            return session.run(lambda bp: _in_dio(bp, work))
+        return await guard(run)
+
+    async def pwm_off(pin: int) -> Dict[str, Any]:
+        def run() -> Dict[str, Any]:
+            def stop(bp: Any) -> Dict[str, Any]:
+                with bp.console() as con:  # g works in any mode it matters in; no mode change
+                    out = signals.pwm_stop(con, pin)
+                state.of(session).pwm_pins.discard(pin)
+                return out
+            return session.run(stop)
+        return await guard(run)
+
+    async def frequency(pin: int = 1) -> Dict[str, Any]:
+        def run() -> Dict[str, Any]:
+            signals.check_frequency_pin(pin)
+            return session.run(lambda bp: _in_dio(
+                bp, lambda con: signals.measure_frequency(con, pin)))
+        return await guard(run)
+
     async def bp6_notes() -> Dict[str, Any]:
         return {"text": NOTES.read_text(encoding="utf-8")}
 
@@ -352,6 +413,13 @@ def build_server(session: BoardSession) -> MCPServer:
         ("pins", pins, "Drive IO pins and read every pin's direction, level and voltage. "
          "`set` maps pins to 1, 0 or \"in\", e.g. {\"IO2\": 1, \"IO3\": \"in\"}; omit it to "
          "only read." + unpowered),
+        ("pwm", pwm, "Generate a square wave on an IO pin (0-7): `hz` 8 to 62500000, `duty` "
+         "above 0 to 100 percent. IO0/IO1, IO2/IO3, IO4/IO5 and IO6/IO7 share one PWM, so "
+         "only one pin of a pair runs. Needs power: planned and applied, or the target's own. "
+         "Runs until pwm_off or hiz. Returns the actual frequency and duty."),
+        ("pwm_off", pwm_off, "Stop the PWM on an IO pin."),
+        ("frequency", frequency, "Measure the frequency and duty cycle of a signal on IO1, "
+         "IO3, IO5 or IO7 (one reading). Needs power like pwm."),
         ("bp6_notes", bp6_notes, "The Bus Pirate 6 notes: limits, pin map with wire colours, "
          "the pull-up rule and the risks. Read when unsure."),
     ]
@@ -365,7 +433,7 @@ def build_server(session: BoardSession) -> MCPServer:
 TOOL_NAMES = ("recipes", "recipe_plan", "recipe_run", "recipe_commit", "board_status",
               "connect", "hiz", "power_off", "measure_voltages", "power_plan", "power_apply",
               "wiring", "i2c_scan", "i2c_read", "i2c_write", "spi_transfer", "uart_send", "uart_listen",
-              "onewire_scan", "pins", "bp6_notes")
+              "onewire_scan", "pins", "pwm", "pwm_off", "frequency", "bp6_notes")
 
 
 def run_stdio(demo: bool = False) -> None:
