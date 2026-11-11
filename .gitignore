@@ -31,3 +31,4 @@ package-lock.json
 # built app + dmg (bin/build-dmg.sh)
 dist/
 build/
+.superpowers/
