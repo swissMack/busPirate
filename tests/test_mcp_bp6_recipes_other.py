@@ -599,3 +599,72 @@ def test_frequency_recipe_reads(session, confirm):
     _, out = _run(session, confirm, "frequency-measure", {"pin": 3})
     assert out["result"] == {"pin": 3, "hz": 1000, "duty_percent": 50.0}
     assert b"f 3\r" in _sent(session)
+
+
+# -- self-test (terminal ~) -------------------------------------------------------
+
+def test_selftest_registered():
+    r = REGISTRY["self-test"]
+    assert (r.bus, r.transport, r.terminal_mode, r.wiring) == ("board", "terminal", None, ())
+    assert (r.min_mv, r.max_mv, r.default_mv, r.options) == (0, 0, 0, {"button_s": 20})
+
+
+def test_selftest_precheck_refuses_connected_pins(session, confirm):
+    _fake(session).adc_mv = (0, 0, 0, 3300, 0, 0, 0, 0)
+    plan = engine.plan_recipe(session, confirm, "self-test", {})
+    mark = len(_fake(session).lines_received())
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "disconnect everything from the Bus Pirate's pins first" in out["check"]["error"]
+    assert b"~\r" not in _sent(session, mark)
+
+
+def test_selftest_precheck_refuses_live_vout(session, confirm):
+    _fake(session).vout_mv = 3300
+    plan = engine.plan_recipe(session, confirm, "self-test", {})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "VOUT" in out["check"]["error"]
+
+
+def test_selftest_plan_names_its_own_supply(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "self-test", {})
+    assert plan["power"] is None and plan["wiring"] == []
+    assert "the self-test switches the Bus Pirate's own supply on at 3.3 V" in plan["warnings"]
+    assert any("press the board's button" in w for w in plan["warnings"])
+
+
+def test_selftest_pass(session, confirm):
+    session.power = object()
+    _, out = _run(session, confirm, "self-test")
+    res = out["result"]
+    assert (res["passed"], res["button"], res["errors"]) == (True, "pressed", [])
+    assert session.power is None
+    assert not _fake(session).psu_enabled
+
+
+def test_selftest_button_skipped(session, confirm):
+    _fake(session).button_pressed = False
+    _, out = _run(session, confirm, "self-test", run_options={"button_s": 0})
+    res = out["result"]
+    assert b" " in _sent(session)
+    assert (res["passed"], res["button"], res["errors"]) == (False, "skipped", [])
+    assert res["verdict"] == "every block passed; the button test was skipped"
+
+
+def test_selftest_never_formats(session, confirm):
+    _fake(session).nand_formatted = False
+    _, out = _run(session, confirm, "self-test")
+    assert b"n\r" in _sent(session)
+    assert out["result"]["passed"] is True
+
+
+def test_selftest_reports_error_lines(session, confirm):
+    _fake(session).selftest_faults = ["BIO3 FLOAT: 1/0.92V ERROR!"]
+    _, out = _run(session, confirm, "self-test")
+    res = out["result"]
+    assert res["passed"] is False and res["errors"] == ["BIO3 FLOAT: 1/0.92V ERROR!"]
+    assert "BIO3 FLOAT: 1/0.92V ERROR!" in res["verdict"]
+
+
+def test_selftest_bad_button_s_stops(session, confirm):
+    _, out = _run(session, confirm, "self-test", run_options={"button_s": 99})
+    assert out["check"]["ok"] is False

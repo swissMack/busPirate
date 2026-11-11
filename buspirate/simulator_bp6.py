@@ -453,6 +453,12 @@ class FakeBp6:
         #: Signals the target drives into the pins, for ``f``: pin -> (Hz, duty %).
         self.signals = {}
         self._terminal_lines = []
+        #: Self-test (``~``): whether a human presses the button, whether the NAND
+        #: has a file system, and extra failing lines to print (each is one error).
+        self.button_pressed = True
+        self.nand_formatted = True
+        self.selftest_faults = []
+        self._selftest_errors = 0
         #: True once Ctrl-C has hit the colour question: nothing answers.
         self.terminal_wedged = False
         #: How long BPIO2 takes to start answering once selected (real board:
@@ -827,6 +833,13 @@ class FakeBp6:
         elif state == "w-volts":
             self._terminal_state = "prompt"
             self._finish(line.strip())  # only x is understood: it leaves
+        elif state == "selftest-format":
+            self._selftest_body(line.strip(), "")
+        elif state == "selftest-button":
+            if line == " ":
+                self._terminal_state = "prompt"
+                self._selftest_errors += 1
+                self._say("SKIPPED\r\n" + self._selftest_summary())
         elif state == "pwm-freq":
             self._pwm_frequency(line)
         elif state == "pwm-duty":
@@ -869,6 +882,8 @@ class FakeBp6:
             self._cmd_pwm_off(text, args)
         elif name == "f":
             self._cmd_freq(text, args)
+        elif name == "~":
+            self._cmd_selftest(text)
         else:
             self._finish(text, f"Invalid command: {text}. Type ? for help.\r\n")
 
@@ -915,6 +930,52 @@ class FakeBp6:
                      f"Vreg output: {mv // 1000}.{mv % 1000 // 100}V, "
                      f"Vref/Vout pin: {mv // 1000}.{mv % 1000 // 100}V, "
                      f"Current: {self.load_ma}.0mA\r\n")
+
+    # Self-test: ``~`` (research doc section 4).
+
+    def _cmd_selftest(self, text: str) -> None:
+        if self.mode != "HiZ":
+            self._finish(text, "Selftest only available in HiZ mode\r\n")
+            return
+        self._selftest_errors = 0
+        if not self.nand_formatted:
+            self._ask(text, "No file system!\r\nFormat the Bus Pirate NAND flash?\r\n"
+                      "ALL DATA WILL BE DESTROYED.\r\ny/n >", "selftest-format")
+            return
+        self._selftest_body(text, "")
+
+    def _selftest_body(self, echo: str, _unused: str) -> None:
+        self._say(f"{echo}\x1b[0K\r\n")
+        out = ("SELF TEST STARTING\r\nDISABLE IRQ: OK\r\n"
+               "ADC SUBSYSTEM: VUSB  4.98V OK\r\nFLASH STORAGE: OK\r\nPSU ENABLE: OK\r\n"
+               "VREG==VOUT:  3300 = 3300 OK\r\n"
+               "BIO FLOAT TEST (SHOULD BE 0/<0.30V)\r\n")
+        out += "".join(f"BIO{n} FLOAT: 0/0.00V OK\r\n" for n in range(8))
+        for fault in self.selftest_faults:
+            out += fault + "\r\n"
+            self._selftest_errors += 1
+        out += "BIO HIGH TEST (SHOULD BE >3.00V)\r\n"
+        out += "".join(f"BIO{n} HIGH: 3.30V OK\r\n" for n in range(8))
+        out += "BIO LOW TEST (SHOULD BE <0.30V)\r\n"
+        out += "".join(f"BIO{n} LOW: 0.00V OK\r\n" for n in range(8))
+        out += ("LA_BPIO TEST (SHOULD BE 1)\r\nTEST RP2350 E9 BUG FIX\r\n"
+                "BIO PULL-UP HIGH TEST (SHOULD BE 1/>3.00V)\r\n"
+                "BIO PULL-UP LOW TEST (SHOULD BE <0.30V)\r\n"
+                "CURRENT OVERRIDE: OK\r\nCURRENT LIMIT TEST: OK\r\n"
+                "PUSH BUTTON (SPACE TO SKIP):")
+        self.psu_enabled, self.pullups = False, False  # the test ends with both off
+        if self.button_pressed:
+            self._terminal_state = "prompt"
+            self._say(out + " press \r\nPUSH BUTTON (SPACE TO SKIP): release OK\r\n"
+                      + self._selftest_summary())
+        else:
+            self._terminal_state = "selftest-button"
+            self._say(out)  # no ETX: the board waits for the button or SPACE
+
+    def _selftest_summary(self) -> str:
+        if self._selftest_errors == 0:
+            return "\r\nPASS :)\r\n" + self._prompt()
+        return f"\r\nERRORS: {self._selftest_errors}\r\nFAIL! :(\r\n" + self._prompt()
 
     # PWM: G <pin> asks for a frequency, then a duty cycle.
 
