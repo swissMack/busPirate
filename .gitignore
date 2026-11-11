@@ -32,3 +32,5 @@ package-lock.json
 dist/
 build/
 .superpowers/
+.worktrees/
+pytest-of-*/
