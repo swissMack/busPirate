@@ -7,8 +7,10 @@ the driver asks; it is not a firmware emulator.
 
 from __future__ import annotations
 
+import re
 import struct
 import time
+from typing import List
 
 import flatbuffers
 
@@ -39,6 +41,8 @@ PIN_LABELS = {
     "UART": ["VOUT", "", "", "", "", "TX", "RX", "", "", "GND"],
     "1WIRE": ["VOUT", "OWD", "", "", "", "", "", "", "", "GND"],
     "LED": ["VOUT", "SDO", "", "", "", "", "", "", "", "GND"],
+    "DIO": ["VOUT"] + [""] * 8 + ["GND"],
+    "JTAG": ["VOUT"] + [""] * 8 + ["GND"],
 }
 
 
@@ -438,6 +442,15 @@ class FakeBp6:
         self.data_log = []
         self._reader = FrameReader()
         self._terminal_state = "prompt"
+        #: Modes whose last settings are saved: ``m <mode>`` then asks to reuse them.
+        self.saved_modes = set()
+        #: The next ``W`` trips the over-current protection.
+        self.trip_next_w = False
+        #: Pins generating a frequency (terminal ``G``), pin -> (Hz, duty %).
+        self.pwm = {}
+        self._pwm_pin = None
+        self._pwm_hz = None
+        self._terminal_lines = []
         #: True once Ctrl-C has hit the colour question: nothing answers.
         self.terminal_wedged = False
         #: How long BPIO2 takes to start answering once selected (real board:
@@ -744,10 +757,35 @@ class FakeBp6:
 
     # -- the text terminal ----------------------------------------------------
 
+    HIZ_REFUSAL = "Command has no effect in HiZ mode, press 'm' to choose a mode"
+    TERMINAL_MODES = ("HiZ", "DIO", "JTAG", "I2C")
+
+    def lines_received(self) -> List[bytes]:
+        """Every write the terminal port received, in order."""
+        return list(self._terminal_lines)
+
     def _say(self, text: str) -> None:
         self.terminal.out += text.encode()
 
+    def _prompt(self) -> str:
+        return f"\r\n{self.mode}> \x03"
+
+    def _finish(self, echo: str, body: str = "") -> None:
+        """Echo (with the redraw noise the real line editor adds), output, prompt."""
+        self._say(f"{echo}\x1b[0K\r\n{body}{self._prompt()}")
+
+    def _ask(self, echo: str, body: str, state: str) -> None:
+        self._terminal_state = state
+        self._say(f"{echo}\x1b[0K\r\n{body}\x03")
+
+    def _set_mode(self, name: str) -> None:
+        self.mode = name
+        self.psu_enabled = False   # the HiZ setup of every mode switches these off
+        self.pullups = False
+        self.pwm.clear()
+
     def _on_terminal(self, keys: bytes) -> None:
+        self._terminal_lines.append(bytes(keys))
         if self.terminal_wedged:
             return
         if keys == b"\x03" and self.color_prompt:
@@ -757,24 +795,40 @@ class FakeBp6:
             self.terminal_wedged = True
             return
         if keys == b"\x03":
-            self._say("^C\r\n" + ("VT100 compatible color mode? (Y/n)> " if self.color_prompt else "HiZ> "))
+            self._say("^C\r\n" + ("VT100 compatible color mode? (Y/n)> " if self.color_prompt
+                                  else f"{self.mode}> \x03"))
             return
         if self.color_prompt:
             if keys in (b"n\r", b"y\r"):
                 self.color_prompt = False
-                self._say(keys.decode()[0] + "\n\r\n\r\nHiZ> ")
+                self._say(keys.decode()[0] + "\n\r\n\r\n" + self._prompt().lstrip("\r\n"))
             else:
                 self._say("\n\r\n\r\nVT100 compatible color mode? (Y/n)> ")
             return
         line = keys.decode("ascii", "replace")
-        if self._terminal_state == "binmode-menu" and line == "2\r":
+        state = self._terminal_state
+        if state == "binmode-menu" and line == "2\r":
             self._terminal_state = "binmode-save"
             self._say("2\n\r\n\r\nBinmode selected: BPIO2 flatbuffer interface\r\nSave setting?\r\ny/n > ")
-        elif self._terminal_state == "binmode-save" and line in ("n\r", "y\r"):
+        elif state == "binmode-save" and line in ("n\r", "y\r"):
             self._terminal_state = "prompt"
             self.bpio_active = True
             self._bpio_ready_at = time.monotonic() + self.bpio_settle
-            self._say(line[0] + "\n\r\n\r\nHiZ> ")
+            self._say(line[0] + "\n\r\n\r\n" + self._prompt().lstrip("\r\n"))
+        elif state == "i2c-previous":
+            self._terminal_state = "prompt"
+            if line.strip().lower() == "x":
+                self._finish("x")
+            else:
+                self._set_mode("I2C")
+                self._finish(line.strip())
+        elif state == "w-volts":
+            self._terminal_state = "prompt"
+            self._finish(line.strip())  # only x is understood: it leaves
+        elif state == "pwm-freq":
+            self._pwm_frequency(line)
+        elif state == "pwm-duty":
+            self._pwm_duty(line)
         elif line == "binmode\r":
             self._terminal_state = "binmode-menu"
             self._say("binmode\n\r\n 1. SUMP logic analyzer\r\n 2. BPIO2 flatbuffer interface\r\n"
@@ -783,8 +837,138 @@ class FakeBp6:
             binmode = "BPIO2 flatbuffer interface" if self.bpio_active else "SUMP logic analyzer"
             self._say("i\n\r\nBus Pirate 6\r\nFirmware main branch @ unknown (Oct 12 2026 09:04:39)\r\n"
                       "RP2350B with 512KB RAM, 128Mbit FLASH\r\n"
-                      f"Active binmode: {binmode}\r\nActive mode: HiZ\r\n\r\nHiZ> ")
+                      f"Active binmode: {binmode}\r\nActive mode: {self.mode}\r\n" + self._prompt())
         elif line == "\r":
-            self._say("\n\r\nHiZ> ")
+            self._say("\n" + self._prompt())
         else:
-            self._say(f"{line.strip()}\n\r\nInvalid command: {line.strip()}. Type ? for help.\r\nHiZ> ")
+            self._command(line.strip())
+
+    def _command(self, text: str) -> None:
+        words = text.split()
+        name, args = words[0], words[1:]
+        if name in ("W", "w", "P", "p", "G", "g") and self.mode == "HiZ":
+            self._finish(text, f"\x07{self.HIZ_REFUSAL}\r\n")
+        elif name == "m":
+            self._cmd_mode(text, args)
+        elif name == "W":
+            self._cmd_psu_on(text, args)
+        elif name == "w":
+            self.psu_enabled = False
+            self._finish(text, "Power supply: Disabled\r\n")
+        elif name == "P":
+            self.pullups = True
+            self._finish(text, "Pull-up resistors: Enabled (10K ohms @ 3.3V)\r\n")
+        elif name == "p":
+            self.pullups = False
+            self._finish(text, "Pull-up resistors: Disabled\r\n")
+        elif name == "G":
+            self._cmd_pwm_on(text, args)
+        elif name == "g":
+            self._cmd_pwm_off(text, args)
+        else:
+            self._finish(text, f"Invalid command: {text}. Type ? for help.\r\n")
+
+    def _cmd_mode(self, text: str, args) -> None:
+        match = next((m for m in self.TERMINAL_MODES if args and m.lower() == args[0].lower()), None)
+        if match is None:
+            self._finish(text, "\x07\r\nError: Invalid option\r\n")
+            return
+        if match == "I2C" and "-s" not in args and "i2c" in self.saved_modes:
+            self._ask(text, "\r\nMode: I2C\r\n\r\nUse previous settings?\r\n"
+                      "Speed: 400kHz\r\n\r\ny/n, x to exit (Y) >", "i2c-previous")
+            return
+        self._set_mode(match)
+        self._finish(text, f"\r\nMode: {match}")
+
+    def _cmd_psu_on(self, text: str, args) -> None:
+        try:
+            volts = float(args[0]) if args else None
+            ma = float(args[1]) if len(args) > 1 else 300.0
+        except ValueError:
+            volts, ma = -1.0, 300.0
+        if volts is None or not 0.8 <= volts <= 5.0:
+            note = ("" if volts is None else
+                    f"volts out of range: {volts:.2f}, expected 0.80 to 5.00\r\n")
+            self._ask(text, note + "Voltage, 0.8-5.0volts\r\nx to exit (3.30) >", "w-volts")
+            return
+        if not 0 <= ma <= 500:
+            self._finish(text, f"current out of range: {ma:.1f}, expected 0.0 to 500.0\r\n")
+            return
+        mv = int(round(volts * 1000))
+        self.psu_mv, self.psu_ma = mv, int(ma)
+        uv = mv * 9 // 10
+        body = (f"{volts:.2f}V requested, closest value: {volts:.2f}V\r\n"
+                f"{ma:.1f}mA requested, closest value: {ma:.1f}mA\r\n"
+                f"Undervoltage limit: {uv // 1000}.{uv % 1000 // 100}V (10%)\r\n")
+        if self.trip_next_w or self.over_limit():
+            self.trip_next_w = False
+            self.psu_enabled, self.psu_tripped = False, True
+            self._finish(text, body + "\r\nPower supply:  Enabled\r\n"
+                         "\x07\r\nError: Current over limit, power supply disabled\r\n")
+            return
+        self.psu_enabled, self.psu_tripped = True, False
+        self._finish(text, body + "\r\nPower supply:  Enabled\r\n"
+                     f"Vreg output: {mv // 1000}.{mv % 1000 // 100}V, "
+                     f"Vref/Vout pin: {mv // 1000}.{mv % 1000 // 100}V, "
+                     f"Current: {self.load_ma}.0mA\r\n")
+
+    # PWM: G <pin> asks for a frequency, then a duty cycle.
+
+    def _cmd_pwm_on(self, text: str, args) -> None:
+        pin = int(args[0]) if args and args[0].isdigit() else 0
+        if pin > 7:
+            self._finish(text, f"pin out of range: {pin}, expected 0 to 7\r\n")
+            return
+        if any(p // 2 == pin // 2 for p in self.pwm):
+            self._finish(text, f"IO{pin} is not available for PWM generation\r\n")
+            return
+        self._pwm_pin = pin
+        self._ask(text, "\r\nPeriod or frequency (ns, us, ms, Hz, kHz or Mhz) >", "pwm-freq")
+
+    def _pwm_frequency(self, line: str) -> None:
+        word = line.strip()
+        if word.lower() == "x":
+            self._terminal_state = "prompt"
+            self._finish("x")
+            return
+        match = re.fullmatch(r"([0-9.]+)\s*(ns|us|ms|hz|khz|mhz)", word.lower())
+        hz = None
+        if match:
+            value, unit = float(match.group(1)), match.group(2)
+            if unit in ("hz", "khz", "mhz"):
+                hz = value * {"hz": 1, "khz": 1e3, "mhz": 1e6}[unit]
+            elif value:
+                hz = 1e9 / (value * {"ns": 1, "us": 1e3, "ms": 1e6}[unit])
+        if hz is None or not 7.46 <= hz <= 62.5e6:
+            self._ask(word, "\r\nFrequency invalid: 7.46Hz-62.5MHz (134.1ms-16us period)\r\n"
+                      "\r\nPeriod or frequency (ns, us, ms, Hz, kHz or Mhz) >", "pwm-freq")
+            return
+        self._pwm_hz = hz
+        self._ask(word, f"\r\nFrequency: {hz:.3f}Hz = {hz:.0f}Hz\r\n"
+                  f"\r\nActual frequency: {hz:.0f}Hz\r\n\r\nDuty cycle (%) >", "pwm-duty")
+
+    def _pwm_duty(self, line: str) -> None:
+        word = line.strip()
+        if word.lower() == "x":
+            self._terminal_state = "prompt"
+            self._finish("x")
+            return
+        match = re.fullmatch(r"([0-9.]+)\s*%", word)
+        if not match or not 0 <= float(match.group(1)) <= 100:
+            self._ask(word, "\r\nDuty cycle (%) >", "pwm-duty")
+            return
+        self.pwm[self._pwm_pin] = (self._pwm_hz, float(match.group(1)))
+        self._terminal_state = "prompt"
+        self._finish(word, f"\r\nDuty cycle: {float(match.group(1)):.2f}%\r\n"
+                     f"\r\nGenerate frequency: Enabled on IO{self._pwm_pin}\r\n")
+
+    def _cmd_pwm_off(self, text: str, args) -> None:
+        if not self.pwm:
+            self._finish(text, "Frequency generation not active on any IO pins!")
+            return
+        pin = int(args[0]) if args and args[0].isdigit() else next(iter(self.pwm))
+        if pin not in self.pwm:
+            self._finish(text, f"Error: frequency generator not active on IO{pin}\r\n")
+            return
+        del self.pwm[pin]
+        self._finish(text, f"Generate frequency: Disabled on IO{pin}\r\n")

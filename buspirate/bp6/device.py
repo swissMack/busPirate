@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, Optional, Sequence
+from contextlib import contextmanager
+from typing import Any, ContextManager, Dict, Optional, Sequence
 
 from ..base import SerialLink, TrafficHook
 from ..device import parse_bp6_status
 from ..exceptions import BusPirateError, ModeError, ProtocolError
 from . import protocol
+from .console import Console, TerminalError
 from .link import BpioLink
 from .protocol import Status
 from . import terminal as term
@@ -72,6 +74,7 @@ class BusPirate6(SerialLink):
         #: The BPIO2 serial while a stream has lent ``self.serial`` elsewhere.
         self._binary = None
         self._terminal_open = False
+        self._console_open = False
 
     # -- connection --------------------------------------------------------
 
@@ -324,6 +327,34 @@ class BusPirate6(SerialLink):
         # After the terminal port has been used, the real board's next reply
         # comes seconds late: wait for it, or closing on it would hang it.
         self._status(self.first_reply_timeout)
+
+    @contextmanager
+    def console(self) -> ContextManager[Console]:
+        """Scripted terminal commands, then BPIO2 again: ``with bp.console() as con``."""
+        if self._console_open or self._terminal_open:
+            raise TerminalError("the terminal is already in use")
+        if not self.terminal_port:
+            raise TerminalError("this Bus Pirate 6's terminal port is unknown")
+        terminal = self._make_serial(self.terminal_port)
+        self._console_open = True
+        failed = False
+        try:
+            if not term.wake(terminal, self._notify):
+                raise TerminalError("the Bus Pirate 6's terminal did not answer")
+            yield Console(terminal, self._notify)
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            self._console_open = False
+            terminal.close()
+            self._mode = None
+            # The next BPIO2 reply can come seconds late after terminal use.
+            try:
+                self._status(self.first_reply_timeout)
+            except Exception:
+                if not failed:
+                    raise
 
     def resync(self) -> None:
         self._mode = None

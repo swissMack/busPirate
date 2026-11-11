@@ -121,7 +121,7 @@ def test_the_terminal_switches_bpio2_on():
     for keys in (b"\r", b"n\r", b"binmode\r", b"2\r", b"n\r"):
         fake.terminal.write(keys)
     assert fake.bpio_active
-    assert fake.terminal.read(4096).endswith(b"HiZ> ")
+    assert fake.terminal.read(4096).endswith(b"HiZ> \x03")
 
 
 def test_ctrl_c_at_the_colour_question_silences_the_terminal_like_the_real_board():
