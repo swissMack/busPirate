@@ -40,6 +40,11 @@ HOW = {
 SAVE = "Save setting?"
 EXIT_LEGACY = "Exit legacy binary mode"
 RESETTING = "Resetting Bus Pirate"
+#: How long ``q`` and ``y`` may take to bring the reset message.
+EXIT_TIMEOUT_S = 5.0
+STUCK = ("the Bus Pirate did not confirm that it left Legacy mode (%s), so it is "
+         "still lent to %s, possibly with its supply on. Call connect or hiz again, or press "
+         "the board's button to reset it")
 #: How long a reset may take to drop the ports, and then to bring them back.
 GONE_WAIT_S = 3.0
 BACK_WAIT_S = 10.0
@@ -81,20 +86,31 @@ def lend(session: Any, bp: Any, to: str) -> Dict[str, Any]:
     return {"lent_to": to, "binary_port": bp.port, "how_to_return": how_to_return(to)}
 
 
-def _wait_for_reset(session: Any) -> None:
-    """Wait for the ports to vanish (the reset), then to come back."""
+def _ports_vanished(session: Any) -> bool:
+    """Wait up to ``GONE_WAIT_S`` for the board's ports to vanish (a reset)."""
     deadline = time.monotonic() + GONE_WAIT_S
-    while time.monotonic() < deadline and session.candidates():
+    while session.candidates():
+        if time.monotonic() >= deadline:
+            return False
         time.sleep(0.05)
+    return True
+
+
+def _wait_for_return(session: Any) -> None:
     deadline = time.monotonic() + BACK_WAIT_S
     while time.monotonic() < deadline and not session.candidates():
         time.sleep(0.1)
 
 
-def _reclaim_legacy(session: Any, bp: Any) -> bool:
-    """``q`` then ``y`` on the locked terminal. True if the board reset."""
+def _reclaim_legacy(bp: Any) -> bool:
+    """``q`` then ``y`` on the locked terminal.
+
+    True once the board says it is resetting; False if a main prompt came
+    back instead (the terminal is not locked, so Legacy is not running: the
+    board reset earlier). Raises ``TerminalError`` if neither happened.
+    """
     with bp.raw_console() as con:
-        reply = con.command("q", timeout=5.0, until=RESETTING,
+        reply = con.command("q", timeout=EXIT_TIMEOUT_S, until=RESETTING,
                             answers=[Answer(EXIT_LEGACY, "y")])
     return RESETTING in reply.text
 
@@ -109,29 +125,55 @@ def _reclaim_sump(session: Any, bp: Any) -> None:
     bp.hiz()
 
 
+def _released(session: Any, lent: Dict[str, Any], reconnect: bool,
+              warning: str = "") -> Dict[str, Any]:
+    """The board is no longer lent: forget it, and its supply (reset or HiZ is off)."""
+    state.of(session).lent = None
+    session.power = None
+    out = {"reclaimed": lent["to"] if not warning else None,
+           "reconnect": reconnect}  # type: Dict[str, Any]
+    if warning:
+        out["warning"] = warning
+    return out
+
+
+def _unreachable(session: Any, lent: Dict[str, Any], exc: BaseException) -> Dict[str, Any]:
+    """The board cannot be reached (unplugged): nothing is lent any more."""
+    session.disconnect()
+    return _released(session, lent, True, "could not take the board back from %s (%s)"
+                     % (lent["to"], exc))
+
+
 def reclaim(session: Any) -> Dict[str, Any]:
-    """Take a lent board back. ``lent`` is None afterwards, whatever happened.
+    """Take a lent board back.
 
     ``reconnect`` True means the session was dropped (the board reset, or
-    could not be reached) and the caller should connect again.
+    could not be reached) and the caller should connect again. A Legacy
+    board that answered but never confirmed its reset stays lent, with its
+    supply counted as on, and the result carries ``error``.
     """
-    st = state.of(session)
-    lent = st.lent
+    lent = state.of(session).lent
     if lent is None:
         return {"reclaimed": None, "reconnect": False}
-    st.lent = None
-    session.power = None  # the reset or HiZ switches the supply off
     to = lent["to"]
+    if lent["kind"] == SUMP:
+        try:
+            session.run(lambda bp: _reclaim_sump(session, bp))
+        except (BoardGone, NotConnected, BusPirateError, OSError) as exc:
+            # A fresh connect selects BPIO2 through the terminal, so SUMP
+            # needs no confirmation.
+            return _unreachable(session, lent, exc)
+        return _released(session, lent, False)
     try:
-        if lent["kind"] == LEGACY:
-            reset = session.run(lambda bp: _reclaim_legacy(session, bp))
-            session.disconnect()
-            if reset:
-                _wait_for_reset(session)
-            return {"reclaimed": to, "reconnect": True}
-        session.run(lambda bp: _reclaim_sump(session, bp))
-        return {"reclaimed": to, "reconnect": False}
-    except (BoardGone, NotConnected, BusPirateError, OSError) as exc:
-        session.disconnect()
-        return {"reclaimed": None, "reconnect": True,
-                "warning": "could not take the board back from %s (%s)" % (to, exc)}
+        reset = session.run(_reclaim_legacy)
+    except (BoardGone, NotConnected) as exc:
+        return _unreachable(session, lent, exc)
+    except (BusPirateError, OSError) as exc:
+        if not _ports_vanished(session):
+            return {"reclaimed": None, "reconnect": False,
+                    "error": STUCK % (exc, to)}
+        reset = True  # the ports went away: the board did reset
+    session.disconnect()
+    if reset:
+        _wait_for_return(session)
+    return _released(session, lent, True)

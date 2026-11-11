@@ -739,3 +739,18 @@ def test_trip_during_rerun_action_clears_power(session, confirm, recipes):
     assert "Current over limit" in result["error"]
     assert result["power"] is None and session.power is None
     assert engine.run_recipe(session, confirm, None, {})["error"].startswith("plan again")
+
+
+def test_terminal_recipe_refuses_a_voltage_off_the_10_mv_step(session, confirm):
+    mark = _mark(session)
+    plan = engine.plan_recipe(session, confirm, "pwm-signal", {"millivolts": 3333})
+    assert "token" not in plan
+    assert plan["error"].startswith("3333 mV cannot be set through the terminal")
+    assert "3330 mV" in plan["error"]
+    assert _fake(session).lines_received()[mark:] == []
+    assert "token" in engine.plan_recipe(session, confirm, "pwm-signal", {"millivolts": 3330})
+
+
+def test_bpio2_recipe_keeps_any_millivolt(session, confirm, recipes):
+    recipes()
+    assert "token" in engine.plan_recipe(session, confirm, "toy-backpack", {"millivolts": 3333})

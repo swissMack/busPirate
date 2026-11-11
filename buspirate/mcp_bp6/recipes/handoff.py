@@ -70,20 +70,33 @@ def _legacy(con: Any, to: str, opts: Options, outputs: bool) -> Dict[str, Any]:
         answers += [Answer(HOLD_HIGH, "y", _WAIT), Answer(WP_HIGH, "y", _WAIT)]
     answers += [Answer(CLOCK, "n", _WAIT), Answer(VOLTS, "%.2f" % (mv / 1000.0), _WAIT),
                 Answer(CURRENT, "%d" % MILLIAMPS, _WAIT)]
+    planned = power.plan_power("bp6", mv, power.SOURCE_OWNER, False, MILLIAMPS)
     try:
         reply = con.command("binmode 5", timeout=5.0, answers=answers, until=DONE)
     except TerminalError as exc:
+        # The prompts may have got as far as the supply: count it as on until
+        # the hand-back resets the board.
+        session.power = planned
         raise TerminalError(str(exc) + STILL_LENT) from exc
     if reply.error:
+        session.power = planned
         raise TerminalError("binmode 5 failed: %s%s" % (reply.error, STILL_LENT))
     match = _SET.search(reply.text)
-    if match is None or (int(round(float(match.group(1)) * 1000)), int(match.group(2))) != (
-            mv, MILLIAMPS):
-        raise TerminalError("Legacy mode did not set the supply to the planned %d mV, %d mA"
-                            "%s" % (mv, MILLIAMPS, STILL_LENT))
+    if match is None:
+        session.power = planned
+        raise TerminalError("Legacy mode did not report the supply it set%s" % STILL_LENT)
+    got_mv, got_ma = int(round(float(match.group(1)) * 1000)), int(match.group(2))
+    if (got_mv, got_ma) != (mv, MILLIAMPS):
+        # The supply is on, but not at the plan: record what the firmware set.
+        try:
+            session.power = power.plan_power("bp6", got_mv, power.SOURCE_OWNER, False, got_ma)
+        except (power.PowerRefused, ValueError):
+            session.power = planned
+        raise TerminalError("Legacy mode set the supply to %d mV, %d mA, not the planned "
+                            "%d mV, %d mA%s" % (got_mv, got_ma, mv, MILLIAMPS, STILL_LENT))
     # The firmware switched the supply on at the plan: record it, so status
     # and the hand-back know it is on.
-    session.power = power.plan_power("bp6", mv, power.SOURCE_OWNER, False, MILLIAMPS)
+    session.power = planned
     out["supply"] = {"millivolts": mv, "milliamps": MILLIAMPS, "on": True}
     return out
 

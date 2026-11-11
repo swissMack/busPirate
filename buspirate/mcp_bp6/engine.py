@@ -81,6 +81,22 @@ def _range_error(recipe: Recipe, mv: int, what: str) -> Optional[str]:
             % (what, mv, recipe.name, recipe.min_mv, recipe.max_mv))
 
 
+TERMINAL_STEP_MV = 10  #: the terminal takes volts with two decimals
+
+
+def _step_error(recipe: Recipe, mv: int) -> Optional[str]:
+    """Why ``mv`` cannot be typed into the terminal, or None if it can."""
+    if recipe.transport != "terminal" or mv % TERMINAL_STEP_MV == 0:
+        return None
+    step = TERMINAL_STEP_MV
+    below, above = mv - mv % step, mv - mv % step + step
+    candidates = [c for c in (below, above) if recipe.min_mv <= c <= recipe.max_mv]
+    nearest = min(candidates, key=lambda c: (abs(c - mv), c)) if candidates else below
+    return ("%d mV cannot be set through the terminal, which takes the voltage in steps "
+            "of %d mV (0.01 V); plan again with %d mV. Nothing was planned"
+            % (mv, step, nearest))
+
+
 def _wiring(recipe: Recipe, target_powered: bool,
             options: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
     channels = (options or {}).get("channels")
@@ -155,7 +171,7 @@ def plan_recipe(session: Any, confirm: ConfirmStore, name: str,
             if recipe.default_mv == 0 and "millivolts" not in options:
                 return {"error": ASK_VOLTAGE}
             mv = int(merged.get("millivolts", recipe.default_mv))
-            error = _range_error(recipe, mv, "the voltage")
+            error = _range_error(recipe, mv, "the voltage") or _step_error(recipe, mv)
             if error:
                 return {"error": error}
             try:

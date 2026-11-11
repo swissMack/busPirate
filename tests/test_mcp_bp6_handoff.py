@@ -254,3 +254,47 @@ def test_replugged_while_lent_connects_fresh(rig, server):
     assert out["connected"] is True, out
     assert state.of(rig.session).lent is None
     assert "error" not in call(server, "i2c_scan")
+
+
+# -- fix round 1 -------------------------------------------------------------------
+
+def test_flashrom_plan_refuses_a_voltage_off_the_terminal_step(rig):
+    mark = len(_fake(rig).lines_received())
+    plan = engine.plan_recipe(rig.session, rig.confirm, "flashrom", {"millivolts": 3333})
+    assert "token" not in plan
+    assert "3333 mV" in plan["error"] and "3330 mV" in plan["error"]
+    assert _fake(rig).lines_received()[mark:] == []
+
+
+def test_supply_set_off_plan_is_recorded(rig):
+    fake = _fake(rig)
+    fake.legacy_psu = (3200, 100)
+    plan = engine.plan_recipe(rig.session, rig.confirm, "flashrom", {})
+    out = engine.run_recipe(rig.session, rig.confirm, plan["token"], {})
+    assert "3200 mV" in out["error"] and "still lent" in out["error"]
+    assert fake.psu_enabled
+    assert rig.session.power is not None and rig.session.power.millivolts == 3200
+    assert state.of(rig.session).lent["to"] == "flashrom"
+
+
+def test_reclaim_without_reset_stays_lent(rig, server, monkeypatch):
+    monkeypatch.setattr(handoff, "EXIT_TIMEOUT_S", 0.5)
+    fake = _fake(rig)
+    _lend_by_server(server, "flashrom")
+    fake.exit_answer_lost = True
+    out = call(server, "connect")
+    assert out["connected"] is False
+    assert "button" in out["error"] and "again" in out["error"]
+    assert state.of(rig.session).lent["to"] == "flashrom"
+    assert rig.session.power is not None and fake.psu_enabled and fake.resets == 0
+    assert "lent to flashrom" in call(server, "i2c_scan")["error"]
+    out = call(server, "hiz")
+    assert out["hiz"] is False and "button" in out["error"]
+    # the answer gets through on the next try: q is sent again and the board resets
+    fake.exit_answer_lost = False
+    mark = len(fake.lines_received())
+    out = call(server, "connect")
+    assert out["connected"] is True, out
+    assert _sent(rig, mark)[:2] == [b"q\r", b"y\r"]
+    assert fake.resets == 1 and state.of(rig.session).lent is None
+    assert rig.session.power is None

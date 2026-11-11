@@ -136,6 +136,8 @@ def build_server(session: BoardSession) -> MCPServer:
         out = {"reclaimed": back["reclaimed"]}  # type: Dict[str, Any]
         if "warning" in back:
             out["warnings"] = [back["warning"]]
+        if "error" in back:
+            return dict(out, error=back["error"])  # still lent
         if back["reconnect"]:
             try:
                 out.update(_open(session, port))
@@ -150,7 +152,7 @@ def build_server(session: BoardSession) -> MCPServer:
             back = _take_back(port)
             if back is None:
                 return _open(session, port)
-            if "connected" in back:
+            if "connected" in back or "error" in back:
                 return back
             return dict(back, **_open(session, port))
         out = await guard(go, connect_first=False, lent_ok=True)

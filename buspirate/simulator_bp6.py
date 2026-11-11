@@ -497,6 +497,10 @@ class FakeBp6:
         #: How long a reset takes the ports away; how many resets so far.
         self.reset_seconds = 0.3
         self.resets = 0
+        #: Legacy's exit question never gets its answer: no reset follows ``q``, ``y``.
+        self.exit_answer_lost = False
+        #: (mV, mA) Legacy sets in place of the answers given; None: the answers.
+        self.legacy_psu = None
         self.was_gone = False
         self._gone_until = 0.0
         self.binary = _BinaryPort(self)
@@ -959,6 +963,11 @@ class FakeBp6:
                 self._say("\r\nExit legacy binary mode and reset the Bus Pirate? (y/n) ")
             return
         if state == "legacy-exit":
+            if self.exit_answer_lost:
+                # The answer never reached the question (it timed out): the
+                # board stays in Legacy mode, as after the firmware's 15 s.
+                self._terminal_state = "legacy"
+                return
             if "y" in answer:
                 self._say("y\r\n\r\nExit reason: 'q' then 'y' on the terminal\r\n")
                 self._legacy_reset()
@@ -984,7 +993,7 @@ class FakeBp6:
             self._legacy_ask("legacy-amps")
         elif state == "legacy-amps":
             self.legacy["ma"] = int(round(float(answer or "200")))
-            self.psu_mv, self.psu_ma = self.legacy["mv"], self.legacy["ma"]
+            self.psu_mv, self.psu_ma = self.legacy_psu or (self.legacy["mv"], self.legacy["ma"])
             self.psu_enabled, self.psu_tripped = True, False
             self._terminal_state = "legacy"
             self._say("\r\nPower supply set to %.2fV, %3.0fmA\r\n"
