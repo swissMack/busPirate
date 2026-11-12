@@ -48,6 +48,8 @@ LINE_BYTES = 48
 LATENCY_S = 0.5
 #: How long each read for the card's next bytes lasts.
 SLICE_S = 0.02
+#: What the traffic log sees in place of the PIN block and its echo.
+REDACTED = b"[PIN block redacted]"
 #: GET RESPONSE rounds followed for one command (61 xx can chain).
 MAX_RESPONSES = 8
 
@@ -87,7 +89,7 @@ def _split_echo(text: str) -> Tuple[int, str]:
 def received_bytes(text: str) -> bytes:
     """The bytes the card sent in ``text``: the ``0x%02x`` tokens after the
     ``TX:`` echo (a digit-only echo such as ``0x00`` looks the same)."""
-    return bytes(int(h, 16) for h in smartcard._BYTE.findall(_split_echo(text)[1]))
+    return bytes(int(h, 16) for h in smartcard.BYTE_RE.findall(_split_echo(text)[1]))
 
 
 def _sw_text(sw: int) -> str:
@@ -178,18 +180,30 @@ class SimLink:
     # -- the line --------------------------------------------------------------
 
     def _send(self, data: bytes, secret: bool = False) -> None:
-        """Write ``data`` as terminal lines; the card's answer is read after."""
+        """Write ``data`` as terminal lines; the card's answer is read after.
+
+        With ``secret`` (the PIN block) the traffic log sees :data:`REDACTED`
+        in place of every byte written or read while the line and its
+        ``TX:`` echo go by, and no error names the line or its echo.
+        """
         for i in range(0, len(data), LINE_BYTES):
             chunk = data[i:i + LINE_BYTES]
             what = "the PIN block" if secret else _line(chunk)
+            notify = getattr(self.con, "notify", None)
+            if secret and notify is not None:
+                self.con.notify = lambda direction, _data: notify(direction, REDACTED)
             try:
                 reply = self.con.command(_line(chunk))
             except TerminalError:
                 if secret:
                     raise TerminalError("the terminal did not answer %s" % what) from None
                 raise
+            finally:
+                if secret and notify is not None:
+                    self.con.notify = notify
             if reply.error:
-                raise TerminalError("'%s' failed: %s" % (what, reply.error))
+                raise TerminalError("'%s' failed: %s"
+                                    % (what, "the board refused it" if secret else reply.error))
             count, after = _split_echo(reply.text)
             if count != len(chunk):
                 raise TerminalError("the board did not send %s: %s"
@@ -200,9 +214,9 @@ class SimLink:
     def _take(self, count: int) -> bytes:
         """The card's next ``count`` bytes, waiting up to ``wwt_s`` for each."""
         last = time.monotonic()
-        seen = len(smartcard._BYTE.findall(self._text))
+        seen = len(smartcard.BYTE_RE.findall(self._text))
         while True:
-            found = smartcard._BYTE.findall(self._text)
+            found = smartcard.BYTE_RE.findall(self._text)
             if len(found) > seen:
                 seen, last = len(found), time.monotonic()
             if len(found) - self._taken >= count:
@@ -287,7 +301,10 @@ class SimLink:
         return self.command(self.cla, SELECT, 0x00, p2, fid.to_bytes(2, "big"))
 
     def read_binary(self, length: int, offset: int = 0) -> Tuple[bytes, int]:
-        """READ BINARY of the selected transparent EF."""
+        """READ BINARY of the selected transparent EF, from ``offset`` (0 to 0x7FFF:
+        P1 b8 set would mean a short file identifier)."""
+        if not 0 <= offset <= 0x7FFF:
+            raise ValueError("offset must be 0 to 0x7FFF, not %r" % offset)
         return self.command(self.cla, READ_BINARY, offset >> 8, offset & 0xFF, le=length)
 
     def read_record(self, number: int, length: int) -> Tuple[bytes, int]:

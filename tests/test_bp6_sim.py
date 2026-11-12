@@ -295,3 +295,72 @@ def test_verify_refuses_a_bad_pin_without_sending(fake, pin):
             assert fake.lines_received() == lines
     if pin.strip():
         assert pin.strip() not in str(exc.value)
+
+
+# -- the PIN stays out of the traffic log ------------------------------------------
+
+PIN = "9876"  # 0x39 0x38 0x37 0x36: none of these bytes is in the ATR or the files
+
+
+def _leaks(log):
+    blob = b"".join(data for _, data in log)
+    found = [b"9876", b"39 38 37 36", b"393837"]
+    found += [b"0x%02x" % b for b in b"9876"] + [b"0x%02X" % b for b in b"9876"]
+    return [f for f in found if f.lower() in blob.lower()]
+
+
+def _logged(fake):
+    board = make(fake).open()
+    log = []
+    board.add_traffic_hook(lambda direction, data: log.append((direction, bytes(data))))
+    return board, log
+
+
+@pytest.mark.parametrize("given", [PIN, "9877"])
+def test_pin_never_reaches_the_traffic_log(fake, given):
+    fake.sim.pin = PIN
+    board, log = _logged(fake)
+    with board.console() as con:
+        with open_link(con) as link:
+            out = link.verify_pin_once(given)
+    assert out["verified"] is (given == PIN)
+    assert log and _leaks(log) == [], _leaks(log)
+    assert any(data == sim.REDACTED for _, data in log)
+    assert any(d == "tx" and data.startswith(sim.verify_line(0xA0).encode()) for d, data in log)
+
+
+def test_pin_line_failure_keeps_the_pin_out_of_log_and_error(fake):
+    fake.sim.pin = PIN
+    board, log = _logged(fake)
+    real = fake._on_terminal
+    state = {"drop": False}
+
+    def on_terminal(keys):
+        if state["drop"] and keys.startswith(b"0x39"):
+            state["drop"] = False
+            fake._terminal_lines.append(bytes(keys))  # heard, never answered
+            return
+        if keys.startswith(sim.verify_line(0xA0).encode()):
+            state["drop"] = True
+        real(keys)
+
+    fake.terminal._on_write = on_terminal
+    with board.console() as con:
+        con.timeout = 0.5
+        link = open_link(con)
+        with pytest.raises(TerminalError) as exc:
+            link.verify_pin_once(PIN)
+    message = str(exc.value)
+    assert "PIN block" in message
+    assert "9876" not in message and "0x39" not in message.lower()
+    assert _leaks(log) == [], _leaks(log)
+    assert sent(fake)[-2:] == [b"]\r", b"g 1\r"]
+
+
+def test_read_binary_refuses_an_sfi_offset(fake):
+    with make(fake).open().console() as con:
+        with open_link(con) as link:
+            lines = list(fake.lines_received())
+            with pytest.raises(ValueError):
+                link.read_binary(1, offset=0x8000)
+            assert fake.lines_received() == lines

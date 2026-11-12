@@ -22,7 +22,7 @@ CLOCK_PIN = 1
 BAUD = 9600
 NO_ANSWER = "no answer from the card: check that it is inserted and the wiring"
 #: Exactly the firmware's ``0x%02x `` format: lower-case hex, nothing glued on.
-_BYTE = re.compile(r"(?<!\S)0x([0-9a-f]{2})(?!\S)")
+BYTE_RE = re.compile(r"(?<!\S)0x([0-9a-f]{2})(?!\S)")
 
 
 def _bus(con: Any, line: str, expect: str) -> str:
@@ -54,7 +54,7 @@ def reset_card(con: Any, wait_s: float) -> bytes:
     _bus(con, "[", "UART OPEN")
     text = _bus(con, "{", "RST HIGH")
     text += "\n" + con.collect(wait_s)
-    return bytes(int(h, 16) for h in _BYTE.findall(text))
+    return bytes(int(h, 16) for h in BYTE_RE.findall(text))
 
 
 def stop(con: Any, first: Optional[BaseException] = None) -> Optional[BaseException]:
