@@ -135,6 +135,30 @@ def mnc_digits(ef_ad: bytes) -> int:
     return value if value in (2, 3) else 2
 
 
+def mnc_length_known(ef_ad: bytes) -> bool:
+    """Whether EF_AD says how long the MNC is (byte 4 present, b4..b1 2 or 3)."""
+    ef_ad = bytes(ef_ad)
+    return len(ef_ad) >= 4 and ef_ad[3] & 0x0F in (2, 3)
+
+
+def mixed_mnc_mccs() -> frozenset:
+    """The MCCs whose networks in the operator table have both 2- and 3-digit MNCs.
+
+    For these an IMSI cannot be split into MCC and MNC without EF_AD."""
+    if "mixed" not in _TABLES:
+        lengths = {}  # type: Dict[str, set]
+        for mcc, mnc in _mcc_tables()[1]:
+            lengths.setdefault(mcc, set()).add(len(mnc))
+        _TABLES["mixed"] = frozenset(m for m, n in lengths.items() if n >= {2, 3})
+    return _TABLES["mixed"]
+
+
+def operator_candidates(imsi: str) -> List[Tuple[str, Optional[str]]]:
+    """``[(2-digit MNC, operator or None), (3-digit MNC, operator or None)]`` for an IMSI."""
+    mcc = imsi[:3]
+    return [(imsi[3:3 + n], operator(mcc, imsi[3:3 + n])) for n in (2, 3)]
+
+
 def decode_imsi(b: bytes, mnc_digits: int) -> Dict[str, str]:
     """The subscriber identity (IMSI): MCC (3 digits), MNC (``mnc_digits``) and MSIN.
 
@@ -265,12 +289,17 @@ def _network(b: bytes) -> Optional[Dict[str, Any]]:
 #     101 GSM without EC-GSM-IoT, 110 EC-GSM-IoT only, 111 GSM and EC-GSM-IoT;
 #   table 4.2.5.1, byte 1 b7 b6 b5: 0xx none, 100 WB-S1 and NB-S1,
 #     101 NB-S1 only, 110 WB-S1 only, 111 WB-S1 and NB-S1.
+# 100 is the legacy coding (one "E-UTRAN" bit, one "GSM" bit) that almost every
+# SIM stores, and 111 means the same, so both name only the general technology:
+# NB-IoT comes only from 101 (NB-S1 only), EC-GSM-IoT only from 110.
 _GSM = "2G (GSM)"
 _EC_GSM = "2G (EC-GSM-IoT)"
 _LTE = "4G (E-UTRAN)"
 _NB_IOT = "4G NB-IoT (E-UTRAN NB-S1)"
-_GSM_FIELD = {0b100: (_GSM, _EC_GSM), 0b101: (_GSM,), 0b110: (_EC_GSM,), 0b111: (_GSM, _EC_GSM)}
-_EUTRAN_FIELD = {0b100: (_LTE, _NB_IOT), 0b101: (_NB_IOT,), 0b110: (_LTE,), 0b111: (_LTE, _NB_IOT)}
+_GSM_FIELD = {0b100: (_GSM,), 0b101: (_GSM,), 0b110: (_EC_GSM,), 0b111: (_GSM,)}
+_EUTRAN_FIELD = {0b100: (_LTE,), 0b101: (_NB_IOT,), 0b110: (_LTE,), 0b111: (_LTE,)}
+#: Byte 2 b2 b1 are RFU: set, the identifier is not a coding this table knows.
+_ACT_RFU = 0x03
 #: Report order: oldest technology first.
 _ACT_ORDER = (_GSM, "2G (GSM COMPACT)", _EC_GSM, "3G (UTRAN)", "3G (cdma2000 HRPD)", "3G (cdma2000 1xRTT)",
               _LTE, _NB_IOT, "5G (NG-RAN)", "5G by satellite (NG-RAN)", "4G by satellite (E-UTRAN WB-S1)",
@@ -289,7 +318,10 @@ _ACT_SINGLE = (
 
 
 def _technologies(act: bytes) -> List[str]:
-    if len(act) < 2:
+    """The technologies an access technology identifier selects; none when it
+    is all ones in either byte (filler) or has a reserved (RFU) bit set:
+    such a field states nothing, so nothing is claimed from it."""
+    if len(act) < 2 or 0xFF in act[:2] or act[1] & _ACT_RFU:
         return []
     found = {name for index, mask, name in _ACT_SINGLE if act[index] & mask}
     gsm = (act[1] >> 7 & 1) << 2 | (act[1] >> 3 & 1) << 1 | (act[1] >> 2 & 1)  # b8 b4 b3

@@ -17,7 +17,7 @@ from buspirate.simulator_bp6 import make_sim
 #: EF_SDN, EF_LND (last numbers dialled) and the USIM phone book DF.
 NEVER = {0x6F3A, 0x6F3C, 0x6F40, 0x6F3B, 0x6F49, 0x6F44, 0x5F3A}
 KI = "secret key (Ki) and authentication keys — no SIM allows reading them"
-SUMMARY_KEYS = {"operator", "country", "brand_on_phones", "iccid", "imsi", "card_type", "pin",
+SUMMARY_KEYS = {"home_network_operator", "operator_note", "applications", "country", "brand_on_phones", "iccid", "imsi", "card_type", "pin",
                 "home_network", "equivalent_home_networks", "home_network_search",
                 "capabilities", "capabilities_note", "preferred_roaming", "blocked_networks", "last_network",
                 "access_class", "languages", "not_readable"}
@@ -116,7 +116,7 @@ def test_gsm_sim_full_report(session, confirm):
     result = _report(session, confirm, card)
     s = result["summary"]
     assert set(s) == SUMMARY_KEYS
-    assert s["operator"] == "Swisscom"
+    assert s["home_network_operator"] == "Swisscom"
     assert s["country"] == "Switzerland"
     assert s["brand_on_phones"] == "Swisscom"
     assert s["iccid"] == ICCID
@@ -159,7 +159,7 @@ def test_usim_refusing_class_a0_takes_the_uicc_route(session, confirm):
     assert card.apdus[0][0] == 0xA0 and all(a[0] == 0x00 for a in card.apdus[1:])
     assert any(a[1] == 0xA4 and a[2] == 0x04 for a in card.apdus)  # USIM selected by AID
     assert s["card_type"] == "USIM"
-    assert (s["operator"], s["country"], s["iccid"], s["imsi"]) == (
+    assert (s["home_network_operator"], s["country"], s["iccid"], s["imsi"]) == (
         "Swisscom", "Switzerland", ICCID, IMSI)
     assert s["pin"] == "off"
     assert s["last_network"] == "Swisscom (Switzerland), 4G (LTE)"
@@ -183,7 +183,7 @@ def test_usim_answering_a0_is_read_through_the_usim(session, confirm):
     assert all(a[0] == 0x00 for a in after)  # PIN status and network files in class 00
     assert 0x7F20 not in _selected(card)  # DF_GSM never used
     assert s["card_type"] == "USIM" and s["pin"] == "off"
-    assert (s["operator"], s["imsi"]) == ("Swisscom", IMSI)
+    assert (s["home_network_operator"], s["imsi"]) == ("Swisscom", IMSI)
     for phrase in USIM_ONLY:
         assert phrase in s["capabilities"], s["capabilities"]
     assert "EF_UST" in result["raw"] and "EF_SST" not in result["raw"]
@@ -198,7 +198,7 @@ def test_usim_listed_but_refused_falls_back_to_df_gsm(session, confirm):
     assert len(_aid_selects(card)) == 1  # tried once, refused
     assert 0x7F20 in _selected(card)
     assert s["card_type"] == "SIM"  # the route actually taken
-    assert (s["operator"], s["imsi"], s["pin"]) == ("Swisscom", IMSI, "off")
+    assert (s["home_network_operator"], s["imsi"], s["pin"]) == ("Swisscom", IMSI, "off")
     assert "mobile-data-ready (GPRS)" in s["capabilities"]  # decoded as a GSM SST
     assert not set(USIM_ONLY) & set(s["capabilities"])
     assert "EF_SST" in result["raw"] and "EF_UST" not in result["raw"]
@@ -211,7 +211,7 @@ def test_refuses_a0_and_lists_no_usim(session, confirm):
     assert set(s) == SUMMARY_KEYS
     assert not _aid_selects(card)
     assert s["iccid"] == ICCID
-    assert s["operator"] == s["imsi"] == "not on this card"
+    assert s["home_network_operator"] == s["imsi"] == "not on this card"
     assert s["pin"] == "unknown (the card did not say)"
     assert s["not_readable"] == [KI]
 
@@ -255,7 +255,7 @@ def test_pin_on_lists_locked_fields(session, confirm):
     assert s["imsi"] == "locked by the SIM PIN"
     assert s["blocked_networks"] == "locked by the SIM PIN"
     assert s["country"] == "Switzerland"  # from the card number, which needs no PIN
-    assert s["operator"] == s["last_network"] == s["capabilities"] == "locked by the SIM PIN"
+    assert s["home_network_operator"] == s["last_network"] == s["capabilities"] == "locked by the SIM PIN"
     assert s["capabilities_note"] == NOTE
     assert s["not_readable"][0] == KI
     locked = s["not_readable"][1:]
@@ -278,7 +278,7 @@ def test_empty_file_does_not_abort_the_report(session, confirm):
     card.files[0x6F31]["data"] = b""  # EF_HPPLMN with no bytes
     s = _report(session, confirm, card)["summary"]
     assert s["home_network_search"] == "could not be read (the file is empty or malformed)"
-    assert s["operator"] == "Swisscom"
+    assert s["home_network_operator"] == "Swisscom"
 
 
 def test_pin_blocked(session, confirm):
@@ -295,7 +295,7 @@ def test_missing_ehplmn_is_not_on_this_card(session, confirm, profile):
     result = _report(session, confirm, card)
     s = result["summary"]
     assert s["equivalent_home_networks"] == "not on this card"
-    assert s["operator"] == "Swisscom" and s["last_network"].startswith("Swisscom")
+    assert s["home_network_operator"] == "Swisscom" and s["last_network"].startswith("Swisscom")
     assert "EF_EHPLMN" not in result["raw"]
     assert s["not_readable"] == [KI]
 
@@ -395,7 +395,7 @@ def test_right_pin_gives_the_full_report(session, confirm, profile, cla):
     s = done["result"]["summary"]
     assert set(s) == SUMMARY_KEYS
     assert s["pin"] == "on, verified"
-    assert (s["operator"], s["imsi"], s["iccid"]) == ("Swisscom", IMSI, ICCID)
+    assert (s["home_network_operator"], s["imsi"], s["iccid"]) == ("Swisscom", IMSI, ICCID)
     assert s["not_readable"] == [KI]
     assert "EF_IMSI" in done["result"]["raw"]
     verifies = _verifies(card)
@@ -423,7 +423,7 @@ def test_wrong_pin_is_not_committed_and_says_attempts_left(session, confirm):
     assert "2 attempts left" in result["hint"]
     s = result["summary"]
     assert s["pin"] == "on, 2 attempts left"
-    assert s["imsi"] == s["operator"] == s["blocked_networks"] == "locked by the SIM PIN"
+    assert s["imsi"] == s["home_network_operator"] == s["blocked_networks"] == "locked by the SIM PIN"
     assert len(_verifies(card)) == 1  # never retried
     assert card.attempts == 2
     assert _leaks(plan, out, done) == []
@@ -433,10 +433,14 @@ def test_wrong_pin_is_not_committed_and_says_attempts_left(session, confirm):
 def test_wrong_pin_on_a_usim_says_attempts_left(session, confirm):
     card = _pin_card("usim")
     card.pin = "1111"
-    _, out = _pin_run(session, confirm, card)
+    log = _logged(session)
+    plan, out = _pin_run(session, confirm, card)
     done = engine.commit_recipe(session, confirm, out["commit"]["token"])
     assert done["committed"] is False
     assert done["result"]["attempts_left"] == 2 and len(_verifies(card)) == 1
+    assert _leaks(plan, out, done) == []
+    assert log and _log_leaks(log) == [], _log_leaks(log)
+    assert any(data == bp6_sim.REDACTED for _, data in log)
 
 
 @pytest.mark.parametrize("attempts", [1, 0])
@@ -517,6 +521,112 @@ def test_card_silent_after_the_verify_header_may_have_changed(session, confirm, 
     assert PIN not in json.dumps(done)
     assert session.last_recipe is None
     _ended_cleanly(_fake(session))
+
+
+def test_right_pin_on_a_usim_reads_on_without_a_new_route(session, confirm):
+    """After the VERIFY: no class change, no MF or ADF re-select, and the PIN fields read."""
+    card = _pin_card("usim-a0")
+    _, out = _pin_run(session, confirm, card)
+    mark = len(card.apdus)
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is True, done
+    commit = card.apdus[mark:]
+    verify = next(i for i, a in enumerate(commit) if a[1] == 0x20 and len(a) > 5)
+    assert commit[verify][0] == 0x00
+    after = commit[verify + 1:]
+    assert after and all(a[0] == 0x00 for a in after), [a.hex() for a in after]
+    assert not [a for a in after if a[1] == 0xA4 and a[2] == 0x04]  # no ADF re-select
+    selected = [int.from_bytes(a[5:7], "big") for a in after if a[1] == 0xA4 and len(a) == 7]
+    assert 0x3F00 not in selected and 0x7F20 not in selected
+    s = done["result"]["summary"]
+    assert s["pin"] == "on, verified" and s["card_type"] == "USIM"
+    assert (s["home_network_operator"], s["imsi"]) == ("Swisscom", IMSI)
+    assert s["not_readable"] == [KI]
+
+
+@pytest.mark.parametrize("error", [ValueError("bad field"), KeyError("number")])
+def test_any_failure_after_the_verify_may_have_changed(session, confirm, monkeypatch, error):
+    card = _pin_card()
+    plan, out = _pin_run(session, confirm, card)
+
+    def boom(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(recipe_sim, "_summary", boom)
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is None and done["may_have_changed"] is True, done
+    assert done["hint"] == PIN_HINT
+    assert len(_verifies(card)) == 1
+    assert _leaks(plan, out, done) == []
+    _ended_cleanly(_fake(session))
+
+
+# -- what the summary claims (final review I1, M2, M6, M7) ------------------------------------
+
+def _with_act(card, act):
+    old = card.files[0x6F62]["data"]
+    card.files[0x6F62]["data"] = old[:3] + bytes.fromhex(act)
+    return card
+
+
+def test_legacy_eutran_bit_is_4g_not_nb_iot(session, confirm):
+    s = _report(session, confirm, _with_act(make_sim("gsm"), "C080"))["summary"]
+    assert "4G-ready (LTE)" in s["capabilities"]
+    assert "NB-IoT-ready" not in s["capabilities"]
+    assert "EC-GSM-IoT-ready" not in s["capabilities"]
+
+
+def test_all_ones_access_technology_claims_nothing(session, confirm):
+    s = _report(session, confirm, _with_act(make_sim("gsm"), "FFFF"))["summary"]
+    assert not [c for c in s["capabilities"] if "satellite" in c or "NB-IoT" in c
+                or "EC-GSM" in c], s["capabilities"]
+
+
+def _imsi_file(imsi):
+    from buspirate.simulator_bp6 import _swapped
+    return bytes([8, int(imsi[0]) << 4 | 0x9]) + _swapped(imsi[1:])
+
+
+@pytest.mark.parametrize("imsi,names", [
+    ("310410123456789", ["AT&T"]),
+    ("405030123456789", ["Reliance", "TATA DOCOMO"]),
+])
+def test_operator_uncertain_without_ef_ad_in_a_mixed_mnc_country(session, confirm, imsi, names):
+    card = make_sim("gsm", without=(0x6FAD,))
+    card.files[0x6F07]["data"] = _imsi_file(imsi)
+    s = _report(session, confirm, card)["summary"]
+    assert s["imsi"] == imsi
+    op = s["home_network_operator"]
+    assert op.startswith("uncertain"), op
+    for name in names:
+        assert name in op and name in s["home_network"]
+    assert "2" in op and "3" in op
+
+
+def test_operator_named_when_both_splits_agree(session, confirm):
+    card = make_sim("gsm", without=(0x6FAD,))
+    card.files[0x6F07]["data"] = _imsi_file("310260123456789")
+    s = _report(session, confirm, card)["summary"]
+    assert s["home_network_operator"] == "T-Mobile - US"
+
+
+def test_operator_named_without_ef_ad_where_mncs_have_one_length(session, confirm):
+    s = _report(session, confirm, make_sim("gsm", without=(0x6FAD,)))["summary"]
+    assert s["home_network_operator"] == "Swisscom"
+
+
+def test_operator_is_the_home_network_and_spn_the_brand(session, confirm):
+    s = _report(session, confirm, make_sim("gsm"))["summary"]
+    assert "home network" in s["operator_note"] and "MVNO" in s["operator_note"]
+    assert "host network" in s["operator_note"]
+    assert s["brand_on_phones"] == "Swisscom"
+
+
+def test_applications_listed_from_ef_dir(session, confirm):
+    s = _report(session, confirm, make_sim("usim-a0"))["summary"]
+    assert s["applications"] == ["USIM (3G/4G/5G subscriber identity)"]
+    s = _report(session, confirm, make_sim("gsm"))["summary"]
+    assert s["applications"] == "not on this card"
 
 
 # -- the SIM card plank ----------------------------------------------------------

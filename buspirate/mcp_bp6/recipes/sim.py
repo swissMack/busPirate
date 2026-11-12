@@ -34,6 +34,10 @@ UNREADABLE = "could not be read (the file is empty or malformed)"
 CAPABILITIES_NOTE = "what the SIM supports; the subscription itself may differ"
 PARTLY_LOCKED = "; more may be listed once the SIM PIN is given"
 NONE_RECORDED = "none recorded"
+NONE_LISTED = "none listed"
+#: What ``home_network_operator`` is, and what it is not.
+OPERATOR_NOTE = ("the home network the IMSI belongs to; for a virtual operator's (MVNO) card "
+                 "this is the host network, and brand_on_phones is the brand")
 KI = "secret key (Ki) and authentication keys — no SIM allows reading them"
 
 MF = 0x3F00
@@ -232,6 +236,18 @@ def _names(networks: List[Dict[str, Any]]) -> List[str]:
     return out
 
 
+def _uncertain_operator(imsi: str) -> str:
+    """The operator when EF_AD does not say how long the MNC is and the
+    country has both lengths: one name when both splits agree, else both."""
+    found = dec.operator_candidates(imsi)
+    names = {name for _, name in found}
+    if len(names) == 1 and None not in names:
+        return names.pop()
+    return ("uncertain (the card does not say whether its network code has 2 or 3 digits): "
+            + " or ".join("%s with %d digits" % (name or "an operator not in the table", len(mnc))
+                          for mnc, name in found))
+
+
 def _pin_text(status: Dict[str, Any]) -> str:
     if status.get("blocked"):
         return "blocked"
@@ -360,9 +376,16 @@ def build_report(link: SimLink) -> Dict[str, Any]:
     return _build(link)[0]
 
 
-def _build(link: SimLink) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """:func:`build_report`, and the PIN status it read on the way."""
-    reader, through_usim, pin, reach = _route(link)
+Route = Tuple["_Reader", bool, Dict[str, Any], int]
+
+
+def _build(link: SimLink, routed: Optional[Route] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """:func:`build_report`, and the PIN status it read on the way.
+
+    ``routed``: what :func:`_route` returned on this link already (the PIN
+    commit). The network files are then read on that route, with no new
+    SELECT of MF or the application and no change of class."""
+    reader, through_usim, pin, reach = routed if routed is not None else _route(link)
     for name, fid, label in APP_FILES:
         if reach == 0x9000:
             reader.read(name, fid, label)
@@ -389,17 +412,21 @@ def _summary(reader: _Reader, through_usim: bool, pin: Dict[str, Any]) -> Dict[s
     acc, why_acc = _decoded(reader, "EF_ACC", dec.decode_acc)
     languages, why_languages = _decoded(reader, "EF_PL", _languages)
 
+    uncertain = None  # type: Optional[str]
     if imsi is not None:
         home = {"operator": dec.operator(imsi["mcc"], imsi["mnc"]),
                 "country": dec.country(imsi["mcc"])}  # type: Optional[Dict[str, Any]]
+        if not dec.mnc_length_known(ad) and imsi["mcc"] in dec.mixed_mnc_mccs():
+            uncertain = _uncertain_operator(imsi["imsi"])
     else:
         home = None
     if home is not None:
-        operator = home["operator"] or "not in the operator table"
+        operator = uncertain or home["operator"] or "not in the operator table"
         country = home["country"] or "an unknown country"
     else:
         operator = why_imsi
         country = (iccid or {}).get("country") or why_imsi
+    apps, why_apps = _decoded(reader, "EF_DIR", dec.decode_dir)
 
     capabilities, capabilities_note = _capabilities(reader, gsm=not through_usim)
     if search is None:
@@ -415,15 +442,24 @@ def _summary(reader: _Reader, through_usim: bool, pin: Dict[str, Any]) -> Dict[s
         if why is not None and why != NOT_ON_CARD:
             not_readable.append("%s: %s" % (label, why))
 
+    if home is None:
+        home_network = why_imsi
+    elif uncertain:
+        home_network = "%s (%s)" % (uncertain, country)
+    else:
+        home_network = _network_name(home)
+
     return {
-        "operator": operator,
+        "home_network_operator": operator,
+        "operator_note": OPERATOR_NOTE,
         "country": country,
         "brand_on_phones": why_spn or (spn["name"] or "none set"),
         "iccid": why_iccid or iccid["iccid"],
         "imsi": why_imsi or imsi["imsi"],
         "card_type": "USIM" if through_usim else "SIM",
         "pin": _pin_text(pin),
-        "home_network": _network_name(home) if home is not None else why_imsi,
+        "home_network": home_network,
+        "applications": why_apps or [a["application"] for a in apps] or NONE_LISTED,
         "equivalent_home_networks": why_ehplmn or _names(ehplmn) or "none set",
         "home_network_search": search_text,
         "capabilities": capabilities,
@@ -550,12 +586,16 @@ def _pin_commit(con: Any, opts: Options, prepared: Dict[str, Any]) -> Dict[str, 
     link = SimLink.open(con, opts["clock_hz"], atr_wait_s=float(opts["wait_s"]))
     # The context manager closes the link (async print off, clock off) on every path.
     with link:
-        _, _, pin, _ = _route(link)
+        reader, through_usim, pin, reach = _route(link)
         why = _pin_refusal(pin)
         if why:
             return {"error": why, "hint": NOTHING_SENT}
         tried = link.verify_pin_once(opts["pin"])
-        report, after = _build(link)
+        # The same route, class and application as the VERIFY: a re-select
+        # could restart the application session and drop the PIN's status.
+        # Only the no-data PIN status is read again.
+        after = link.pin_status()
+        report, after = _build(link, (reader, through_usim, after, reach))
     left = tried["attempts_left"]
     if left is None and not tried["verified"]:
         left = after.get("attempts_left")

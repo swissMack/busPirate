@@ -611,7 +611,8 @@ def _commit_terminal(bp: Any, session: Any, recipe: Recipe, payload: Dict[str, A
     A trip or an error before that is a plain error with ``committed`` False;
     after it, the change may have happened, so the reply says so
     (``committed`` None, ``may_have_changed``, the recipe's ``change_hint``).
-    A lost port is left to ``commit_recipe``, which sees ``sent`` too.
+    Any exception after it, not only a ``BusPirateError``, is reported the
+    same way. A lost port is left to ``commit_recipe``, which sees ``sent`` too.
     """
     want = recipe.terminal_mode or "hiz"
     try:
@@ -642,3 +643,10 @@ def _commit_terminal(bp: Any, session: Any, recipe: Recipe, payload: Dict[str, A
         if sent.change:
             return _may_have_changed(recipe, {"error": str(exc)})
         return {"recipe": recipe.name, "committed": False, "error": str(exc)}
+    except Exception as exc:  # noqa: B902  (any failure once the change line went out)
+        # A decoder or programming error after the change line still leaves
+        # the change possibly made: never a plain error (server.guard would
+        # turn a ValueError into one) and never an escaped exception.
+        if sent.change:
+            return _may_have_changed(recipe, {"error": "%s: %s" % (type(exc).__name__, exc)})
+        raise

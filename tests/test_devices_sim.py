@@ -137,12 +137,11 @@ def test_plmn_with_access_technology():
     data = h("22 F8 10 C0 80") + h("FF FF FF 00 00") + h("22 F8 20 08 00") + h("22 F8 30 00 80")
     got = sim.decode_plmn_list(data, with_act=True)
     assert [p["mnc"] for p in got] == ["01", "02", "03"]
-    # C0: UTRAN + E-UTRAN with b6 b5 = 00, which table 4.2.5.1 reads as WB-S1 and NB-S1;
-    # 80: b8 alone, which table 4.2.5.2 reads as GSM and EC-GSM-IoT.
-    assert got[0]["technologies"] == ["2G (GSM)", "2G (EC-GSM-IoT)", "3G (UTRAN)", "4G (E-UTRAN)",
-                                      "4G NB-IoT (E-UTRAN NB-S1)"]
+    # C0 80: the legacy coding almost every SIM stores (one E-UTRAN bit, one GSM bit).
+    # It says "E-UTRAN" and "GSM", nothing about NB-IoT or EC-GSM-IoT.
+    assert got[0]["technologies"] == ["2G (GSM)", "3G (UTRAN)", "4G (E-UTRAN)"]
     assert got[1]["technologies"] == ["5G (NG-RAN)"]
-    assert got[2]["technologies"] == ["2G (GSM)", "2G (EC-GSM-IoT)"]
+    assert got[2]["technologies"] == ["2G (GSM)"]
     assert got[0]["country"] == "Switzerland"
 
 
@@ -151,10 +150,10 @@ def test_plmn_with_access_technology():
     (0x08, []),                              # b4 without b8: "0xx", not selected
     (0x04, []),                              # b3 without b8
     (0x0C, []),                              # b4 b3 without b8
-    (0x80, ["2G (GSM)", "2G (EC-GSM-IoT)"]),  # 100: GSM and EC-GSM-IoT
+    (0x80, ["2G (GSM)"]),                     # 100: the legacy GSM bit, no EC-GSM-IoT claim
     (0x84, ["2G (GSM)"]),                     # 101: GSM without EC-GSM-IoT
     (0x88, ["2G (EC-GSM-IoT)"]),              # 110: EC-GSM-IoT only
-    (0x8C, ["2G (GSM)", "2G (EC-GSM-IoT)"]),  # 111: GSM and EC-GSM-IoT
+    (0x8C, ["2G (GSM)"]),                     # 111: same meaning as 100, no EC-GSM-IoT claim
     (0x40, ["2G (GSM COMPACT)"]),
     (0x30, ["3G (cdma2000 HRPD)", "3G (cdma2000 1xRTT)"]),
 ])
@@ -166,16 +165,47 @@ def test_gsm_access_technology_field_table_4_2_5_2(byte2, expected):
 @pytest.mark.parametrize("byte1, expected", [
     (0x20, []),                                                  # b6 without b7
     (0x30, []),                                                  # b6 b5 without b7
-    (0x40, ["4G (E-UTRAN)", "4G NB-IoT (E-UTRAN NB-S1)"]),        # 100: WB-S1 and NB-S1
+    (0x40, ["4G (E-UTRAN)"]),                                     # 100: legacy, E-UTRAN generally
     (0x50, ["4G NB-IoT (E-UTRAN NB-S1)"]),                        # 101: NB-S1 only
     (0x60, ["4G (E-UTRAN)"]),                                     # 110: WB-S1 only
-    (0x70, ["4G (E-UTRAN)", "4G NB-IoT (E-UTRAN NB-S1)"]),        # 111: WB-S1 and NB-S1
+    (0x70, ["4G (E-UTRAN)"]),                                     # 111: same meaning as 100
     (0x0F, ["5G (NG-RAN)", "5G by satellite (NG-RAN)", "4G by satellite (E-UTRAN WB-S1)",
             "4G by satellite (E-UTRAN NB-S1)"]),
 ])
 def test_eutran_access_technology_field_table_4_2_5_1(byte1, expected):
     got = sim.decode_plmn_list(h("22 F8 10") + bytes([byte1, 0x00]), with_act=True)
     assert got[0]["technologies"] == expected
+
+
+def test_legacy_eutran_c0_80_is_4g_only():
+    got = sim.decode_plmn_list(h("22 F8 10 C0 80"), with_act=True)
+    assert "4G (E-UTRAN)" in got[0]["technologies"]
+    assert not [t for t in got[0]["technologies"] if "NB-IoT" in t or "EC-GSM" in t]
+
+
+@pytest.mark.parametrize("act", ["FF FF", "FF 00", "00 01", "00 02", "C0 83"])
+def test_all_ones_or_reserved_access_technology_is_not_specified(act):
+    """All ones, or an RFU bit (byte 2 b2 b1) set: the field says nothing, so nothing is claimed."""
+    got = sim.decode_plmn_list(h("22 F8 10 " + act), with_act=True)
+    assert got[0]["mnc"] == "01" and got[0]["technologies"] == []
+
+
+def test_mnc_length_known_only_from_a_valid_ef_ad():
+    assert sim.mnc_length_known(h("00 00 00 02")) and sim.mnc_length_known(h("00 00 00 03"))
+    assert not sim.mnc_length_known(h("00 00 00"))
+    assert not sim.mnc_length_known(b"")
+    assert not sim.mnc_length_known(h("00 00 00 0F"))
+
+
+def test_mixed_mnc_countries_come_from_the_table():
+    mixed = sim.mixed_mnc_mccs()
+    assert {"310", "334", "405"} <= mixed
+    assert "228" not in mixed  # Switzerland: 2-digit MNCs only
+
+
+def test_operator_candidates_for_both_lengths():
+    assert sim.operator_candidates("405030123456789") == [("03", "Reliance"), ("030", "TATA DOCOMO")]
+    assert sim.operator_candidates("310410123456789") == [("41", None), ("410", "AT&T")]
 
 
 def test_plmn_unknown_operator_is_none():

@@ -152,8 +152,9 @@ How it differs from `buspirate`:
   on the back). The CARD LED lights only for the large socket on the back; for a
   SIM the power LED shows the card is powered. `smartcard-atr` reads a smart
   card's answer to reset. `sim-report` is a business summary of a SIM card:
-  operator, country, brand, ICCID and IMSI, capabilities and networks, with the
-  raw values underneath. It is read-only by construction: only SELECT, READ
+  home network operator (for an MVNO card, the host network; the brand is the
+  SPN), country, ICCID and IMSI, applications, capabilities and networks, with
+  the raw values underneath. It is read-only by construction: only SELECT, READ
   BINARY, READ RECORD, GET RESPONSE, STATUS and VERIFY are ever sent, and
   contacts, SMS, the phone number (MSISDN), FDN, SDN and call logs are never
   read. With the SIM PIN on, the files it locks show as locked.
