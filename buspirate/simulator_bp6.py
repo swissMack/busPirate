@@ -450,10 +450,13 @@ class FakeSim:
 
     def add_file(self, parent: int, fid: int, data: Optional[bytes] = None,
                  records: Optional[List[bytes]] = None, df: bool = False,
-                 chv1: bool = False) -> None:
-        """Add a DF, a transparent EF (``data``) or a linear fixed EF (``records``)."""
+                 chv1: bool = False, aid: Optional[bytes] = None) -> None:
+        """Add a DF, a transparent EF (``data``) or a linear fixed EF (``records``).
+
+        A DF with an ``aid`` is an application (ADF): class ``00`` selects it
+        by AID (P1 ``04``, the whole AID or its start)."""
         if df:
-            node = {"kind": "DF", "parent": parent}  # type: Dict[str, Any]
+            node = {"kind": "DF", "parent": parent, "aid": aid}  # type: Dict[str, Any]
         elif records is not None:
             node = {"kind": "EF", "parent": parent, "records": list(records), "chv1": chv1}
         else:
@@ -552,10 +555,21 @@ class FakeSim:
         return node_parent == here or fid == parent or (parent is not None and node_parent == parent)
 
     def _select(self, data: bytes) -> int:
-        if self._p3 != 2 or len(data) != 2:
+        if self._p1 == 0x04:
+            if self._gsm():
+                return 0x6B00
+            found = [f for f, n in self.files.items()
+                     if n.get("aid") and data and n["aid"].startswith(data)]
+            if not found:
+                return 0x6A82
+            fid = found[0]
+        elif self._p1 != 0x00:
+            return 0x6B00 if self._gsm() else 0x6A86
+        elif self._p3 != 2 or len(data) != 2:
             return 0x6700
-        fid = int.from_bytes(data, "big")
-        if not self._find(fid):
+        else:
+            fid = int.from_bytes(data, "big")
+        if not self._find(fid) and self._p1 != 0x04:
             return 0x9404 if self._gsm() else 0x6A82
         node = self.files[fid]
         if node["kind"] == "EF":
@@ -668,6 +682,112 @@ class FakeSim:
         if gsm:
             return 0x9840 if self.attempts == 0 else 0x9804
         return 0x63C0 | self.attempts
+
+
+def _bcd_plmn(mcc: str, mnc: str) -> bytes:
+    """MCC and MNC as 3 bytes (TS 24.008): MCC2|MCC1, MNC3|MCC3, MNC2|MNC1."""
+    m = [int(c) for c in mcc]
+    n = [int(c) for c in mnc] + ([0xF] if len(mnc) == 2 else [])
+    return bytes((m[1] << 4 | m[0], n[2] << 4 | m[2], n[1] << 4 | n[0]))
+
+
+def _swapped(digits: str) -> bytes:
+    digits += "F" * (len(digits) % 2)
+    return bytes(int(digits[i + 1], 16) << 4 | int(digits[i], 16) for i in range(0, len(digits), 2))
+
+
+def _service_table(numbers, kind: str, size: int) -> bytes:
+    """EF_UST (one bit per service) or EF_SST (two bits: allocated and activated)."""
+    out = bytearray(size)
+    for n in numbers:
+        i = n - 1
+        if kind == "ust":
+            out[i // 8] |= 1 << (i % 8)
+        else:
+            out[i // 4] |= 0x03 << (2 * (i % 4))
+    return bytes(out)
+
+
+#: Access technology bytes: 2G + 3G + 4G + 5G (byte 1: UTRAN b8, E-UTRAN WB-S1 only b7..b5 = 110,
+#: NG-RAN b4; byte 2: GSM without EC-GSM-IoT, b8 b4 b3 = 101).
+_ACT_ALL = b"\xe8\x84"
+_ACT_2G_3G_4G = b"\xe0\x84"
+_ACT_NONE = b"\x00\x00"
+_EMPTY_ACT = b"\xff\xff\xff\x00\x00"
+_EMPTY_PLMN = b"\xff\xff\xff"
+#: The USIM application's AID (TS 101 220 Annex E: A000000087 1002, then country and provider).
+USIM_AID = bytes.fromhex("A0000000871002FF49FF0589")
+_ADF = 0x7FF0
+
+#: GSM SST services on the "gsm" profile (TS 51.011 §10.3.7): PIN disable, phone book,
+#: FDN, SMS storage, own number, SPN, SMS-PP download, proactive SIM, GPRS, the three
+#: "with access technology" lists, MMS.
+_SST_ON = (1, 2, 3, 4, 9, 17, 26, 29, 38, 43, 44, 45, 57)
+#: USIM UST services on the "usim" profile (TS 31.102 §4.2.8): phone book, SPN, the
+#: radio-type lists, GSM access, SMS-PP download, EHPLMN, EPS info, SMS over IP,
+#: IMS access, ePDG, NB-IoT channel list, 5G info and security, SUCI.
+_UST_ON = (1, 2, 10, 19, 20, 21, 27, 28, 33, 42, 43, 71, 85, 91, 95, 106, 107, 121, 122,
+           123, 124)
+
+
+def make_sim(profile: str = "gsm", without=()) -> "FakeSim":
+    """A FakeSim with a realistic Swisscom (MCC 228, MNC 01) subscription.
+
+    ``"gsm"``: an old GSM SIM (class ``A0`` only), PIN off. ``"usim"``: a USIM
+    that refuses class ``A0`` (``6E 00``) and keeps its files in the USIM
+    application, listed in EF_DIR. ``"pin-on"``: the GSM SIM with the PIN on,
+    its network files needing it. ``without``: file IDs to leave out.
+    """
+    if profile not in ("gsm", "usim", "pin-on"):
+        raise ValueError("profile must be gsm, usim or pin-on")
+    usim = profile == "usim"
+    iccid = _swapped("89410112345678901231")
+    card = FakeSim(iccid=iccid, pin_enabled=profile == "pin-on")
+    del card.files[0x7F20]
+    card.classes = (0x00,) if usim else (0xA0,)
+    swisscom, sunrise, salt = _bcd_plmn("228", "01"), _bcd_plmn("228", "02"), _bcd_plmn("228", "03")
+    imsi = "228011234567890"
+    files = {
+        0x6F46: b"\x00" + b"Swisscom".ljust(16, b"\xff"),            # EF_SPN
+        0x6FAD: b"\x00\x00\x00\x02",                                   # EF_AD: 2-digit MNC
+        0x6F07: bytes([8]) + bytes([int(imsi[0]) << 4 | 0x9]) + _swapped(imsi[1:]),  # EF_IMSI
+        0x6F38: (_service_table(_UST_ON, "ust", 16) if usim
+                 else _service_table(_SST_ON, "sst", 15)),               # EF_UST / EF_SST
+        0x6F31: b"\x05",                                                 # EF_HPPLMN: 5 x 6 min
+        0x6F60: _EMPTY_ACT * 4,                                          # EF_PLMNwAcT
+        0x6F61: (_bcd_plmn("262", "01") + _ACT_2G_3G_4G + _bcd_plmn("208", "10") + _ACT_2G_3G_4G
+                 + _bcd_plmn("222", "47") + _ACT_NONE + _EMPTY_ACT),     # EF_OPLMNwAcT
+        0x6F62: swisscom + _ACT_ALL,                                     # EF_HPLMNwAcT
+        0x6FD9: swisscom + _EMPTY_PLMN,                                  # EF_EHPLMN
+        0x6F7B: sunrise + salt + _EMPTY_PLMN + _EMPTY_PLMN,              # EF_FPLMN
+        0x6F7E: b"\x1a\x2b\x3c\x4d" + swisscom + b"\x1f\x40\xff\x00",       # EF_LOCI
+        0x6F73: b"\x5e\x6f\x70\x81" + b"\x11\x22\x33" + swisscom + b"\x1f\x40\x07\x00",  # EF_PSLOCI
+        0x6FE3: b"\x0b\xf6" + swisscom + b"\x80\x01\x01\xc2\x3a\x4b\x5c" + swisscom
+                + b"\x30\x39\x00",                                        # EF_EPSLOCI
+        0x6F78: b"\x00\x08",                                             # EF_ACC: class 3
+        # Present so a test can prove the report never selects them.
+        0x6F3A: b"\xff" * 28,                                            # EF_ADN
+        0x6F40: b"\xff" * 28,                                            # EF_MSISDN
+    }
+    no_pin = (0x6F46, 0x6FAD)
+    if usim:
+        card.add_file(0x3F00, 0x2F00, records=[
+            bytes.fromhex("61144F0C") + USIM_AID + bytes.fromhex("5004") + b"USIM"
+            + b"\xff" * 10])
+        card.add_file(0x3F00, _ADF, df=True, aid=USIM_AID)
+        home = _ADF
+    else:
+        card.add_file(0x3F00, 0x7F20, df=True)
+        home = 0x7F20
+    if 0x2F05 not in without:
+        # EF_PL (UICC) / EF_ELP (GSM): ISO 639 language codes, German then English.
+        card.add_file(0x3F00, 0x2F05, data=b"deen\xff\xff")
+    for fid, data in files.items():
+        if fid not in without:
+            card.add_file(home, fid, data=data, chv1=fid not in no_pin)
+    if 0x6F3C not in without:
+        card.add_file(home, 0x6F3C, records=[b"\x00" + b"\xff" * 175])  # EF_SMS
+    return card
 
 
 class FakeBp6:
