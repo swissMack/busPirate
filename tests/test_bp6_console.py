@@ -298,3 +298,15 @@ def test_listen_answers_menu_repeatedly():
     con.listen("sniff", 0.3, "x", keys=[Answer("space for next", " ", 0)])
     assert port.sent[:3] == [b"sniff\r", b" ", b" "] and port.sent[-1] == b"x"
     assert port.sent.count(b" ") == 2
+
+
+def test_listen_keeps_partial_line_before_prompt():
+    def on_write(port, data):
+        if data == b"sniff\r":
+            port.out += b"sniff\r\nPress x to exit\r\n[ [0xA0]+ [0x00]+"
+        elif data == b"x":
+            port.out += b"I2C> \x03"
+
+    con = Console(ScriptPort(on_write), lambda *a: None)
+    reply = con.listen("sniff", 0.1, "x")
+    assert reply.text.endswith("[ [0xA0]+ [0x00]+") and reply.mode == "I2C"

@@ -756,18 +756,25 @@ def test_2wire_sniff_recipe_runs(session, confirm):
 def test_sniff_truncates(session, confirm):
     fake = _fake(session)
     fake.sniff_lines = _sniff_lines(250)
-    _, result = _run(session, confirm, "i2c-sniff", {"millivolts": 3300, "seconds": 1})
+    _, result = _run(session, confirm, "i2c-sniff", {"millivolts": 3300, "seconds": 2})
     r = result["result"]
     assert r["count"] == 250 and len(r["transactions"]) == 200 and r["truncated"] is True
 
 
 def test_sniff_seconds_refused(session, confirm):
     plan = engine.plan_recipe(session, confirm, "i2c-sniff", {"millivolts": 3300, "seconds": 61})
-    if "error" in plan:
-        assert "60" in plan["error"]
-        return
+    assert "token" in plan, plan
     out = engine.run_recipe(session, confirm, plan["token"], {})
     assert out["check"]["ok"] is False and "60" in out["check"]["error"]
+
+
+def test_i2c_sniff_keeps_cut_off_last_transaction(session, confirm):
+    fake = _fake(session)
+    fake.sniff_lines = ["[ [0xA0]+ [0x00]+ [0x12]-]\r\n", "[ [0xA0]+ [0x00]+"]
+    _, result = _run(session, confirm, "i2c-sniff", {"millivolts": 3300, "seconds": 0.3})
+    last = result["result"]["transactions"][-1]
+    assert result["result"]["count"] == 2 and last["complete"] is False
+    assert last["data"] == "00"
 
 
 def test_sniff_notes_name_driven_pins():

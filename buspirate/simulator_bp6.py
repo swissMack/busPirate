@@ -865,16 +865,21 @@ class FakeBp6:
             return f"\r\nINFRARED-({self.ir_protocol})> \x03"
         return f"\r\n{self.mode}> \x03"
 
-    def _stream(self, text: str, banner: str, stop_keys, end_text: str, chunks) -> None:
+    def _stream(self, text: str, banner: str, stop_keys, end_text: str, chunks,
+                inline_prompt: bool = False) -> None:
         """Start a command that streams until a key in ``stop_keys`` is pressed.
 
         Echoes ``text``, prints ``banner``, then one chunk of ``chunks`` (any
         iterable of strings) every 20 ms. A stop key prints ``end_text`` and the
         prompt; other keys are ignored. Every key is kept in ``keys_seen``.
+        With ``inline_prompt`` a last chunk that ends mid-line gets the prompt
+        straight after it, as the firmware prints it (a sniffer stopped
+        mid-transaction).
         """
         self._terminal_state = "stream"
         self._streaming = {"stop": tuple(stop_keys), "end": end_text,
-                           "chunks": iter(chunks), "due": time.monotonic() + 0.02}
+                           "chunks": iter(chunks), "due": time.monotonic() + 0.02,
+                           "inline": inline_prompt, "last": banner}
         self._say(f"{text}\x1b[0K\r\n{banner}")
 
     def _pump_stream(self) -> None:
@@ -888,6 +893,7 @@ class FakeBp6:
             chunk = next(s["chunks"], None)
             if chunk is None:
                 break
+            s["last"] = chunk
             self._say(chunk)
 
     def _stream_key(self, keys: bytes) -> None:
@@ -896,7 +902,10 @@ class FakeBp6:
         if any(k in keys.decode("ascii", "replace") for k in s["stop"]):
             self._streaming = None
             self._terminal_state = "prompt"
-            self._say(s["end"] + self._prompt())
+            prompt = self._prompt()
+            if s["inline"] and not s["end"] and s["last"] and not s["last"].endswith("\n"):
+                prompt = prompt.lstrip("\r\n")
+            self._say(s["end"] + prompt)
 
     def _finish(self, echo: str, body: str = "") -> None:
         """Echo (with the redraw noise the real line editor adds), output, prompt."""
@@ -1115,7 +1124,7 @@ class FakeBp6:
             banner = "I2C Sniffer" if self.mode == "I2C" else "2Wire Sniffer"
             self._stream(text, banner + "\r\nPress x to exit\r\n", ("x",), "",
                          ["".join(self.sniff_lines[i:i + 10])
-                          for i in range(0, len(self.sniff_lines), 10)])
+                          for i in range(0, len(self.sniff_lines), 10)], inline_prompt=True)
         elif name == "bluetag" and self.mode == "JTAG":
             self._cmd_bluetag(text, args)
         else:

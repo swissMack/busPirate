@@ -17,6 +17,10 @@ from ..exceptions import BusPirateError, PortGoneError
 
 #: Escape sequences (colours, erase-line, cursor moves) the terminal sends.
 _ESCAPES = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+#: A prompt that follows unterminated output on the same line (a sniffer that
+#: was stopped mid-transaction prints nothing before the prompt).
+_INLINE_PROMPT = re.compile(r"(?:HiZ|1WIRE|UART|HDUART|I2C|SPI|2WIRE|3WIRE|DIO|LED|INFRARED|JTAG|PS2|USB)"
+                            r"(?:-\([^)]*\))?> $")
 _MAIN_PROMPT = re.compile(r"^([A-Za-z0-9]+)(-\([^)]*\))?> $")
 _SUB_PROMPT = re.compile(r">\s?$")
 _ERROR = re.compile(
@@ -241,9 +245,22 @@ class Console:
                 continue
             seen += chunk
             text = clean(seen.decode("utf-8", "replace"))
-            if self._at_main_prompt(text):
-                return self._reply(text)
+            lenient = self._prompt_after_output(text)
+            if lenient is not None:
+                return self._reply(lenient)
         raise TerminalError(f"the terminal did not answer {line}")
+
+    def _prompt_after_output(self, text: str) -> Optional[str]:
+        """``text`` with the prompt moved onto its own line, if it ends in one.
+
+        Keeps whatever came before the prompt on the same line (a cut-off
+        transaction); None when the text does not end in a main prompt.
+        """
+        found = _INLINE_PROMPT.search(_last_line(text))
+        if not found:
+            return None
+        self.mode = found.group(0).split("-(")[0].split(">")[0].strip()
+        return text[:len(text) - len(found.group(0))] + "\n" + found.group(0)
 
     def _stop_listening(self, stop: str, seen: bytearray) -> None:
         """Send ``stop`` and wait briefly for the prompt, so the board is not left listening."""
