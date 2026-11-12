@@ -512,6 +512,10 @@ class FakeBp6:
         self.usbpd_result = "accepted"
         self.usbpd_vbus_mv = 5000
         self.usbpd_requested = (5000, 0)
+        #: The Bus Pirate's own disk (``ls``, ``cat``, ``hex``, ``rm`` in every mode):
+        #: path from the root, lower case, such as ``dumps/flash.bin`` -> contents.
+        #: Directories are the paths' parents; a key ending in ``/`` is an empty one.
+        self.disk = {}  # type: Dict[str, bytes]
         #: Self-test (``~``): whether a human presses the button, whether the NAND
         #: has a file system, and extra failing lines to print (each is one error).
         self.button_pressed = True
@@ -1135,6 +1139,8 @@ class FakeBp6:
             self._finish(text, f"\x07{self.HIZ_REFUSAL}\r\n")
         elif name == "m":
             self._cmd_mode(text, args)
+        elif name in ("ls", "cat", "hex", "rm"):
+            self._cmd_disk(text, name, args)
         elif name == "W":
             self._cmd_psu_on(text, args)
         elif name == "w":
@@ -1175,6 +1181,98 @@ class FakeBp6:
             self._cmd_usbpd(text, args)
         else:
             self._finish(text, f"Invalid command: {text}. Type ? for help.\r\n")
+
+    # -- the Bus Pirate's disk (commands/global/disk.c, hex.c) ----------------
+
+    DISK_DATE = "2020-01-01 00:00"
+
+    def _disk_error(self, echo: str, reason: str) -> None:
+        """A FatFs error: coloured ``Error:``, no line ending, then the prompt."""
+        self._say(f"{echo}\x1b[0K\r\n\x1b[38;2;191;165;48mError:\x1b[38;2;150;150;150m "
+                  f"{reason}\x1b[0m{self.mode}> \x03")
+
+    @staticmethod
+    def _disk_key(path: str) -> str:
+        return path.strip("/").lower()
+
+    def _disk_dirs(self) -> List[str]:
+        dirs = set()
+        for key in self.disk:
+            parts = key.rstrip("/").split("/")
+            for i in range(1, len(parts) + (1 if key.endswith("/") else 0)):
+                dirs.add("/".join(parts[:i]))
+        return sorted(dirs)
+
+    def _cmd_disk(self, text: str, name: str, args) -> None:
+        flags = [a for a in args if a.startswith("-")]
+        words = [a for a in args if not a.startswith("-") and not a.isdigit()]
+        if name == "ls":
+            self._cmd_ls(text, words[0] if words else "/", "-l" in flags)
+            return
+        if not words:
+            self._disk_error(text, "no file")
+            return
+        key = self._disk_key(words[0])
+        data = self.disk.get(key)
+        if name == "rm" and data is None and key in self._disk_dirs():
+            empty = not any(k.startswith(key + "/") and k != key + "/" for k in self.disk)
+            if not empty:
+                self._disk_error(text, "denied")
+                return
+            self.disk.pop(key + "/", None)
+            self._finish(text)
+            return
+        if data is None or key.endswith("/"):
+            self._disk_error(text, "no file")
+        elif name == "rm":
+            del self.disk[key]
+            self._finish(text)
+        elif name == "cat":
+            lines = data.decode("latin-1").split("\n")
+            if lines[-1] == "":
+                lines.pop()
+            self._finish(text, "".join(ln + "\r\n" for ln in lines))
+        else:
+            self._cmd_hex(text, args, data)
+
+    def _cmd_ls(self, text: str, path: str, long: bool) -> None:
+        where = self._disk_key(path)
+        if where and where not in self._disk_dirs():
+            self._finish(text)  # the firmware prints nothing and only sets the error flag
+            return
+        prefix = where + "/" if where else ""
+        dirs, files = set(), []
+        for key, data in sorted(self.disk.items()):
+            if not key.startswith(prefix) or key == prefix:
+                continue
+            rest = key[len(prefix):]
+            if "/" in rest:
+                dirs.add(rest.split("/", 1)[0])
+            else:
+                files.append((rest, len(data)))
+        if long:
+            body = "".join("       -  %s  %s/\r\n" % (self.DISK_DATE, d) for d in sorted(dirs))
+            body += "".join("%8u  %s  %s\r\n" % (size, self.DISK_DATE, f) for f, size in files)
+        else:
+            body = "".join("%s/\r\n" % d for d in sorted(dirs))
+            body += "".join("%s\r\n" % f for f, _ in files)
+        body += "%d dirs, %d files\r\n" % (len(dirs), len(files))
+        self._finish(text, body)
+
+    def _cmd_hex(self, text: str, args, data: bytes) -> None:
+        def flag(name: str, default: int) -> int:
+            if name in args and args.index(name) + 1 < len(args):
+                return int(args[args.index(name) + 1], 0)
+            return default
+        start = flag("-s", 0)
+        chunk = data[start:start + flag("-b", len(data))]
+        rows = []
+        for at in range(0, len(chunk), 16):
+            row = chunk[at:at + 16]
+            hexes = "".join("%02x " % b for b in row).ljust(48)
+            text_part = "".join(chr(b) if 0x20 <= b < 0x7F else "." for b in row)
+            rows.append("%08X  %s |%s|\r\n" % (start + at, hexes, text_part))
+        self._finish(text, "".join(rows))
 
     HDUART_BUS = {"}": "RST LOW", "{": "RST HIGH", "[": "UART OPEN (ASYNC READ)",
                    "]": "UART CLOSE"}

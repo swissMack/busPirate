@@ -174,3 +174,126 @@ def test_usbpd_reset_runs(session, confirm, plank):
     _, out = _run(session, confirm, "usbpd-reset", {})
     assert out["result"]["sent"] is True, out
     assert b"usbpd reset\r" in plank.lines_received()
+
+
+# -- the Bus Pirate's disk ----------------------------------------------------
+
+DISK = {"bpconfig.bp": b'{"a":1}\n', "dumps/flash.bin": bytes(range(40))}
+DISK_RECIPES = ["disk-list", "disk-show", "disk-hex", "disk-delete"]
+
+
+@pytest.fixture
+def drive(session):
+    fake = _fake(session)
+    fake.disk = dict(DISK)
+    return fake
+
+
+def _no_power_lines(lines, mode=True):
+    """No supply or pull-up line; with ``mode``, no mode switch either."""
+    sent = [ln.split()[0] for ln in lines if ln.strip()]
+    banned = {b"W", b"w", b"P", b"p"} | ({b"m"} if mode else set())
+    assert not set(sent) & banned, sent
+
+
+@pytest.mark.parametrize("name", DISK_RECIPES)
+def test_disk_recipes_registered(name):
+    r = REGISTRY[name]
+    assert (r.bus, r.transport, r.terminal_mode, r.terminal_flags) == (
+        "board", "terminal", None, "")
+    assert (r.default_mv, r.min_mv, r.max_mv, r.milliamps) == (0, 0, 0, 0)
+    assert r.pullups is False and r.wiring == ()
+    assert r.source == "https://docs.buspirate.com/docs/command-reference/"
+    assert any("read-only" in n for n in r.notes)
+    assert r.risk == ("destructive" if name == "disk-delete" else "none")
+
+
+def test_disk_recipe_options():
+    assert REGISTRY["disk-list"].options == {"path": "/"}
+    assert REGISTRY["disk-show"].options == {"path": None, "max_chars": 16384}
+    assert REGISTRY["disk-hex"].options == {"path": None, "start": 0, "length": 256}
+    assert REGISTRY["disk-delete"].options == {"path": None}
+    assert any("disk-hex" in n for n in REGISTRY["disk-show"].notes)
+    assert any("%" in n for n in REGISTRY["disk-show"].notes)
+
+
+@pytest.mark.parametrize("query", ["disk", "files", "delete file"])
+def test_disk_recipes_found(query):
+    from buspirate.mcp_bp6.recipes import find_recipes
+    found = {r["name"] for r in find_recipes(query)}
+    want = {"disk-delete"} if query == "delete file" else set(DISK_RECIPES)
+    assert want <= found, found
+
+
+def test_disk_list_runs(session, confirm, drive):
+    plan, out = _run(session, confirm, "disk-list", {})
+    assert plan["power"] is None and plan["wiring"] == [], plan
+    assert out["result"]["dirs"] == ["dumps"], out
+    assert out["result"]["files"] == [
+        {"name": "bpconfig.bp", "size": 8, "date": "2020-01-01 00:00"}]
+    assert b"ls -l /\r" in drive.lines_received() and b"m hiz\r" in drive.lines_received()
+    _no_power_lines(drive.lines_received(), mode=False)
+
+
+def test_disk_list_missing_dir(session, confirm, drive):
+    _, out = _run(session, confirm, "disk-list", {"path": "nothere"})
+    assert out["check"]["ok"] is False and "no such directory" in out["check"]["error"], out
+
+
+def test_disk_show_and_hex_run(session, confirm, drive):
+    _, out = _run(session, confirm, "disk-show", {"path": "bpconfig.bp"})
+    assert out["result"] == {"text": '{"a":1}', "truncated": False}, out
+    _, out = _run(session, confirm, "disk-hex", {"path": "dumps/flash.bin", "start": 16,
+                                                 "length": 16})
+    assert out["result"]["data_hex"] == bytes(range(16, 32)).hex(), out
+    _no_power_lines(drive.lines_received(), mode=False)
+
+
+@pytest.mark.parametrize("name,options,word", [
+    ("disk-show", {"path": None}, "path"), ("disk-show", {"path": "a b.txt"}, "path"),
+    ("disk-show", {"path": "gone.txt"}, "no file"),
+    ("disk-show", {"path": "dumps"}, "directory"),
+    ("disk-show", {"path": "bpconfig.bp", "max_chars": 0}, "max_chars"),
+    ("disk-hex", {"path": "dumps/flash.bin", "length": 5000}, "length"),
+    ("disk-hex", {"path": "dumps/flash.bin", "start": -1}, "start"),
+    ("disk-list", {"path": "x;rm y"}, "path")])
+def test_disk_read_recipes_refuse(session, confirm, drive, name, options, word):
+    _, out = _run(session, confirm, name, options)
+    assert out["check"]["ok"] is False and word in out["check"]["error"], out
+    assert not [ln for ln in drive.lines_received()
+                if ln.split()[:1] in ([b"cat"], [b"hex"], [b"rm"])]
+
+
+def test_disk_delete(session, confirm, drive):
+    plan, out = _run(session, confirm, "disk-delete", {"path": "bpconfig.bp"})
+    assert engine.CHANGE_NOTE in plan["warnings"]
+    commit = out["commit"]
+    assert "/bpconfig.bp" in commit["summary"] and "8 bytes" in commit["summary"], out
+    assert commit["summary"].startswith("Delete /bpconfig.bp (8 bytes) from the Bus Pirate's")
+    assert (commit["chip"], commit["operation"], commit["start"], commit["length"],
+            commit["backup"]) == ("Bus Pirate disk", "delete", 0, 8, None)
+    assert "bpconfig.bp" in drive.disk
+    assert not [ln for ln in drive.lines_received() if ln.startswith(b"rm")]
+    mark = len(drive.lines_received())
+    done = engine.commit_recipe(session, confirm, commit["token"])
+    assert done["committed"] is True and done["result"]["deleted"] is True, done
+    assert "bpconfig.bp" not in drive.disk
+    assert b"rm /bpconfig.bp\r" in drive.lines_received()[mark:]
+    _no_power_lines(drive.lines_received()[mark:])
+
+
+def test_disk_delete_refused_when_file_changes(session, confirm, drive):
+    _, out = _run(session, confirm, "disk-delete", {"path": "bpconfig.bp"})
+    drive.disk["bpconfig.bp"] = b'{"a":12}\n'
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["error"].startswith("plan again"), done
+    assert "bpconfig.bp" in drive.disk
+
+
+@pytest.mark.parametrize("path,word", [("dumps", "directory"), ("gone.txt", "no file"),
+                                       ("dumps/", "path"), ("nothere/a.txt", "no such")])
+def test_disk_delete_refuses(session, confirm, drive, path, word):
+    _, out = _run(session, confirm, "disk-delete", {"path": path})
+    assert out["check"]["ok"] is False and word in out["check"]["error"], out
+    assert "commit" not in out
+    assert not [ln for ln in drive.lines_received() if ln.startswith(b"rm")]
