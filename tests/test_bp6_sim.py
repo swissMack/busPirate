@@ -364,3 +364,70 @@ def test_read_binary_refuses_an_sfi_offset(fake):
             with pytest.raises(ValueError):
                 link.read_binary(1, offset=0x8000)
             assert fake.lines_received() == lines
+
+
+def _chain(exc):
+    """``exc`` and every exception chained to it (cause or context)."""
+    seen = []
+    while exc is not None and exc not in seen:
+        seen.append(exc)
+        exc = exc.__cause__ or exc.__context__
+    return seen
+
+
+def test_pin_line_failure_chains_nothing_with_the_pin(fake):
+    fake.sim.pin = PIN
+    board, _ = _logged(fake)
+    real = fake._on_terminal
+
+    def on_terminal(keys):
+        if keys.startswith(b"0x39"):
+            fake._terminal_lines.append(bytes(keys))  # heard, never answered
+            return
+        real(keys)
+
+    fake.terminal._on_write = on_terminal
+    with board.console() as con:
+        con.timeout = 0.5
+        link = open_link(con)
+        with pytest.raises(TerminalError) as exc:
+            link.verify_pin_once(PIN)
+    err = exc.value
+    assert err.__cause__ is None and err.__context__ is None
+    for one in _chain(err):
+        for text in (str(one), repr(one)):
+            assert "9876" not in text and "0x39" not in text.lower(), text
+
+
+# -- 6C xx is never repeated for VERIFY ---------------------------------------------
+
+def test_pin_status_6c_is_an_error_not_a_repeat(fake):
+    real = fake.sim._verify
+    fake.sim._verify = lambda data: 0x6C08 if not data else real(data)
+    with make(fake).open().console() as con:
+        with open_link(con) as link:
+            link.cla = 0x00
+            with pytest.raises(TerminalError) as exc:
+                link.pin_status()
+    assert "6C08" in str(exc.value)
+    assert [a[1] for a in fake.sim.apdus].count(0x20) == 1
+
+
+# -- the ATR's specific mode (TA2) ----------------------------------------------------
+
+@pytest.mark.parametrize("atr,refused", [
+    (bytes.fromhex("3B90961000"), True),    # specific mode, TA1 96: not the 9600 baud default
+    (bytes.fromhex("3B90111000"), False),   # specific mode at the default speed
+    (bytes.fromhex("3B1096"), False),  # negotiable mode (no TA2)
+])
+def test_specific_mode_off_the_default_speed_is_refused(fake, atr, refused):
+    fake.sim.atr = atr
+    with make(fake).open().console() as con:
+        if refused:
+            with pytest.raises(TerminalError) as exc:
+                open_link(con)
+            assert "specific mode" in str(exc.value)
+            assert sent(fake)[-3:] == [b"]\r", b"}\r", b"g 1\r"]
+        else:
+            with open_link(con) as link:
+                assert link.atr["ta1"] in (0x11, 0x96)

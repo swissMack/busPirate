@@ -139,6 +139,11 @@ class SimLink:
                 raise TerminalError("the card's answer to reset is not valid: %s" % exc) from None
             if atr["convention"] != "direct":
                 raise TerminalError("the card uses the inverse convention, which HDUART cannot read")
+            if atr.get("ta2") is not None and atr.get("ta1") not in (None, 0x11):
+                raise TerminalError("the card is in specific mode at a speed other than the "
+                                    "default (TA1 = %02X, TA2 = %02X): it would answer at a "
+                                    "rate the terminal does not listen at"
+                                    % (atr["ta1"], atr["ta2"]))
             if 0 not in atr["protocols"]:
                 raise TerminalError("the card does not offer T=0 (it offers T=%s)"
                                     % ",".join(str(p) for p in atr["protocols"]))
@@ -192,15 +197,20 @@ class SimLink:
             notify = getattr(self.con, "notify", None)
             if secret and notify is not None:
                 self.con.notify = lambda direction, _data: notify(direction, REDACTED)
+            failed = None  # type: Optional[TerminalError]
             try:
                 reply = self.con.command(_line(chunk))
             except TerminalError:
-                if secret:
-                    raise TerminalError("the terminal did not answer %s" % what) from None
-                raise
+                if not secret:
+                    raise
+                # Raised below, outside this handler, so that neither its
+                # __context__ nor its __cause__ holds the error naming the PIN line.
+                failed = TerminalError("the terminal did not answer %s" % what)
             finally:
                 if secret and notify is not None:
                     self.con.notify = notify
+            if failed is not None:
+                raise failed from None
             if reply.error:
                 raise TerminalError("'%s' failed: %s"
                                     % (what, "the board refused it" if secret else reply.error))
@@ -266,6 +276,13 @@ class SimLink:
             raise ValueError("Le must be 1 to 256")
         try:
             out, sw = self._exchange(cla, ins, p1, p2, bytes(data), None if data else le, secret)
+            if ins == VERIFY:
+                # Never repeated and never chained: a VERIFY is answered by its status word.
+                if sw >> 8 == 0x6C:
+                    raise TerminalError("the card answered %s to VERIFY, which has no data to "
+                                        "repeat with another length; nothing was repeated"
+                                        % _sw_text(sw))
+                return out, sw
             if sw >> 8 == 0x6C and not data:
                 out, sw = self._exchange(cla, ins, p1, p2, b"", (sw & 0xFF) or 256)
             response = bytearray(out)
@@ -287,7 +304,8 @@ class SimLink:
 
         Handles the T=0 procedure bytes (INS, INS XOR FF, ``60``), follows
         ``61 xx`` / ``9F xx`` with GET RESPONSE and repeats once with Le = xx
-        on ``6C xx``. Raises ``ValueError``, before anything is sent, for an
+        on ``6C xx`` (VERIFY, sent only by the PIN methods, is never repeated:
+        ``6C xx`` to it is an error). Raises ``ValueError``, before anything is sent, for an
         instruction outside :data:`ALLOWED`; a card that stops answering
         raises ``TerminalError`` and closes the link.
         """

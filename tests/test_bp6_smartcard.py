@@ -208,3 +208,9 @@ def test_read_atr_refuses_an_off_baud_clock_before_reset():
     assert out["atr"] is None and "3000000" in out["error"] and out["bytes"] == ""
     assert out["clock_hz"] == 3000000
     assert "{" not in con.lines and con.lines[-3:] == ["]", "}", "g 1"]
+
+
+def test_parse_atr_reads_ta2():
+    from buspirate.devices.smartcard import parse_atr
+    assert parse_atr(bytes.fromhex("3B90961000"))["ta2"] == 0x00
+    assert parse_atr(bytes.fromhex("3B1096"))["ta2"] is None
