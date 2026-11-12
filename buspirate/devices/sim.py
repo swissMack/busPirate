@@ -259,15 +259,28 @@ def _network(b: bytes) -> Optional[Dict[str, Any]]:
     return {"mcc": mcc, "mnc": mnc, "operator": operator(mcc, mnc), "country": country(mcc)}
 
 
-# Access technology identifier (TS 31.102 §4.2.5): (byte index, bit mask, name), in report order.
-_ACT_BITS = (
-    (1, 0x80, "2G (GSM)"),
+# Access technology identifier (TS 31.102 §4.2.5). Two fields are coded as
+# three bits read together, not bit by bit:
+#   table 4.2.5.2, byte 2 b8 b4 b3: 0xx none, 100 GSM and EC-GSM-IoT,
+#     101 GSM without EC-GSM-IoT, 110 EC-GSM-IoT only, 111 GSM and EC-GSM-IoT;
+#   table 4.2.5.1, byte 1 b7 b6 b5: 0xx none, 100 WB-S1 and NB-S1,
+#     101 NB-S1 only, 110 WB-S1 only, 111 WB-S1 and NB-S1.
+_GSM = "2G (GSM)"
+_EC_GSM = "2G (EC-GSM-IoT)"
+_LTE = "4G (E-UTRAN)"
+_NB_IOT = "4G NB-IoT (E-UTRAN NB-S1)"
+_GSM_FIELD = {0b100: (_GSM, _EC_GSM), 0b101: (_GSM,), 0b110: (_EC_GSM,), 0b111: (_GSM, _EC_GSM)}
+_EUTRAN_FIELD = {0b100: (_LTE, _NB_IOT), 0b101: (_NB_IOT,), 0b110: (_LTE,), 0b111: (_LTE, _NB_IOT)}
+#: Report order: oldest technology first.
+_ACT_ORDER = (_GSM, "2G (GSM COMPACT)", _EC_GSM, "3G (UTRAN)", "3G (cdma2000 HRPD)", "3G (cdma2000 1xRTT)",
+              _LTE, _NB_IOT, "5G (NG-RAN)", "5G by satellite (NG-RAN)", "4G by satellite (E-UTRAN WB-S1)",
+              "4G by satellite (E-UTRAN NB-S1)")
+#: Bits that stand alone: (byte index, mask, name).
+_ACT_SINGLE = (
     (1, 0x40, "2G (GSM COMPACT)"),
-    (1, 0x08, "2G (EC-GSM-IoT)"),
     (0, 0x80, "3G (UTRAN)"),
     (1, 0x20, "3G (cdma2000 HRPD)"),
     (1, 0x10, "3G (cdma2000 1xRTT)"),
-    (0, 0x40, "4G (E-UTRAN)"),
     (0, 0x08, "5G (NG-RAN)"),
     (0, 0x04, "5G by satellite (NG-RAN)"),
     (0, 0x02, "4G by satellite (E-UTRAN WB-S1)"),
@@ -278,7 +291,12 @@ _ACT_BITS = (
 def _technologies(act: bytes) -> List[str]:
     if len(act) < 2:
         return []
-    return [name for index, mask, name in _ACT_BITS if act[index] & mask]
+    found = {name for index, mask, name in _ACT_SINGLE if act[index] & mask}
+    gsm = (act[1] >> 7 & 1) << 2 | (act[1] >> 3 & 1) << 1 | (act[1] >> 2 & 1)  # b8 b4 b3
+    eutran = act[0] >> 4 & 0x07  # b7 b6 b5
+    found.update(_GSM_FIELD.get(gsm, ()))
+    found.update(_EUTRAN_FIELD.get(eutran, ()))
+    return [name for name in _ACT_ORDER if name in found]
 
 
 def decode_plmn_list(b: bytes, with_act: bool) -> List[Dict[str, Any]]:
@@ -363,7 +381,7 @@ UST_SERVICES = {
     137: "Pre-configured closed access groups (CAG)", 138: "Steering of roaming information (SOR-CMCI)",
     139: "5G proximity services (5G ProSe)", 140: "Disaster roaming information",
     141: "Pre-configured extended sleep (eDRX)", 142: "5G non-seamless Wi-Fi offload (NSWO)",
-    143: "Public warning settings for private 5G (SNPN)", 144: "Faster home network search via 5G",
+    143: "Public warning settings for private 5G (SNPN)", 144: "Faster home network search via 5G satellite",
 }
 
 #: GSM SIM service table (EF_SST, 6F38), TS 51.011 §10.3.7, checked against v4.15.0.
@@ -429,10 +447,18 @@ def _status(byte: int, table: Dict[int, str]) -> str:
     return table.get(byte & 0x07, "reserved")
 
 
-def _area(network: Optional[Dict[str, Any]], b: bytes) -> Optional[int]:
+NO_VALID_AREA = "no valid area"
+#: Reserved area codes: LAC 0000 and FFFE (TS 24.008 §10.5.1.3, FFFE = deleted),
+#: TAC 0000 and FFFE (TS 23.003 §19.4.2.3).
+_RESERVED_AREAS = (0x0000, 0xFFFE)
+
+
+def _area(network: Optional[Dict[str, Any]], b: bytes) -> Any:
+    """The area code as a number, or ``NO_VALID_AREA`` when there is no network or the code is reserved."""
     if network is None or len(b) < 2:
-        return None
-    return (b[0] << 8) | b[1]
+        return NO_VALID_AREA
+    code = (b[0] << 8) | b[1]
+    return NO_VALID_AREA if code in _RESERVED_AREAS else code
 
 
 def decode_loci(b: bytes) -> Dict[str, Any]:

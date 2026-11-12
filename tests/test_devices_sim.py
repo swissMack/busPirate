@@ -39,7 +39,14 @@ def test_iccid_bad_check_digit():
 def test_iccid_north_america_one_digit_calling_code():
     # 89 1 260 ... : calling code 1
     got = sim.decode_iccid(h("98 01 62 00 00 00 00 00 00 F0"))
-    assert got["country"].startswith("North America")
+    assert got["country"].startswith("North America (NANP")
+
+
+def test_iccid_shared_calling_code_names_every_country():
+    # 89 7 00 1... : +7 is Russia and Kazakhstan
+    got = sim.decode_iccid(h("98 07 10 00 00 00 00 00 00 F0"))
+    assert got["country"] == "Russia or Kazakhstan"
+    assert got["issuer_id"] == "00"
 
 
 def test_iccid_not_telecom():
@@ -130,10 +137,45 @@ def test_plmn_with_access_technology():
     data = h("22 F8 10 C0 80") + h("FF FF FF 00 00") + h("22 F8 20 08 00") + h("22 F8 30 00 80")
     got = sim.decode_plmn_list(data, with_act=True)
     assert [p["mnc"] for p in got] == ["01", "02", "03"]
-    assert got[0]["technologies"] == ["2G (GSM)", "3G (UTRAN)", "4G (E-UTRAN)"]
+    # C0: UTRAN + E-UTRAN with b6 b5 = 00, which table 4.2.5.1 reads as WB-S1 and NB-S1;
+    # 80: b8 alone, which table 4.2.5.2 reads as GSM and EC-GSM-IoT.
+    assert got[0]["technologies"] == ["2G (GSM)", "2G (EC-GSM-IoT)", "3G (UTRAN)", "4G (E-UTRAN)",
+                                      "4G NB-IoT (E-UTRAN NB-S1)"]
     assert got[1]["technologies"] == ["5G (NG-RAN)"]
-    assert got[2]["technologies"] == ["2G (GSM)"]
+    assert got[2]["technologies"] == ["2G (GSM)", "2G (EC-GSM-IoT)"]
     assert got[0]["country"] == "Switzerland"
+
+
+@pytest.mark.parametrize("byte2, expected", [
+    (0x00, []),
+    (0x08, []),                              # b4 without b8: "0xx", not selected
+    (0x04, []),                              # b3 without b8
+    (0x0C, []),                              # b4 b3 without b8
+    (0x80, ["2G (GSM)", "2G (EC-GSM-IoT)"]),  # 100: GSM and EC-GSM-IoT
+    (0x84, ["2G (GSM)"]),                     # 101: GSM without EC-GSM-IoT
+    (0x88, ["2G (EC-GSM-IoT)"]),              # 110: EC-GSM-IoT only
+    (0x8C, ["2G (GSM)", "2G (EC-GSM-IoT)"]),  # 111: GSM and EC-GSM-IoT
+    (0x40, ["2G (GSM COMPACT)"]),
+    (0x30, ["3G (cdma2000 HRPD)", "3G (cdma2000 1xRTT)"]),
+])
+def test_gsm_access_technology_field_table_4_2_5_2(byte2, expected):
+    got = sim.decode_plmn_list(h("22 F8 10 00") + bytes([byte2]), with_act=True)
+    assert got[0]["technologies"] == expected
+
+
+@pytest.mark.parametrize("byte1, expected", [
+    (0x20, []),                                                  # b6 without b7
+    (0x30, []),                                                  # b6 b5 without b7
+    (0x40, ["4G (E-UTRAN)", "4G NB-IoT (E-UTRAN NB-S1)"]),        # 100: WB-S1 and NB-S1
+    (0x50, ["4G NB-IoT (E-UTRAN NB-S1)"]),                        # 101: NB-S1 only
+    (0x60, ["4G (E-UTRAN)"]),                                     # 110: WB-S1 only
+    (0x70, ["4G (E-UTRAN)", "4G NB-IoT (E-UTRAN NB-S1)"]),        # 111: WB-S1 and NB-S1
+    (0x0F, ["5G (NG-RAN)", "5G by satellite (NG-RAN)", "4G by satellite (E-UTRAN WB-S1)",
+            "4G by satellite (E-UTRAN NB-S1)"]),
+])
+def test_eutran_access_technology_field_table_4_2_5_1(byte1, expected):
+    got = sim.decode_plmn_list(h("22 F8 10") + bytes([byte1, 0x00]), with_act=True)
+    assert got[0]["technologies"] == expected
 
 
 def test_plmn_unknown_operator_is_none():
@@ -150,9 +192,10 @@ def test_ust_service_1_is_local_phone_book():
     assert len(got) == 16
 
 
-def test_ust_names_cover_1_to_120():
-    for n in range(1, 121):
+def test_ust_names_cover_1_to_144():
+    for n in range(1, 145):
         assert sim.UST_SERVICES[n]
+    assert "satellite" in sim.UST_SERVICES[144]
     got = sim.decode_service_table(h("00 00 00 00 00 00 00 00 00 00 10"), "ust")
     assert got[84] == {"number": 85, "name": "EPS (4G) mobility information", "enabled": True}
 
@@ -166,8 +209,8 @@ def test_sst_two_bits_per_service_allocated_and_activated():
     assert got[3]["name"] == "Short message storage"
 
 
-def test_sst_names_cover_1_to_56():
-    for n in range(1, 57):
+def test_sst_names_cover_1_to_59():
+    for n in range(1, 60):
         assert sim.SST_SERVICES[n]
 
 
@@ -189,7 +232,18 @@ def test_loci():
 def test_loci_never_registered():
     got = sim.decode_loci(h("FF FF FF FF FF FF FF FF FE FF 01"))
     assert got["network"] is None
+    assert got["area_code"] == "no valid area"
     assert got["status"] == "not updated"
+
+
+@pytest.mark.parametrize("area", ["FF FE", "00 00"])
+def test_reserved_area_codes_are_no_valid_area(area):
+    # LAC/TAC 0000 and FFFE are reserved; FFFE marks a deleted location.
+    assert sim.decode_loci(h("11 22 33 44 22 F8 10") + h(area) + h("FF 01"))["area_code"] == "no valid area"
+    psloci = h("11 22 33 44 AA BB CC 62 F2 10") + h(area) + h("07 01")
+    assert sim.decode_psloci(psloci)["area_code"] == "no valid area"
+    epsloci = h("0B F6 22 F8 10 80 01 02 11 22 33 44 22 F8 10") + h(area) + h("01")
+    assert sim.decode_epsloci(epsloci)["area_code"] == "no valid area"
 
 
 def test_psloci():
@@ -257,6 +311,26 @@ def test_tables_ship_in_the_package():
 
 
 def test_tables_are_listed_as_package_data():
+    # Parse pyproject.toml and check every file in devices/data matches a
+    # package-data pattern of a listed package, so a wheel or sdist install carries them.
+    import fnmatch
     import pathlib
-    text = (pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml").read_text()
-    assert '"buspirate.devices" = ["data/*"]' in text
+    try:
+        import tomllib  # Python 3.11+
+    except ImportError:
+        tomllib = pytest.importorskip("tomli")
+    root = pathlib.Path(__file__).resolve().parent.parent
+    config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["setuptools"]
+    assert "buspirate.devices" in config["packages"]
+    patterns = config["package-data"]["buspirate.devices"]
+    data = root / "buspirate" / "devices" / "data"
+    files = sorted(p.name for p in data.iterdir() if p.is_file())
+    assert {"mcc_mnc.csv", "calling_codes.csv", "LICENSE-Apache-2.0.txt"} <= set(files)
+    for name in files:
+        assert any(fnmatch.fnmatch("data/" + name, pattern) for pattern in patterns), name
+
+
+def test_csv_headers_name_the_generator_script():
+    for name in ("mcc_mnc.csv", "calling_codes.csv"):
+        first = pkgutil.get_data("buspirate.devices", "data/" + name).decode("utf-8").splitlines()[0]
+        assert "scripts/build_sim_tables.py" in first

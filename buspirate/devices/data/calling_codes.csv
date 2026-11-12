@@ -1,7 +1,7 @@
-# Country calling codes (ITU-T E.164) to country, for the ICCID: code to main region from libphonenumber CountryCodeToRegionCodeMap.java (https://github.com/google/libphonenumber, Apache License 2.0, Copyright The Libphonenumber Authors), region named via AOSP MccTable.java (Apache License 2.0); retrieved 2026-11-12.
+# Built by scripts/build_sim_tables.py. Country calling codes (ITU-T E.164) to country, for the ICCID: regions per code from libphonenumber CountryCodeToRegionCodeMap.java (https://raw.githubusercontent.com/google/libphonenumber/981600cc587fb87483ad294a61daa187afc64b2c/java/libphonenumber/src/com/google/i18n/phonenumbers/CountryCodeToRegionCodeMap.java, Apache License 2.0, Copyright The Libphonenumber Authors), named via AOSP MccTable.java (Apache License 2.0); retrieved 2026-11-12.
 code,country
-1,"North America (USA, Canada and the Caribbean)"
-7,Russian Federation
+1,"North America (NANP: USA, Canada and the Caribbean)"
+7,Russia or Kazakhstan
 20,Egypt
 27,South Africa
 30,Greece
@@ -10,14 +10,14 @@ code,country
 33,France
 34,Spain
 36,Hungary
-39,Italy
+39,Italy or Vatican City State
 40,Romania
 41,Switzerland
 43,Austria
-44,United Kingdom
+44,"United Kingdom, Guernsey, Isle of Man or Jersey"
 45,Denmark
 46,Sweden
-47,Norway
+47,Norway or Svalbard and Jan Mayen
 48,Poland
 49,Germany
 51,Peru
@@ -29,7 +29,7 @@ code,country
 57,Colombia
 58,Venezuela
 60,Malaysia
-61,Australia
+61,"Australia, Cocos (Keeling) Islands or Christmas Island"
 62,Indonesia
 63,Philippines
 64,New Zealand
@@ -47,7 +47,7 @@ code,country
 95,Myanmar
 98,Iran
 211,South Sudan
-212,Morocco
+212,Morocco or Western Sahara
 213,Algeria
 216,Tunisia
 218,Libya
@@ -90,7 +90,7 @@ code,country
 258,Mozambique
 260,Zambia
 261,Madagascar
-262,French Departments and Territories in the Indian Ocean
+262,Réunion or Mayotte
 263,Zimbabwe
 264,Namibia
 265,Malawi
@@ -111,7 +111,7 @@ code,country
 355,Albania
 356,Malta
 357,Cyprus
-358,Finland
+358,Finland or Åland Islands
 359,Bulgaria
 370,Lithuania
 371,Latvia
@@ -143,7 +143,7 @@ code,country
 507,Panama
 508,Saint Pierre and Miquelon
 509,Haiti
-590,Guadeloupe
+590,"Guadeloupe, Saint Barthélemy or Saint Martin"
 591,Bolivia
 592,Guyana
 593,Ecuador
@@ -151,7 +151,7 @@ code,country
 595,Paraguay
 597,Suriname
 598,Uruguay
-599,Curaçao
+599,Curaçao or Caribbean Netherlands
 670,Timor-Leste
 673,Brunei Darussalam
 674,Nauru

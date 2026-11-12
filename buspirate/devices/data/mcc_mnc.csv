@@ -1,4 +1,4 @@
-# Countries: MCC to country from Android Open Source Project MccTable.java (https://android.googlesource.com/platform/frameworks/opt/telephony/+/refs/heads/main/src/java/com/android/internal/telephony/MccTable.java, names as in ITU-T E.212, official-form suffixes dropped); operators: MCC+MNC to network operator from AOSP carrier_list.textpb (https://android.googlesource.com/platform/packages/providers/TelephonyProvider/+/refs/heads/main/assets/latest_carrier_id/carrier_list.textpb, version 134217771, entries matching on MCC+MNC alone); both Apache License 2.0, Copyright The Android Open Source Project; retrieved 2026-11-12.
+# Built by scripts/build_sim_tables.py. Countries: MCC to country from Android Open Source Project MccTable.java (https://android.googlesource.com/platform/frameworks/opt/telephony/+/307806916047d68377ff74674f95ca499243e068/src/java/com/android/internal/telephony/MccTable.java, names as in ITU-T E.212, official-form suffixes dropped); operators: MCC+MNC to network operator from AOSP carrier_list.textpb (https://android.googlesource.com/platform/packages/providers/TelephonyProvider/+/bca387f553a4493c88e24455172225fd1049c91f/assets/latest_carrier_id/carrier_list.textpb, version 134217771, entries matching on MCC+MNC alone); both Apache License 2.0, Copyright The Android Open Source Project; retrieved 2026-11-12.
 mcc,mnc,name
 202,,Greece
 204,,Netherlands
@@ -28,7 +28,7 @@ mcc,mnc,name
 246,,Lithuania
 247,,Latvia
 248,,Estonia
-250,,Russian Federation
+250,,Russia
 255,,Ukraine
 257,,Belarus
 259,,Moldova
