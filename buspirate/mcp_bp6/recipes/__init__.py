@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from ...mcp.wiring import JOBS
 
 RISKS = ("none", "destructive", "owner-only")
-BUSES = JOBS + ("led", "jtag", "board")
+BUSES = JOBS + ("led", "jtag", "board", "infrared")
 TRANSPORTS = ("bpio2", "terminal")
 SUPPLIED_BY = ("engine", "action")
 
@@ -33,7 +33,8 @@ class Recipe:
     A ``transport="terminal"`` recipe runs in the board's text terminal: its
     ``check`` and ``action`` get the ``Console`` in place of the board. The
     engine first switches to ``terminal_mode`` (the ``m`` argument; None stays
-    in HiZ), then applies the planned supply (unless ``supply_by="action"``,
+    in HiZ), adding ``terminal_flags`` (the rest of the ``m`` line, such as
+    ``-s 400``), then applies the planned supply (unless ``supply_by="action"``,
     when the firmware's own prompt sets it) and the pull-ups. ``precheck``,
     if given, runs over BPIO2 with the board before the terminal opens. A
     recipe with ``target_powered_ok`` False refuses a target that has its own
@@ -60,10 +61,14 @@ class Recipe:
     commit: Optional[Callable[[Any, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]] = None
     transport: str = "bpio2"
     terminal_mode: Optional[str] = None
+    terminal_flags: str = ""
     precheck: Optional[Callable[[Any, Dict[str, Any]], Dict[str, Any]]] = None
     supply_by: str = "engine"
     target_powered_ok: bool = True
     target_powered_error: str = ""
+    #: Given the merged options, the wiring to show in place of ``wiring`` (a recipe
+    #: whose pins depend on an option, such as which IR sensor is used).
+    wiring_for: Optional[Callable[[Dict[str, Any]], Tuple[Tuple[str, str], ...]]] = None
 
     def __post_init__(self) -> None:
         if self.bus not in BUSES:
@@ -82,8 +87,8 @@ class Recipe:
         if self.supply_by not in SUPPLIED_BY:
             raise ValueError("recipe %r: supply_by must be one of %s" % (self.name, SUPPLIED_BY))
         if self.transport != "terminal" and (self.terminal_mode or self.precheck
-                                             or self.supply_by != "engine"):
-            raise ValueError("recipe %r: terminal_mode, precheck and supply_by are for "
+                                             or self.terminal_flags or self.supply_by != "engine"):
+            raise ValueError("recipe %r: terminal_mode, terminal_flags, precheck and supply_by are for "
                              "terminal recipes" % self.name)
         if self.transport == "terminal" and self.risk == "destructive":
             raise ValueError("recipe %r: a terminal recipe may not change a chip" % self.name)
@@ -125,4 +130,4 @@ def find_recipes(query: Optional[str]) -> List[Dict[str, str]]:
 
 
 from . import i2c  # noqa: E402,F401  (registers the I2C recipes)
-from . import board, ddr, handoff, identify, jtag, led, onewire, pins, signals, spi, uart  # noqa: E402,F401  (the other buses)
+from . import board, ddr, handoff, identify, jtag, led, infrared, onewire, pins, signals, sniff, spi, uart  # noqa: E402,F401  (the other buses)

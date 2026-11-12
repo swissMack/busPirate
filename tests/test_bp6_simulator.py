@@ -129,3 +129,42 @@ def test_ctrl_c_at_the_colour_question_silences_the_terminal_like_the_real_board
     fake.terminal.write(b"\x03")
     fake.terminal.write(b"\r")
     assert fake.terminal.read(4096) == b""
+
+
+def test_sim_infrared_prompt():
+    from buspirate.bp6.console import Console
+    fake = FakeBp6()
+    con = Console(fake.terminal, lambda *a: None)
+    con.command("m infrared -p raw -r 38k_demod")
+    assert fake.terminal.written.endswith(b"-r 38k_demod\r")
+    assert fake._prompt() == "\r\nINFRARED-(RAW)> \x03" and con.mode == "INFRARED"
+    con.command("m infrared -p nec")
+    assert fake._prompt() == "\r\nINFRARED-(NEC)> \x03" and con.mode == "INFRARED"
+    assert con.command("m 2wire").mode == "2WIRE"
+    assert con.command("m ps2").mode == "PS2"
+
+
+def test_sim_stream_ignores_other_keys_and_stops_on_a_stop_key():
+    import time
+    fake = FakeBp6()
+    fake._stream("go", "BANNER\r\n", ("x",), "DONE\r\n", iter(["a\r\n", "b\r\n"]))
+    time.sleep(0.1)
+    fake.terminal.write(b"z")
+    out = fake.terminal.read(4096)
+    assert b"BANNER" in out and b"a\r\n" in out and b"b\r\n" in out and b"DONE" not in out
+    fake.terminal.write(b"x")
+    out = fake.terminal.read(4096)
+    assert out.startswith(b"DONE\r\n") and out.endswith(b"HiZ> \x03")
+    assert fake.keys_seen == [b"z", b"x"]
+
+
+def test_sim_ir_tx_echo_matches_firmware():
+    from buspirate.bp6.console import Console
+    fake = FakeBp6()
+    con = Console(fake.terminal, lambda *a: None)
+    con.command("m infrared -p nec")
+    fake.terminal.read(4096)
+    fake.terminal.write(b"> 0x0408\r")
+    out = fake.terminal.read(4096).decode()
+    assert out.replace("\x1b[0K", "").startswith("> 0x0408\r\n\r\nTX: 0x0408.16 \r\n"), repr(out)
+    assert out.endswith("INFRARED-(NEC)> \x03")

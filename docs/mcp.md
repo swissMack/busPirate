@@ -130,6 +130,16 @@ How it differs from `buspirate`:
   be multiples of 10 mV; anything else is refused when the plan is made. The
   self-test switches the board's own supply on at 3.3 V and only passes if you
   press the board's button.
+- **Sniffer and infrared recipes:** `i2c-sniff`, `2wire-sniff` and `ps2-sniff`
+  listen on the bus for `seconds` (default 5, PS/2 10, at most 60) and return
+  the transactions they saw, so trigger the target while it listens.
+  `ps2-sniff` is owner-only: the owner must confirm the keyboard is theirs, and
+  it switches the supply on at 5.0 V and 400 mA. `ir-receive` listens for
+  `seconds` (default 10) and returns up to 50 frames; `ir-send-nec`,
+  `ir-send-rc5` and `ir-send-raw` transmit one code. Results are capped at 200
+  entries and marked `truncated` when cut. Not automated: the USB sniffer
+  (it hangs the board without traffic), `gps` (use the `gps` recipe), `logic`
+  (use the `pulseview` hand-off) and `tvbgone` (it cannot be stopped).
 - **Hand-offs:** `flashrom`, `avrdude` and `pulseview` lend the board to that
   program. flashrom and avrdude switch the supply on (3.3 V by default) and
   refuse a target with its own power; PulseView gets 3.3 V at 100 mA while it

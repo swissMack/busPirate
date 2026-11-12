@@ -201,7 +201,7 @@ def test_pins_set_and_read():
 def test_bp6_notes():
     out = call(build_server(BoardSession(simulated="bp6")), "bp6_notes")
     text = out["text"]
-    assert len(text.splitlines()) < 80
+    assert len(text.splitlines()) < 100
     for word in ("5 V", "pull-up", "orange", "SHT4x", "SLE4442", "owner-only", "HiZ"):
         assert word in text
 
@@ -401,7 +401,7 @@ def test_tool_names_phase3a():
 
 def test_instructions_mention_terminal_rules():
     text = build_server(BoardSession(simulated="bp6")).instructions
-    assert len(text) < 1800
+    assert len(text) < 2000
     low = text.lower()
     assert "until" in low and "connect" in low and "lends" in low
     assert "self-test" in low and "nothing" in low
@@ -458,3 +458,23 @@ def test_mode_switch_forgets_the_pwm_pins():
     assert _state.of(session).pwm_pins == set()  # m dio switched the PWM off
     out = call(server, "pwm", {"pin": 2})
     assert "error" not in out, out
+
+
+# -- phase 3b: sniffers and infrared ----------------------------------------------------
+
+def test_recipes_list_phase3b():
+    server = build_server(BoardSession(simulated="bp6"))
+    listed = {r["name"]: r for r in call(server, "recipes")["recipes"]}
+    for name in ("i2c-sniff", "2wire-sniff", "ps2-sniff", "ir-receive", "ir-send-nec",
+                 "ir-send-rc5", "ir-send-raw"):
+        assert listed[name]["source"].startswith("https://docs.buspirate.com/")
+    assert "ir-send" not in listed
+
+
+def test_instructions_mention_listening():
+    text = server_module.INSTRUCTIONS
+    assert len(text) < 2000
+    low = text.lower()
+    assert "sniffers" in low and "ir receive" in low and "`seconds`" in low
+    assert "60" in low
+    assert "ps/2" in low and "keyboard" in low and "confirm" in low

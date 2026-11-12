@@ -53,6 +53,9 @@ PIN_LABELS = {
     "LED": ["VOUT", "SDO", "", "", "", "", "", "", "", "GND"],
     "DIO": ["VOUT"] + [""] * 8 + ["GND"],
     "JTAG": ["VOUT"] + [""] * 8 + ["GND"],
+    "2WIRE": ["VOUT", "SDA", "SCLK", "RST", "", "", "", "", "", "GND"],
+    "PS2": ["VOUT", "DAT", "CLK", "", "", "", "", "", "", "GND"],
+    "INFRARED": ["VOUT"] + [""] * 8 + ["GND"],
 }
 
 
@@ -98,6 +101,18 @@ class _Port:
 
     def close(self) -> None:
         self.is_open = False
+
+
+class _TerminalPort(_Port):
+    """The terminal port: a streaming command's chunks come out 20 ms apart."""
+
+    def __init__(self, owner) -> None:
+        super().__init__(owner._on_terminal)
+        self.owner = owner
+
+    def read(self, count: int) -> bytes:
+        self.owner._pump_stream()
+        return super().read(count)
 
 
 class _BinaryPort(_Port):
@@ -466,6 +481,23 @@ class FakeBp6:
         #: What ``bluetag`` finds per protocol, e.g. {"jtag": BLUETAG_JTAG_HIT}; empty: nothing.
         self.bluetag_hit = {}
         self._terminal_lines = []
+        #: Every key received while a command was streaming (see ``_stream``).
+        self.keys_seen = []
+        self._streaming = None
+        #: What ``sniff`` streams in I2C and 2WIRE modes, one string per chunk.
+        self.sniff_lines = []
+        #: What PS2 ``sniff`` streams, one string per chunk; and a PSU error code to print instead.
+        self.ps2_lines = []
+        self.ps2_psu_error = None
+        #: The infrared protocol (-p) the INFRARED prompt shows: RAW, NEC or RC5.
+        self.ir_protocol = "RAW"
+        #: aIR strings (no ``;``) the receiver hears one after another on ``irrx``.
+        self.ir_frames = []
+        #: What the board was told to send: ("raw", air), ("nec", value) or ("rc5", value).
+        self.ir_sent = []
+        #: Text the receiver prints at the prompt after each IR send (it hears the
+        #: board's own LED): a NEC/RC5 decode or an aIR line, straight after the ETX.
+        self.ir_heard = ""
         #: Self-test (``~``): whether a human presses the button, whether the NAND
         #: has a file system, and extra failing lines to print (each is one error).
         self.button_pressed = True
@@ -507,7 +539,7 @@ class FakeBp6:
         self._gone_from = 0.0
         self._gone_until = 0.0
         self.binary = _BinaryPort(self)
-        self.terminal = _Port(self._on_terminal)
+        self.terminal = _TerminalPort(self)
 
     @property
     def present(self) -> bool:
@@ -829,7 +861,7 @@ class FakeBp6:
     # -- the text terminal ----------------------------------------------------
 
     HIZ_REFUSAL = "Command has no effect in HiZ mode, press 'm' to choose a mode"
-    TERMINAL_MODES = ("HiZ", "DIO", "JTAG", "I2C")
+    TERMINAL_MODES = ("HiZ", "DIO", "JTAG", "I2C", "2WIRE", "PS2", "INFRARED")
 
     def lines_received(self) -> List[bytes]:
         """Every write the terminal port received, in order."""
@@ -839,7 +871,56 @@ class FakeBp6:
         self.terminal.out += text.encode()
 
     def _prompt(self) -> str:
+        if self.mode == "INFRARED":
+            return f"\r\nINFRARED-({self.ir_protocol})> \x03"
         return f"\r\n{self.mode}> \x03"
+
+    def _stream(self, text: str, banner: str, stop_keys, end_text: str, chunks,
+                inline_prompt: bool = False, drain: float = 0.0) -> None:
+        """Start a command that streams until a key in ``stop_keys`` is pressed.
+
+        Echoes ``text``, prints ``banner``, then one chunk of ``chunks`` (any
+        iterable of strings) every 20 ms. A stop key prints ``end_text`` and the
+        prompt; other keys are ignored. Every key is kept in ``keys_seen``.
+        With ``inline_prompt`` a last chunk that ends mid-line gets the prompt
+        straight after it, as the firmware prints it (a sniffer stopped
+        mid-transaction).
+        """
+        self._terminal_state = "stream"
+        self._streaming = {"stop": tuple(stop_keys), "end": end_text,
+                           "chunks": iter(chunks), "due": time.monotonic() + 0.02,
+                           "inline": inline_prompt, "last": banner,
+                           "drain_until": time.monotonic() + drain}
+        self._say(f"{text}\x1b[0K\r\n{banner}")
+
+    def _pump_stream(self) -> None:
+        s = self._streaming
+        if s is None:
+            return
+        for _ in range(50):  # a slow reader catches up, but never floods
+            if time.monotonic() < s["due"]:
+                break
+            s["due"] += 0.02
+            chunk = next(s["chunks"], None)
+            if chunk is None:
+                break
+            s["last"] = chunk
+            self._say(chunk)
+
+    def _stream_key(self, keys: bytes) -> None:
+        s = self._streaming
+        self.keys_seen.append(bytes(keys))
+        if time.monotonic() < s.get("drain_until", 0):
+            return  # the firmware discards input it drains before its ready line
+        if s.get("on_key") is not None:
+            s["on_key"](keys.decode("ascii", "replace"))
+        if any(k in keys.decode("ascii", "replace") for k in s["stop"]):
+            self._streaming = None
+            self._terminal_state = "prompt"
+            prompt = self._prompt()
+            if s["inline"] and not s["end"] and s["last"] and not s["last"].endswith("\n"):
+                prompt = prompt.lstrip("\r\n")
+            self._say(s["end"] + prompt)
 
     def _finish(self, echo: str, body: str = "") -> None:
         """Echo (with the redraw noise the real line editor adds), output, prompt."""
@@ -851,6 +932,7 @@ class FakeBp6:
 
     def _set_mode(self, name: str) -> None:
         self.mode = name
+        self.ir_protocol = "RAW"
         self.psu_enabled = False   # the HiZ setup of every mode switches these off
         self.pullups = False
         self.pwm.clear()
@@ -858,6 +940,9 @@ class FakeBp6:
     def _on_terminal(self, keys: bytes) -> None:
         self._terminal_lines.append(bytes(keys))
         if self.terminal_wedged:
+            return
+        if self._streaming is not None:
+            self._stream_key(keys)
             return
         if keys == b"\x03" and self.color_prompt:
             # Seen on the real board (firmware built 2026-10-12): Ctrl-C stops
@@ -1021,7 +1106,11 @@ class FakeBp6:
         self._gone_from = time.monotonic() + self.reset_lag_s
         self._gone_until = self._gone_from + self.reset_seconds
 
+    #: The line editor keeps 256 characters and drops the rest without a sound.
+    MAX_LINE = 256
+
     def _command(self, text: str) -> None:
+        text = text[:self.MAX_LINE]
         words = text.split()
         if not words:  # a stray space at the prompt: the firmware just redraws it
             self._say("\n" + self._prompt())
@@ -1050,10 +1139,100 @@ class FakeBp6:
             self._cmd_freq(text, args)
         elif name == "~":
             self._cmd_selftest(text)
+        elif name == "sniff" and self.mode in ("I2C", "2WIRE"):
+            banner = "I2C Sniffer" if self.mode == "I2C" else "2Wire Sniffer"
+            self._stream(text, banner + "\r\nPress x to exit\r\n", ("x",), "",
+                         ["".join(self.sniff_lines[i:i + 10])
+                          for i in range(0, len(self.sniff_lines), 10)], inline_prompt=True)
+        elif name == "sniff" and self.mode == "PS2":
+            self._cmd_ps2_sniff(text)
+        elif name == "irrx" and self.mode == "INFRARED":
+            self._cmd_irrx(text, args)
+        elif name == "irtx" and self.mode == "INFRARED":
+            self._cmd_irtx(text, text[len("irtx"):].strip())
+        elif text.lstrip().startswith(">") and self.mode == "INFRARED" and self.ir_protocol != "RAW":
+            self._cmd_ir_write(text)
         elif name == "bluetag" and self.mode == "JTAG":
             self._cmd_bluetag(text, args)
         else:
             self._finish(text, f"Invalid command: {text}. Type ? for help.\r\n")
+
+    IR_SENSORS = {"38b": "38kHz barrier", "38d": "36-40kHz demodulator", "56d": "56kHz demodulator"}
+
+    def _cmd_irrx(self, text: str, args) -> None:
+        sensor = args[args.index("-s") + 1].lower() if "-s" in args[:-1] else "38d"
+        name = self.IR_SENSORS.get(sensor, self.IR_SENSORS["38d"])
+        banner = ("No file specified, packets cannot be saved\r\nRX sensor: %s\r\n"
+                  "\r\nListening for IR packets (x to exit)...\r\n" % name)
+        advance = []   # a space at the menu asks for the next frame
+
+        def frames():
+            for i, air in enumerate(list(self.ir_frames)):
+                while i and not advance:
+                    yield ""
+                if advance:
+                    advance.pop()
+                pairs = (air.count(",") + 1) // 2
+                carrier = int(air[1:air.index(":")])
+                yield ("\r\n%s;\r\n\r\nModulation frequency %dkHz, %d MARK/SPACE pairs\r\n\r\n"
+                       "'r' or 't' to re-transmit, space for next, 'x' to exit > "
+                       % (air, carrier, pairs))
+
+        self._stream(text, banner, ("x",), "Exiting...\r\n", frames())
+        self._streaming["on_key"] = lambda k: advance.append(1) if k == " " else None
+
+    def _cmd_irtx(self, text: str, air: str) -> None:
+        found = re.fullmatch(r"\$(\d+):((?:\d+,)+)", air)
+        if not found:
+            problem = ("Unable to find start of data ($) in AIR packet" if not air.startswith("$")
+                       else "Unable to find modulation frequency (:) in AIR packet" if ":" not in air
+                       else "Unable to find end of MARK/SPACE data (,) in AIR packet")
+            self._finish(text, "\x07\r\nTransmitting from command line\r\n%s\r\n"
+                         "Error parsing AIR packet\r\n" % problem)
+            return
+        values = found.group(2).split(",")[:-1]
+        pairs = (len(values) + 1) // 2
+        if pairs > 127:
+            self._finish(text, "\x07\r\nTransmitting from command line\r\nToo many MARK/SPACE "
+                         "pairs in AIR packet, max 127\r\nError parsing AIR packet\r\n")
+            return
+        self.ir_sent.append(("raw", air))
+        self._finish(text, "\r\nTransmitting from command line\r\n\r\n%s;\r\n\r\n"
+                     "Parsed AIR packet: modulation frequency %dkHz, %d MARK/SPACE pairs\r\n"
+                     "Transmitting...done\r\n" % (air, int(found.group(1)), pairs))
+        self._say(self.ir_heard)
+
+    def _cmd_ir_write(self, text: str) -> None:
+        sent = []
+        for word in text.lstrip()[1:].split():
+            try:
+                value = int(word, 0)
+            except ValueError:
+                self._finish(text, "\x07\r\nError: invalid number %s\r\n" % word)
+                return
+            self.ir_sent.append((self.ir_protocol.lower(), value))
+            sent.append(value | 0x3000 if self.ir_protocol == "RC5" else value)
+        # _finish adds the CRLF after the echo: the firmware prints "\r\n\r\nTX: ...16 \r\n"
+        self._finish(text, "\r\nTX: %s\r\n" % "".join("0x%04X.16 " % v for v in sent))
+        self._say(self.ir_heard)
+
+    PS2_BANNER = ("\r\npico-ps2-sniffer started! for Bus Pirate\r\n"
+                  "https://github.com/therealdreg/pico-ps2-sniffer\r\n"
+                  "MIT License David Reguera Garcia aka Dreg\r\n"
+                  "---------------------------------------------------------------\r\n\r\n")
+
+    def _cmd_ps2_sniff(self, text: str) -> None:
+        if self.ps2_psu_error is not None:
+            self._finish(text, "\r\nPSU ERROR CODE %d\r\n" % self.ps2_psu_error)
+            return
+        self.psu_enabled, self.psu_mv, self.psu_ma = True, 5000, 400
+        self.psu_tripped = False
+        self.pullups = True
+        ready = "\r\nPress 'q' to exit\r\n\r\nSniffing...\r\n\r\n"
+        # Five empty 20 ms chunks are the 0.1 s drain before the ready line.
+        self._stream(text, "\r\nPSU 5v Enabled\r\n" + self.PS2_BANNER, ("q", "Q"),
+                     "\r\n\r\nexit...\r\n", [""] * 5 + [ready] + list(self.ps2_lines),
+                     drain=0.1)
 
     def _cmd_mode(self, text: str, args) -> None:
         match = next((m for m in self.TERMINAL_MODES if args and m.lower() == args[0].lower()), None)
@@ -1065,6 +1244,8 @@ class FakeBp6:
                       "Speed: 400kHz\r\n\r\ny/n, x to exit (Y) >", "i2c-previous")
             return
         self._set_mode(match)
+        if match == "INFRARED" and "-p" in args[:-1]:
+            self.ir_protocol = args[args.index("-p") + 1].upper()
         self._finish(text, f"\r\nMode: {match}")
 
     def _cmd_psu_on(self, text: str, args) -> None:

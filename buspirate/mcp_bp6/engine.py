@@ -101,7 +101,8 @@ def _wiring(recipe: Recipe, target_powered: bool,
             options: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
     channels = (options or {}).get("channels")
     steps = []
-    for target_pin, pin in recipe.wiring:
+    wiring = recipe.wiring_for(options or {}) if recipe.wiring_for else recipe.wiring
+    for target_pin, pin in wiring:
         # A recipe with a ``channels`` option wires IO0..IO(channels-1) only.
         if (isinstance(channels, int) and pin.startswith("IO") and pin[2:].isdigit()
                 and int(pin[2:]) >= channels):
@@ -358,7 +359,7 @@ def _run_terminal(bp: Any, session: Any, confirm: ConfirmStore, recipe: Recipe,
                 # Recorded first, so hiz cleans up even after a switch that failed.
                 state.of(session).terminal_mode = recipe.terminal_mode
                 state.of(session).pwm_pins.clear()
-                console_power.set_mode(con, want)
+                console_power.set_mode(con, want, recipe.terminal_flags)
                 if supply == SUPPLY_BP6 and recipe.supply_by == "engine":
                     power_out = _terminal_power(con, plan)
                     session.power = plan

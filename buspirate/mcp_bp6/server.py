@@ -54,6 +54,9 @@ and the plan in one message.
 - Terminal recipes switch the supply off while they change mode, then switch the \
 confirmed supply back on. Their voltages must be multiples of 10 mV.
 - A blueTag pin scan can take a minute at 8 channels; say so before you start.
+- Sniffers and IR receive listen for `seconds` (at most 60) and return what they heard, \
+so tell the owner to trigger the target now. The PS/2 sniffer needs the owner to confirm \
+the keyboard is theirs.
 """
 
 #: Each built server's session, for run_stdio and tests.
