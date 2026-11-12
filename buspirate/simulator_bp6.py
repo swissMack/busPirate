@@ -407,6 +407,397 @@ class FakeSht31:
         return self._reply[:count]
 
 
+class FakeSim:
+    """A SIM card at the T=0 level (ISO 7816-3), behind HDUART in listen mode.
+
+    It reads 5-byte headers, answers each with procedure bytes (``60`` NULLs
+    when ``null_bytes`` is set, then INS, or INS XOR FF before every byte when
+    ``one_byte_at_a_time``) and status words: ``9F xx`` (class ``A0``) or
+    ``61 xx`` (class ``00``, P2 ``04``) after SELECT, served by GET RESPONSE;
+    ``6C xx`` (class ``00``) or ``67 00`` (class ``A0``) for a wrong Le. The
+    file system is a tree of ``{fid: node}``: MF ``3F00`` with EF_ICCID
+    ``2FE2`` and DF_GSM ``7F20``; :meth:`add_file` adds more.
+
+    The PIN (CHV1): VERIFY with 8 bytes tries it; the no-data VERIFY
+    (attempts left) is answered for class ``00`` only, as a GSM card answers
+    ``67 00``; for class ``A0`` the CHV1 status is in the SELECT response of a
+    DF (byte 14 b8: disabled, byte 19: b8 initialised, low nibble attempts).
+
+    Every APDU received (header plus data) is kept in ``apdus``. With
+    ``silent_after`` set the card stops answering after that many APDUs.
+    """
+
+    ATR = bytes.fromhex("3B9F96801FC78031E073FE211B6407689A0082019035")
+    _CASE3 = (0xA4, 0x20)          # data from the terminal
+    _CASE2 = (0xB0, 0xB2, 0xC0, 0xF2)  # data to the terminal (P3 = Le)
+
+    def __init__(self, iccid: bytes = bytes.fromhex("98141032547698103254"),
+                 pin: str = "1234", pin_enabled: bool = True, attempts: int = 3) -> None:
+        self.atr = self.ATR
+        self.classes = (0xA0, 0x00)
+        self.pin = pin
+        self.pin_enabled = pin_enabled
+        self.attempts = attempts
+        self.max_attempts = 3
+        self.one_byte_at_a_time = False
+        self.null_bytes = 0
+        self.silent_after = None  # type: Optional[int]
+        self.apdus = []  # type: List[bytes]
+        self.files = {0x3F00: {"kind": "MF", "parent": None}}  # type: Dict[int, Dict[str, Any]]
+        self.add_file(0x3F00, 0x2FE2, data=iccid)
+        self.add_file(0x3F00, 0x7F20, df=True)
+        self.reset()
+
+    def add_file(self, parent: int, fid: int, data: Optional[bytes] = None,
+                 records: Optional[List[bytes]] = None, df: bool = False,
+                 chv1: bool = False, aid: Optional[bytes] = None) -> None:
+        """Add a DF, a transparent EF (``data``) or a linear fixed EF (``records``).
+
+        A DF with an ``aid`` is an application (ADF): class ``00`` selects it
+        by AID (P1 ``04``, the whole AID or its start)."""
+        if df:
+            node = {"kind": "DF", "parent": parent, "aid": aid}  # type: Dict[str, Any]
+        elif records is not None:
+            node = {"kind": "EF", "parent": parent, "records": list(records), "chv1": chv1}
+        else:
+            node = {"kind": "EF", "parent": parent, "data": bytes(data or b""), "chv1": chv1}
+        self.files[fid] = node
+
+    def reset(self) -> None:
+        """A reset (RST low): MF selected, PIN not verified, no command half-received."""
+        self.current_df = 0x3F00
+        self.current_ef = None  # type: Optional[int]
+        self.verified = False
+        self._header = bytearray()
+        self._data_left = 0
+        self._data = bytearray()
+        self._response = None  # type: Optional[bytes]
+        self._muted = False
+
+    # -- the line ----------------------------------------------------------
+
+    def receive(self, data: bytes) -> bytes:
+        """Bytes the terminal sent; return the bytes the card sends back."""
+        out = bytearray()
+        for byte in data:
+            if self._muted:
+                break
+            out += self._byte(byte)
+        return bytes(out)
+
+    def _nulls(self) -> bytes:
+        return b"\x60" * self.null_bytes
+
+    def _byte(self, byte: int) -> bytes:
+        if self._data_left:
+            self._data.append(byte)
+            self._data_left -= 1
+            self.apdus[-1] += bytes([byte])
+            if self._data_left:
+                return self._nulls() + bytes([self._ins ^ 0xFF]) if self.one_byte_at_a_time else b""
+            return self._run(bytes(self._data))
+        self._header.append(byte)
+        if len(self._header) < 5:
+            return b""
+        header, self._header = bytes(self._header), bytearray()
+        self.apdus.append(header)
+        if self.silent_after is not None and len(self.apdus) > self.silent_after:
+            self._muted = True
+            return b""
+        self._cla, self._ins, self._p1, self._p2, self._p3 = header
+        if self._cla not in self.classes:
+            return self._sw(0x6E00)
+        if self._ins in self._CASE3 and self._p3:
+            self._data_left = self._p3
+            self._data = bytearray()
+            return self._nulls() + bytes([self._ins ^ 0xFF if self.one_byte_at_a_time else self._ins])
+        return self._run(b"")
+
+    def _sw(self, sw: int) -> bytes:
+        return self._nulls() + bytes([sw >> 8, sw & 0xFF])
+
+    def _gsm(self) -> bool:
+        return self._cla == 0xA0
+
+    def _run(self, data: bytes) -> bytes:
+        ins = self._ins
+        if ins == 0xA4:
+            return self._sw(self._select(data))
+        if ins == 0x20:
+            return self._sw(self._verify(data))
+        found = self._read()
+        if isinstance(found, int):
+            return self._sw(found)
+        le = self._p3 or 256
+        if le > len(found):
+            return self._sw((0x6C00 | len(found)) if not self._gsm() else 0x6700)
+        found = found[:le]
+        if ins == 0xC0:
+            self._response = None
+        out = bytearray(self._nulls())
+        if self.one_byte_at_a_time:
+            for byte in found:
+                out += bytes([ins ^ 0xFF, byte])
+        else:
+            out += bytes([ins]) + found
+        return bytes(out) + bytes([0x90, 0x00])
+
+    # -- the commands --------------------------------------------------------
+
+    def _find(self, fid: int) -> bool:
+        if fid not in self.files:
+            return False
+        if fid == 0x3F00:
+            return True
+        here = self.current_df
+        parent = self.files[here]["parent"]
+        node_parent = self.files[fid]["parent"]
+        return node_parent == here or fid == parent or (parent is not None and node_parent == parent)
+
+    def _select(self, data: bytes) -> int:
+        if self._p1 == 0x04:
+            if self._gsm():
+                return 0x6B00
+            found = [f for f, n in self.files.items()
+                     if n.get("aid") and data and n["aid"].startswith(data)]
+            if not found:
+                return 0x6A82
+            fid = found[0]
+        elif self._p1 != 0x00:
+            return 0x6B00 if self._gsm() else 0x6A86
+        elif self._p3 != 2 or len(data) != 2:
+            return 0x6700
+        else:
+            fid = int.from_bytes(data, "big")
+        if not self._find(fid) and self._p1 != 0x04:
+            return 0x9404 if self._gsm() else 0x6A82
+        node = self.files[fid]
+        if node["kind"] == "EF":
+            self.current_ef = fid
+        else:
+            self.current_df, self.current_ef = fid, None
+        if self._gsm():
+            self._response = self._gsm_response(fid)
+            return 0x9F00 | len(self._response)
+        if self._p2 == 0x0C:
+            self._response = None
+            return 0x9000
+        self._response = self._fcp(fid)
+        return 0x6100 | len(self._response)
+
+    def _gsm_response(self, fid: int) -> bytes:
+        node = self.files[fid]
+        out = bytearray(22 if node["kind"] != "EF" else 15)
+        out[4:6] = fid.to_bytes(2, "big")
+        if node["kind"] == "EF":
+            size, structure, rec = self._shape(node)
+            out[2:4] = size.to_bytes(2, "big")
+            out[6] = 0x04
+            out[8:11] = b"\x1f\xff\x44" if node.get("chv1") else b"\x0f\xff\x44"
+            out[11] = 0x01
+            out[12] = 0x02
+            out[13] = structure
+            out[14] = rec
+            return bytes(out)
+        children = [n for n in self.files.values() if n["parent"] == fid]
+        out[2:4] = b"\x10\x00"
+        out[6] = 0x01 if node["kind"] == "MF" else 0x02
+        out[12] = 9
+        out[13] = 0x00 if self.pin_enabled else 0x80
+        out[14] = sum(1 for n in children if n["kind"] == "DF")
+        out[15] = sum(1 for n in children if n["kind"] == "EF")
+        out[16] = 4
+        out[18] = 0x80 | self.attempts
+        out[19] = 0x8A
+        out[20] = 0x83
+        out[21] = 0x8A
+        return bytes(out)
+
+    @staticmethod
+    def _shape(node: Dict[str, Any]):
+        if "records" in node:
+            rec = len(node["records"][0]) if node["records"] else 0
+            return rec * len(node["records"]), 0x01, rec
+        return len(node["data"]), 0x00, 0
+
+    def _fcp(self, fid: int) -> bytes:
+        node = self.files[fid]
+        if node["kind"] == "EF":
+            size, structure, rec = self._shape(node)
+            desc = (b"\x82\x05\x42\x21\x00" + bytes([rec, len(node["records"])])
+                    if structure else b"\x82\x02\x41\x21")
+            body = desc + b"\x83\x02" + fid.to_bytes(2, "big") + b"\x80\x02" + size.to_bytes(2, "big")
+        else:
+            body = b"\x82\x02\x78\x21\x83\x02" + fid.to_bytes(2, "big")
+        return b"\x62" + bytes([len(body)]) + body
+
+    def _read(self):
+        """The data a case-2 command returns, or its error status word."""
+        gsm = self._gsm()
+        if self._ins == 0xC0:
+            return self._response if self._response is not None else (0x6F00 if gsm else 0x6985)
+        if self._ins == 0xF2:
+            return self._gsm_response(self.current_df) if gsm else self._fcp(self.current_df)
+        if self.current_ef is None:
+            return 0x9400 if gsm else 0x6986
+        node = self.files[self.current_ef]
+        if node.get("chv1") and self.pin_enabled and not self.verified:
+            return 0x9804 if gsm else 0x6982
+        if self._ins == 0xB0:
+            if "records" in node:
+                return 0x9408 if gsm else 0x6981
+            offset = self._p1 << 8 | self._p2
+            if offset >= len(node["data"]):
+                return 0x6B00
+            return node["data"][offset:]
+        if "records" not in node:
+            return 0x9408 if gsm else 0x6981
+        if self._p2 != 0x04 or not 1 <= self._p1 <= len(node["records"]):
+            return 0x9402 if gsm else 0x6A83
+        return node["records"][self._p1 - 1]
+
+    def _verify(self, data: bytes) -> int:
+        gsm = self._gsm()
+        if self._p2 != 0x01:
+            return 0x6B00 if gsm else 0x6A86
+        if not data:
+            if gsm:
+                return 0x6700
+            if self.attempts == 0:
+                return 0x6983
+            if not self.pin_enabled or self.verified:
+                return 0x9000
+            return 0x63C0 | self.attempts
+        if len(data) != 8:
+            return 0x6700
+        if gsm and not self.pin_enabled:
+            return 0x9808
+        if self.attempts == 0:
+            return 0x9840 if gsm else 0x6983
+        if data == self.pin.encode("ascii").ljust(8, b"\xff"):
+            self.verified = True
+            self.attempts = self.max_attempts
+            return 0x9000
+        self.attempts -= 1
+        if gsm:
+            return 0x9840 if self.attempts == 0 else 0x9804
+        return 0x63C0 | self.attempts
+
+
+def _bcd_plmn(mcc: str, mnc: str) -> bytes:
+    """MCC and MNC as 3 bytes (TS 24.008): MCC2|MCC1, MNC3|MCC3, MNC2|MNC1."""
+    m = [int(c) for c in mcc]
+    n = [int(c) for c in mnc] + ([0xF] if len(mnc) == 2 else [])
+    return bytes((m[1] << 4 | m[0], n[2] << 4 | m[2], n[1] << 4 | n[0]))
+
+
+def _swapped(digits: str) -> bytes:
+    digits += "F" * (len(digits) % 2)
+    return bytes(int(digits[i + 1], 16) << 4 | int(digits[i], 16) for i in range(0, len(digits), 2))
+
+
+def _service_table(numbers, kind: str, size: int) -> bytes:
+    """EF_UST (one bit per service) or EF_SST (two bits: allocated and activated)."""
+    out = bytearray(size)
+    for n in numbers:
+        i = n - 1
+        if kind == "ust":
+            out[i // 8] |= 1 << (i % 8)
+        else:
+            out[i // 4] |= 0x03 << (2 * (i % 4))
+    return bytes(out)
+
+
+#: Access technology bytes: 2G + 3G + 4G + 5G (byte 1: UTRAN b8, E-UTRAN WB-S1 only b7..b5 = 110,
+#: NG-RAN b4; byte 2: GSM without EC-GSM-IoT, b8 b4 b3 = 101).
+_ACT_ALL = b"\xe8\x84"
+_ACT_2G_3G_4G = b"\xe0\x84"
+_ACT_NONE = b"\x00\x00"
+_EMPTY_ACT = b"\xff\xff\xff\x00\x00"
+_EMPTY_PLMN = b"\xff\xff\xff"
+#: The USIM application's AID (TS 101 220 Annex E: A000000087 1002, then country and provider).
+USIM_AID = bytes.fromhex("A0000000871002FF49FF0589")
+_ADF = 0x7FF0
+
+#: GSM SST services on the "gsm" profile (TS 51.011 §10.3.7): PIN disable, phone book,
+#: FDN, SMS storage, own number, SPN, SMS-PP download, proactive SIM, GPRS, the three
+#: "with access technology" lists, MMS.
+_SST_ON = (1, 2, 3, 4, 9, 17, 26, 29, 38, 43, 44, 45, 57)
+#: USIM UST services on the "usim" profile (TS 31.102 §4.2.8): phone book, SPN, the
+#: radio-type lists, GSM access, SMS-PP download, EHPLMN, EPS info, SMS over IP,
+#: IMS access, ePDG, NB-IoT channel list, 5G info and security, SUCI.
+_UST_ON = (1, 2, 10, 19, 20, 21, 27, 28, 33, 42, 43, 71, 85, 91, 95, 106, 107, 121, 122,
+           123, 124)
+
+
+def make_sim(profile: str = "gsm", without=()) -> "FakeSim":
+    """A FakeSim with a realistic Swisscom (MCC 228, MNC 01) subscription.
+
+    ``"gsm"``: an old GSM SIM (class ``A0`` only, no EF_DIR), PIN off.
+    ``"pin-on"``: that SIM with the PIN on, its network files needing it.
+    ``"usim"``: a USIM that refuses class ``A0`` (``6E 00``), its files in the
+    USIM application listed in EF_DIR. ``"usim-a0"``: the common real card, a
+    USIM that also answers class ``A0`` (its DF_GSM is there but empty: the
+    simulator keys files by FID alone). ``"usim-adf-refused"``: EF_DIR lists
+    a USIM but selecting it fails (``6A 82``); the files are under DF_GSM.
+    ``without``: file IDs to leave out.
+    """
+    profiles = ("gsm", "pin-on", "usim", "usim-a0", "usim-adf-refused")
+    if profile not in profiles:
+        raise ValueError("profile must be one of %s" % (profiles,))
+    usim = profile in ("usim", "usim-a0")  # the files live in the USIM application
+    iccid = _swapped("89410112345678901231")
+    card = FakeSim(iccid=iccid, pin_enabled=profile == "pin-on")
+    del card.files[0x7F20]
+    card.classes = {"usim": (0x00,), "usim-a0": (0xA0, 0x00),
+                    "usim-adf-refused": (0xA0, 0x00)}.get(profile, (0xA0,))
+    swisscom, sunrise, salt = _bcd_plmn("228", "01"), _bcd_plmn("228", "02"), _bcd_plmn("228", "03")
+    imsi = "228011234567890"
+    files = {
+        0x6F46: b"\x00" + b"Swisscom".ljust(16, b"\xff"),            # EF_SPN
+        0x6FAD: b"\x00\x00\x00\x02",                                   # EF_AD: 2-digit MNC
+        0x6F07: bytes([8]) + bytes([int(imsi[0]) << 4 | 0x9]) + _swapped(imsi[1:]),  # EF_IMSI
+        0x6F38: (_service_table(_UST_ON, "ust", 16) if usim
+                 else _service_table(_SST_ON, "sst", 15)),               # EF_UST / EF_SST
+        0x6F31: b"\x05",                                                 # EF_HPPLMN: 5 x 6 min
+        0x6F60: _EMPTY_ACT * 4,                                          # EF_PLMNwAcT
+        0x6F61: (_bcd_plmn("262", "01") + _ACT_2G_3G_4G + _bcd_plmn("208", "10") + _ACT_2G_3G_4G
+                 + _bcd_plmn("222", "47") + _ACT_NONE + _EMPTY_ACT),     # EF_OPLMNwAcT
+        0x6F62: swisscom + _ACT_ALL,                                     # EF_HPLMNwAcT
+        0x6FD9: swisscom + _EMPTY_PLMN,                                  # EF_EHPLMN
+        0x6F7B: sunrise + salt + _EMPTY_PLMN + _EMPTY_PLMN,              # EF_FPLMN
+        0x6F7E: b"\x1a\x2b\x3c\x4d" + swisscom + b"\x1f\x40\xff\x00",       # EF_LOCI
+        0x6F73: b"\x5e\x6f\x70\x81" + b"\x11\x22\x33" + swisscom + b"\x1f\x40\x07\x00",  # EF_PSLOCI
+        0x6FE3: b"\x0b\xf6" + swisscom + b"\x80\x01\x01\xc2\x3a\x4b\x5c" + swisscom
+                + b"\x30\x39\x00",                                        # EF_EPSLOCI
+        0x6F78: b"\x00\x08",                                             # EF_ACC: class 3
+        # Present so a test can prove the report never selects them.
+        0x6F3A: b"\xff" * 28,                                            # EF_ADN
+        0x6F40: b"\xff" * 28,                                            # EF_MSISDN
+    }
+    no_pin = (0x6F46, 0x6FAD)
+    if profile.startswith("usim") and 0x2F00 not in without:
+        card.add_file(0x3F00, 0x2F00, records=[
+            bytes.fromhex("61144F0C") + USIM_AID + bytes.fromhex("5004") + b"USIM"
+            + b"\xff" * 10])
+    if profile != "usim":
+        card.add_file(0x3F00, 0x7F20, df=True)
+    if usim:
+        card.add_file(0x3F00, _ADF, df=True, aid=USIM_AID)
+        home = _ADF
+    else:
+        home = 0x7F20
+    if 0x2F05 not in without:
+        # EF_PL (UICC) / EF_ELP (GSM): ISO 639 language codes, German then English.
+        card.add_file(0x3F00, 0x2F05, data=b"deen\xff\xff")
+    for fid, data in files.items():
+        if fid not in without:
+            card.add_file(home, fid, data=data, chv1=fid not in no_pin)
+    if 0x6F3C not in without:
+        card.add_file(home, 0x6F3C, records=[b"\x00" + b"\xff" * 175])  # EF_SMS
+    return card
+
+
 class FakeBp6:
     TERMINAL = "/dev/cu.usbmodem6buspirate1"
     BINARY = "/dev/cu.usbmodem6buspirate3"
@@ -502,6 +893,10 @@ class FakeBp6:
         #: The smart card's answer to reset, printed after ``{`` while ``[`` printing is on.
         self.card_atr = b""
         self._hduart_printing = False
+        #: A simulated SIM behind HDUART: answers T=0 commands written while the
+        #: mode is in listen mode (``-l listen``) and the clock runs on IO1.
+        self.sim = None  # type: Optional[FakeSim]
+        self.hduart_listen = False
         #: The USB-PD plank (``usbpd`` in I2C mode). Each offer is a dict: ``type``
         #: Fixed/PPS/AVS, ``mv`` (the voltage, or the top of a PPS/AVS range), ``ma``,
         #: optional ``domain`` (SPR) and, for PPS/AVS, ``min`` (the firmware's
@@ -1181,6 +1576,8 @@ class FakeBp6:
             self._cmd_ir_write(text)
         elif name in ("}", "{", "[", "]") and self.mode == "HDUART":
             self._cmd_hduart_bus(text, name)
+        elif self.mode == "HDUART" and all(self._HDUART_BYTE.fullmatch(w) for w in words):
+            self._cmd_hduart_write(text, words)
         elif name == "bluetag" and self.mode == "JTAG":
             self._cmd_bluetag(text, args)
         elif name == "usbpd" and self.mode == "I2C":
@@ -1288,9 +1685,35 @@ class FakeBp6:
             self._hduart_printing = True
         elif name == "]":
             self._hduart_printing = False
+        if self.sim is not None and name in ("}", "{"):
+            self.sim.reset()
         self._finish(text, self.HDUART_BUS[name] + "\r\n")
+        atr = self.card_atr
+        if not atr and self._sim_live():
+            atr = self.sim.atr
         if name == "{" and self._hduart_printing:
-            self._say("".join("0x%02x " % b for b in self.card_atr))
+            self._say("".join("0x%02x " % b for b in atr))
+
+    _HDUART_BYTE = re.compile(r"0x[0-9a-fA-F]{1,2}|[0-9]{1,3}")
+
+    def _sim_live(self) -> bool:
+        """The SIM answers only when it is in, clocked on IO1 and the line is released."""
+        return self.sim is not None and self.hduart_listen and 1 in self.pwm
+
+    def _cmd_hduart_write(self, text: str, words) -> None:
+        """Bus-syntax writes: echoed as ``TX:`` rows (8 values a row, upper-case
+        hex as typed), then the prompt; the card's answer prints after it."""
+        values = [int(w, 0) if w.lower().startswith("0x") else int(w) for w in words]
+        if any(v > 255 for v in values):
+            self._finish(text, "Syntax compile error\r\n")
+            return
+        shown = ["0x%02X" % v if w.lower().startswith("0x") else "%d" % v
+                 for w, v in zip(words, values)]
+        rows = [" ".join(shown[i:i + 8]) + " " for i in range(0, len(shown), 8)]
+        self._finish(text, "\r\nTX: " + "\r\n    ".join(rows))
+        answer = self.sim.receive(bytes(values)) if self._sim_live() else b""
+        if self._hduart_printing:
+            self._say("".join("0x%02x " % b for b in answer))
 
     USBPD_RESULTS = {"accepted": 0x01, "rejected": 0x02, "failed": 0x03, "pending": 0x00}
 
@@ -1465,6 +1888,7 @@ class FakeBp6:
                       "Speed: 400kHz\r\n\r\ny/n, x to exit (Y) >", "i2c-previous")
             return
         self._set_mode(match)
+        self.hduart_listen = match == "HDUART" and "listen" in [a.lower() for a in args]
         if match == "INFRARED" and "-p" in args[:-1]:
             self.ir_protocol = args[args.index("-p") + 1].upper()
         self._finish(text, f"\r\nMode: {match}")

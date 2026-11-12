@@ -46,6 +46,11 @@ range is refused.
 - DDR4/DDR5 SPD: read only.
 - SLE4442: read only; a passcode attempt needs its own yes, shows the attempts left,
   and is never retried automatically.
+- SIM cards (`sim-report`): read only by construction. Only SELECT, READ BINARY, READ RECORD,
+  GET RESPONSE, STATUS and VERIFY are ever sent. Never read: contacts, SMS, own number, FDN,
+  SDN (`EF_ADN`, `EF_SMS`, `EF_MSISDN`, `EF_FDN`, `EF_SDN`) or call and message logs.
+- SIM PIN (`sim-report-pin`): one attempt after its own yes, never retried, refused at 1
+  attempt left; the PIN is never stored, logged or shown in a result.
 - USB-PD: requesting above 5 V needs its own yes naming the voltage.
 - PS/2 and USB keyboard sniffers: `owner-only` — confirm the device is the owner's.
 - UART glitching: its own yes; it is fault injection on the target.
@@ -77,6 +82,8 @@ range is refused.
 - `disk-delete` stops for the second yes; `recipe_commit` then deletes (`verified` true).
 - `smartcard-atr` on the owner's SIM: a 22-byte ATR, T=0, checksum ok, 4.8 mA at 3.0 V.
 - HDUART listen mode receives; the IO1 clock runs alongside IO0; RST is on IO2.
+- SIM plank: the CARD LED lights only for a card in the large socket on the back; a SIM in
+  the nano, micro or mini socket leaves it dark — the power LED shows the card is powered.
 - Once, after `m hduart` saved its settings file, the next terminal open failed
   ("terminal did not answer"); the open after it worked, and opens after a `rm` were fine.
 
@@ -115,5 +122,10 @@ Built from the datasheets and the firmware source; all fakes pass. Check on hard
 - Whether the USB-PD plank needs VOUT from the Bus Pirate or feeds it.
 - USB-PD: VBUS is read again up to 3 times, 0.5 s apart; whether that is long enough to settle.
 - A card's first bytes could be lost while `RST HIGH` prints; the owner's SIM answered in full (22).
+- T=0 timing through the terminal on a real card: the 8-byte receive FIFO while the firmware prints.
+- The USIM route (class 00, the USIM application from `EF_DIR`) on a real card.
+- Reading on after VERIFY without a re-select keeps the PIN's status on a real USIM.
+- SIM: the firmware does not check received parity; the ICCID's Luhn digit is the only check.
+- SIM: listen-mode TX drives IO0 all byte long; a card's parity-error low would briefly contend.
 
 Name the exact part for 24xx/25xx/93Cxx writes: a wrong size mis-addresses the backup and the write alike.

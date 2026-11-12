@@ -21,12 +21,12 @@ from ..mcp.confirm import ConfirmError, ConfirmStore
 from ..mcp.session import BoardGone, NotConnected
 from ..mcp.wiring import WiringStep, cable_colour
 from . import console_power, state
-from .recipes import REGISTRY, Recipe
+from .recipes import PLANKS, REGISTRY, Recipe
 
 ACTION = "recipe_run"  #: the ConfirmStore action recipe tokens are issued for
 WINDOW_S = 300.0       #: how long a token, and a re-run after a run, stays valid
 LOCKED = ("millivolts", "address")  #: options a re-run may not change
-LOCKED_DESTRUCTIVE = ("backup",)  #: more options a destructive recipe fixes at the plan
+LOCKED_DESTRUCTIVE = ("backup", "pin")  #: more options a destructive recipe fixes at the plan
 
 # How a recipe's target is powered.
 SUPPLY_BP6 = "bp6"        # our supply, from the plan
@@ -117,6 +117,15 @@ def _wiring(recipe: Recipe, target_powered: bool,
     return steps
 
 
+def _plank(recipe: Recipe) -> Optional[Dict[str, Any]]:
+    """The plank a recipe runs on: its name, setup steps, notes and docs page; else None."""
+    if recipe.plank is None:
+        return None
+    plank = PLANKS[recipe.plank]
+    return {"key": recipe.plank, "name": plank["name"], "setup": list(plank["setup"]),
+            "notes": list(plank.get("notes", ())), "source": plank["source"]}
+
+
 def _describe(recipe: Recipe) -> str:
     doc = (recipe.action.__doc__ or "").strip()
     return doc.splitlines()[0] if doc else recipe.title
@@ -204,7 +213,10 @@ def plan_recipe(session: Any, confirm: ConfirmStore, name: str,
     return {
         "recipe": recipe.name,
         "title": recipe.title,
-        "wiring": _wiring(recipe, supply == SUPPLY_TARGET, merged),
+        # A plank recipe's wiring is the plank's setup steps (strings), not per-wire steps.
+        "wiring": (list(PLANKS[recipe.plank]["setup"]) if recipe.plank
+                   else _wiring(recipe, supply == SUPPLY_TARGET, merged)),
+        "plank": _plank(recipe),
         "power": plan.to_dict() if plan else None,
         "target_powered": supply == SUPPLY_TARGET,
         "target_mv": target_mv,
@@ -278,6 +290,8 @@ def _power_error(bp: Any, session: Any, recipe: Recipe, mv: int,
 
 def _remember(session: Any, recipe: Recipe, options: Dict[str, Any], mv: int,
               supply: str) -> None:
+    if recipe.no_rerun:
+        options = {}  # it holds a secret, and a re-run is refused anyway
     session.last_recipe = {"name": recipe.name, "options": options, "mv": mv,
                            "supply": supply, "until": time.monotonic() + WINDOW_S}
 
@@ -357,6 +371,16 @@ class _TripWatch:
             self.tripped = self.tripped or (
                 "%s; the supply is off, so plan again" % reply.error)
         return reply
+
+    # The traffic log hook, forwarded so that a caller swapping it (SimLink
+    # redacting the PIN block) swaps the console's own, not a copy on the wrapper.
+    @property
+    def notify(self) -> Any:
+        return self._con.notify
+
+    @notify.setter
+    def notify(self, value: Any) -> None:
+        self._con.notify = value
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._con, name)
@@ -468,6 +492,8 @@ def _rerun(session: Any, confirm: ConfirmStore, options: Dict[str, Any]) -> Dict
         recipe = REGISTRY.get(last["name"])
         if recipe is None:
             return {"error": "plan again: recipe %r is gone" % last["name"]}
+        if recipe.no_rerun:
+            return {"error": "plan again: %s" % recipe.no_rerun}
         key = _changed_locked(recipe, last["options"], options)
         if key:
             return {"error": "plan again: a re-run cannot change %s" % key}
@@ -539,6 +565,10 @@ def commit_recipe(session: Any, confirm: ConfirmStore, token: str) -> Dict[str, 
         if sent.change:
             return _may_have_changed(recipe, {"error": GONE_AFTER_CHANGE})
         raise
+    finally:
+        last = session.last_recipe
+        if recipe.no_rerun and last is not None and last.get("name") == recipe.name:
+            session.last_recipe = None  # nothing of a secret-holding run is kept
 
 
 def _check_then_commit(dev: Any, recipe: Recipe, payload: Dict[str, Any],
@@ -581,7 +611,8 @@ def _commit_terminal(bp: Any, session: Any, recipe: Recipe, payload: Dict[str, A
     A trip or an error before that is a plain error with ``committed`` False;
     after it, the change may have happened, so the reply says so
     (``committed`` None, ``may_have_changed``, the recipe's ``change_hint``).
-    A lost port is left to ``commit_recipe``, which sees ``sent`` too.
+    Any exception after it, not only a ``BusPirateError``, is reported the
+    same way. A lost port is left to ``commit_recipe``, which sees ``sent`` too.
     """
     want = recipe.terminal_mode or "hiz"
     try:
@@ -612,3 +643,10 @@ def _commit_terminal(bp: Any, session: Any, recipe: Recipe, payload: Dict[str, A
         if sent.change:
             return _may_have_changed(recipe, {"error": str(exc)})
         return {"recipe": recipe.name, "committed": False, "error": str(exc)}
+    except Exception as exc:  # noqa: B902  (any failure once the change line went out)
+        # A decoder or programming error after the change line still leaves
+        # the change possibly made: never a plain error (server.guard would
+        # turn a ValueError into one) and never an escaped exception.
+        if sent.change:
+            return _may_have_changed(recipe, {"error": "%s: %s" % (type(exc).__name__, exc)})
+        raise

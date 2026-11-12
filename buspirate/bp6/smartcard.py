@@ -11,7 +11,7 @@ bytes print as ``0x%02x `` after the prompt (research 3c).
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from ..devices.smartcard import parse_atr
 from . import signals
@@ -22,7 +22,7 @@ CLOCK_PIN = 1
 BAUD = 9600
 NO_ANSWER = "no answer from the card: check that it is inserted and the wiring"
 #: Exactly the firmware's ``0x%02x `` format: lower-case hex, nothing glued on.
-_BYTE = re.compile(r"(?<!\S)0x([0-9a-f]{2})(?!\S)")
+BYTE_RE = re.compile(r"(?<!\S)0x([0-9a-f]{2})(?!\S)")
 
 
 def _bus(con: Any, line: str, expect: str) -> str:
@@ -35,44 +35,65 @@ def _bus(con: Any, line: str, expect: str) -> str:
     return reply.text
 
 
-def read_atr(con: Any, clock_hz: int, wait_s: float) -> Dict[str, Any]:
-    """Clock the card, pulse RST and return the bytes it answers, decoded.
+def start_clock(con: Any, clock_hz: int) -> Tuple[Dict[str, Any], Optional[str]]:
+    """Start the card clock on IO1; return it and, when ``actual_hz / 372`` is
+    more than 2 % from :data:`BAUD`, the reason reset must not be released."""
+    clock = signals.pwm_start(con, CLOCK_PIN, clock_hz, 50)
+    baud = round(clock["actual_hz"] / 372)
+    if abs(baud - BAUD) > BAUD * 0.02:
+        return clock, ("the clock on IO1 came out at %s Hz, which gives %d baud (clock / 372), "
+                       "not the %d the terminal listens at; reset was not released"
+                       % (clock["actual_hz"], baud, BAUD))
+    return clock, None
 
-    Refuses, before releasing reset, a clock whose ``actual_hz / 372`` is more
-    than 2 % from the 9600 baud the terminal listens at. Always sends ``]``
-    and ``g 1`` at the end, each even when a step (or the other) fails; the
-    first error is the one raised.
-    """
-    first = None  # type: Optional[BaseException]
-    clock = None  # type: Optional[Dict[str, Any]]
-    text = ""
-    off_baud = None  # type: Optional[str]
-    try:
-        clock = signals.pwm_start(con, CLOCK_PIN, clock_hz, 50)
-        baud = round(clock["actual_hz"] / 372)
-        if abs(baud - BAUD) > BAUD * 0.02:
-            off_baud = ("the clock on IO1 came out at %s Hz, which gives %d baud (clock / 372), "
-                        "not the %d the terminal listens at; reset was not released"
-                        % (clock["actual_hz"], baud, BAUD))
-        else:
-            _bus(con, "}", "RST LOW")
-            _bus(con, "[", "UART OPEN")
-            text = _bus(con, "{", "RST HIGH")
-            text += "\n" + con.collect(wait_s)
-    except BaseException as exc:  # noqa: B902  (re-raised below, after the cleanup)
-        first = exc
-    for line in ("]", "g %d" % CLOCK_PIN):
+
+def reset_card(con: Any, wait_s: float) -> bytes:
+    """Hold RST low, switch the async print on, release RST and return the
+    bytes the card answered within ``wait_s`` (its ATR). Leaves the print on."""
+    _bus(con, "}", "RST LOW")
+    _bus(con, "[", "UART OPEN")
+    text = _bus(con, "{", "RST HIGH")
+    text += "\n" + con.collect(wait_s)
+    return bytes(int(h, 16) for h in BYTE_RE.findall(text))
+
+
+def stop(con: Any, first: Optional[BaseException] = None) -> Optional[BaseException]:
+    """Send ``]`` (print off), ``}`` (RST low) and ``g 1`` (clock off), each
+    even when another fails; return ``first`` or else the first error they
+    raised. RST goes low before the clock stops (ISO 7816-3 deactivation)."""
+    for line in ("]", "}", "g %d" % CLOCK_PIN):
         try:
             con.command(line)
         except Exception as exc:
             if first is None:
                 first = exc
+    return first
+
+
+def read_atr(con: Any, clock_hz: int, wait_s: float) -> Dict[str, Any]:
+    """Clock the card, pulse RST and return the bytes it answers, decoded.
+
+    Refuses, before releasing reset, a clock whose ``actual_hz / 372`` is more
+    than 2 % from the 9600 baud the terminal listens at. Always sends ``]``,
+    ``}`` and ``g 1`` at the end, each even when a step (or another) fails; the
+    first error is the one raised.
+    """
+    first = None  # type: Optional[BaseException]
+    clock = None  # type: Optional[Dict[str, Any]]
+    data = b""
+    off_baud = None  # type: Optional[str]
+    try:
+        clock, off_baud = start_clock(con, clock_hz)
+        if not off_baud:
+            data = reset_card(con, wait_s)
+    except BaseException as exc:  # noqa: B902  (re-raised below, after the cleanup)
+        first = exc
+    first = stop(con, first)
     if first is not None:
         raise first
     assert clock is not None
     if off_baud:
         return {"bytes": "", "atr": None, "clock_hz": clock["actual_hz"], "error": off_baud}
-    data = bytes(int(h, 16) for h in _BYTE.findall(text))
     out = {"bytes": " ".join("%02X" % b for b in data), "atr": None,
            "clock_hz": clock["actual_hz"]}  # type: Dict[str, Any]
     if not data:

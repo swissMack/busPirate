@@ -32,6 +32,7 @@ def parse_atr(data: bytes) -> Dict[str, Any]:
     complete = True
     protocols = set()  # type: set
     ta1 = None  # type: Optional[int]
+    ta2 = None  # type: Optional[int]
     historical = b""
     tck_ok = None  # type: Optional[bool]
     tck_expected = False
@@ -54,6 +55,8 @@ def parse_atr(data: bytes) -> Dict[str, Any]:
                     break
                 if bit == 1 and level == 1:
                     ta1 = data[pos]
+                if bit == 1 and level == 2:
+                    ta2 = data[pos]  # present: the card is in specific mode
                 if bit == 8:
                     td = data[pos]
                 pos += 1
@@ -85,4 +88,4 @@ def parse_atr(data: bytes) -> Dict[str, Any]:
     found = sorted(protocols)  # type: List[int]
     return {"convention": _CONVENTIONS[data[0]], "protocols": found,
             "historical": historical.hex().upper(), "historical_text": text,
-            "ta1": ta1, "tck_ok": tck_ok, "complete": complete}
+            "ta1": ta1, "ta2": ta2, "tck_ok": tck_ok, "complete": complete}

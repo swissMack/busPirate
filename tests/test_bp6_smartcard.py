@@ -103,7 +103,7 @@ def test_read_atr_on_the_simulator(fake):
     assert out["bytes"] == "3B 00", out
     assert out["atr"]["convention"] == "direct" and out["clock_hz"] == 3_571_200
     lines = [ln for ln in sent(fake)[mark:] if ln not in (b"3571200hz\r", b"50%\r")]
-    assert lines == [b"G 1\r", b"}\r", b"[\r", b"{\r", b"]\r", b"g 1\r"], lines
+    assert lines == [b"G 1\r", b"}\r", b"[\r", b"{\r", b"]\r", b"}\r", b"g 1\r"], lines
     assert fake.pwm == {}
 
 
@@ -149,7 +149,7 @@ def test_read_atr_cleans_up_on_error():
     con = _Breaks()
     with pytest.raises(TerminalError):
         smartcard.read_atr(con, 3_571_200, 0.1)
-    assert con.lines[-2:] == ["]", "g 1"]
+    assert con.lines[-3:] == ["]", "}", "g 1"]
 
 
 class _CloseBreaks(_Breaks):
@@ -167,7 +167,7 @@ def test_read_atr_cleanup_tries_both_and_keeps_first_error():
     with pytest.raises(TerminalError) as exc:
         smartcard.read_atr(con, 3_571_200, 0.1)
     assert "stopped answering" in str(exc.value)
-    assert con.lines[-2:] == ["]", "g 1"]
+    assert con.lines[-3:] == ["]", "}", "g 1"]
 
 
 class _CloseOnly(_Breaks):
@@ -188,7 +188,7 @@ def test_read_atr_cleanup_error_raised_after_both():
     con = _CloseOnly()
     with pytest.raises(TerminalError):
         smartcard.read_atr(con, 3_571_200, 0.1)
-    assert con.lines[-2:] == ["]", "g 1"]
+    assert con.lines[-3:] == ["]", "}", "g 1"]
 
 
 class _OffClock(_Breaks):
@@ -207,4 +207,10 @@ def test_read_atr_refuses_an_off_baud_clock_before_reset():
     out = smartcard.read_atr(con, 3_571_200, 0.1)
     assert out["atr"] is None and "3000000" in out["error"] and out["bytes"] == ""
     assert out["clock_hz"] == 3000000
-    assert "{" not in con.lines and con.lines[-2:] == ["]", "g 1"]
+    assert "{" not in con.lines and con.lines[-3:] == ["]", "}", "g 1"]
+
+
+def test_parse_atr_reads_ta2():
+    from buspirate.devices.smartcard import parse_atr
+    assert parse_atr(bytes.fromhex("3B90961000"))["ta2"] == 0x00
+    assert parse_atr(bytes.fromhex("3B1096"))["ta2"] is None
