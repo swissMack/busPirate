@@ -30,7 +30,10 @@ _DATE = r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2})"
 _DIR_LINE = re.compile(r"^\s*-\s+" + _DATE + r"\s+(\S+)/\s*$")
 _FILE_LINE = re.compile(r"^\s*(\d+)\s+" + _DATE + r"\s+(\S+)\s*$")
 _SUMMARY = re.compile(r"^\s*(\d+)\s+dirs?,\s*(\d+)\s+files?\s*$", re.I)
-_HEX_ROW = re.compile(r"^([0-9A-Fa-f]{8})  ((?:[0-9A-Fa-f]{2} ){1,16})")
+#: A row of ``hex -c`` (ui/ui_hex.c): ``%08X: `` then up to 16 ``%02X `` then ``|ascii|``.
+#: Rows are aligned to 16 bytes, so the first and last rows can hold bytes
+#: outside the request (the firmware only greys them, which the console strips).
+_HEX_ROW = re.compile(r"^([0-9A-Fa-f]{8}): ((?:[0-9A-Fa-f]{2} ){1,16})")
 
 
 def _whole(value: Any) -> bool:
@@ -118,12 +121,21 @@ def hexdump(con: Any, path: str, start: int = 0, length: int = 256) -> Dict[str,
     text = _run(con, "hex %s -s %d -b %d -c" % (check_path(path), start, length),
                 timeout=15.0)
     data = bytearray()
+    end = start + length
     for ln in text.split("\n"):
         m = _HEX_ROW.match(ln)
-        if m:
-            data += bytes.fromhex(m.group(2))
-    data = data[:length]
-    return {"start": start, "data_hex": bytes(data).hex(), "length": len(data)}
+        if not m:
+            continue
+        at = int(m.group(1), 16)
+        for i, byte in enumerate(bytes.fromhex(m.group(2))):
+            if start <= at + i < end and at + i == start + len(data):
+                data.append(byte)
+    out = {"start": start, "data_hex": bytes(data).hex(),
+           "length": len(data)}  # type: Dict[str, Any]
+    if len(data) < length:
+        out["note"] = ("%d of the %d bytes asked for: the file ended at byte %d"
+                       % (len(data), length, start + len(data)))
+    return out
 
 
 def delete(con: Any, path: str) -> Dict[str, Any]:

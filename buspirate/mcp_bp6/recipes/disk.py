@@ -75,7 +75,12 @@ def _show_check(con: Any, opts: Options) -> Dict[str, Any]:
     found = _find(con, opts.get("path"))
     if isinstance(found, str):
         return _bad(found)
-    return {"ok": True, "size": found[1]["size"]}
+    size = found[1]["size"]
+    if size > chars:
+        return _bad("%s is %d bytes, more than max_chars (%d): read it with disk-hex, or "
+                    "raise max_chars (up to %d)" % (found[0], size, chars, MAX_CHARS),
+                    "use disk-hex for a large or binary file")
+    return {"ok": True, "size": size}
 
 
 def _show(con: Any, opts: Options) -> Dict[str, Any]:

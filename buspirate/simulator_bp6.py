@@ -1264,15 +1264,19 @@ class FakeBp6:
             if name in args and args.index(name) + 1 < len(args):
                 return int(args[args.index(name) + 1], 0)
             return default
-        start = flag("-s", 0)
-        chunk = data[start:start + flag("-b", len(data))]
-        rows = []
-        for at in range(0, len(chunk), 16):
-            row = chunk[at:at + 16]
-            hexes = "".join("%02x " % b for b in row).ljust(48)
-            text_part = "".join(chr(b) if 0x20 <= b < 0x7F else "." for b in row)
-            rows.append("%08X  %s |%s|\r\n" % (start + at, hexes, text_part))
-        self._finish(text, "".join(rows))
+        if not data:
+            self._finish(text)
+            return
+        start = min(flag("-s", 0), len(data) - 1)
+        last = min((start + max(flag("-b", len(data)), 1) - 1) | 0xF, len(data) - 1)
+        rows = ["", "          " + " ".join("%02X" % i for i in range(16))
+                + "  0123456789ABCDEF", "-" * 57 + "-|----------------|"]
+        for at in range(start & ~0xF, last + 1, 16):
+            row = data[at:min(at + 16, last + 1)]
+            hexes = "".join("%02X " % b for b in row) + "   " * (16 - len(row))
+            ascii_part = "".join(chr(b) if 0x20 <= b < 0x7F else "." for b in row)
+            rows.append("%08X: %s|%s|" % (at, hexes, ascii_part.ljust(16)))
+        self._finish(text, "".join(r + "\r\n" for r in rows))
 
     HDUART_BUS = {"}": "RST LOW", "{": "RST HIGH", "[": "UART OPEN (ASYNC READ)",
                    "]": "UART CLOSE"}

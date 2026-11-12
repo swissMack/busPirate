@@ -94,11 +94,25 @@ def test_hexdump_refuses_bad_range(start, length):
     assert con.lines == []
 
 
+HEX_HEAD = ("\n          00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  0123456789ABCDEF\n"
+            "-" * 57 + "-|----------------|\n")
+
+
 def test_parse_hex_rows():
-    text = ("00000010  10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f  |................|\n"
-            "00000020  41 42                                             |AB|")
+    text = (HEX_HEAD
+            + "00000010: 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F |................|\n"
+            "00000020: 41 42                                           |AB              |")
     out = disk.hexdump(_Says(text), "a.bin", 16, 18)
     assert out == {"start": 16, "data_hex": bytes(range(16, 32)).hex() + "4142", "length": 18}
+
+
+def test_parse_hex_keeps_only_the_requested_range():
+    text = (HEX_HEAD
+            + "00000000: 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F |................|\n"
+            "00000010: 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F |................|")
+    out = disk.hexdump(_Says(text), "a.bin", 5, 20)
+    assert out["data_hex"] == bytes(range(5, 25)).hex() and out["length"] == 20, out
+    assert "note" not in out
 
 
 def test_show_truncates():
@@ -144,11 +158,30 @@ def test_simulator_show_hex_delete(fake):
         assert out == {"start": 16, "data_hex": bytes(range(16, 32)).hex(), "length": 16}
         tail = disk.hexdump(con, "/dumps/flash.bin", 30, 100)
         assert tail["data_hex"] == bytes(range(30, 40)).hex() and tail["length"] == 10
+        assert "file ended" in tail["note"]
+        odd = disk.hexdump(con, "dumps/flash.bin", 5, 20)
+        assert odd == {"start": 5, "data_hex": bytes(range(5, 25)).hex(), "length": 20}
+        short = disk.hexdump(con, "dumps/flash.bin", 32, 16)
+        assert short["data_hex"] == bytes(range(32, 40)).hex() and short["length"] == 8
         assert disk.delete(con, "BPCONFIG.BP") == {"deleted": True}
         with pytest.raises(TerminalError) as exc:
             disk.show(con, "bpconfig.bp")
     assert "no file" in str(exc.value)
     assert "bpconfig.bp" not in fake.disk
+
+
+def test_simulator_hex_layout(fake):
+    with make(fake).open().console() as con:
+        text = con.command("hex /dumps/flash.bin -s 5 -b 20 -c").text
+    lines = text.split("\n")  # the reply drops the leading blank line
+    assert lines[0] == ("          00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+                        "  0123456789ABCDEF")
+    assert lines[1] == "-" * 57 + "-|----------------|"
+    assert lines[2].startswith("00000000: 00 01 02") and lines[2].endswith("|")
+    assert lines[3].startswith("00000010: 10 11") and len(lines) == 4
+    with make(fake).open().console() as con:
+        last = con.command("hex /dumps/flash.bin -s 32 -b 16 -c").text.split("\n")[-1]
+    assert last == "00000020: 20 21 22 23 24 25 26 27" + " " * 25 + "| !\"#$%&'        |"
 
 
 def test_simulator_missing_file_errors_in_a_mode(fake):

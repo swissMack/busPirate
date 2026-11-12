@@ -254,6 +254,7 @@ def test_disk_show_and_hex_run(session, confirm, drive):
     ("disk-show", {"path": "gone.txt"}, "no file"),
     ("disk-show", {"path": "dumps"}, "directory"),
     ("disk-show", {"path": "bpconfig.bp", "max_chars": 0}, "max_chars"),
+    ("disk-show", {"path": "dumps/flash.bin", "max_chars": 39}, "disk-hex"),
     ("disk-hex", {"path": "dumps/flash.bin", "length": 5000}, "length"),
     ("disk-hex", {"path": "dumps/flash.bin", "start": -1}, "start"),
     ("disk-list", {"path": "x;rm y"}, "path")])
