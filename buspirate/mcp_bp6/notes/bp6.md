@@ -59,6 +59,11 @@ range is refused.
 - `gps`: the phase 1 `gps` recipe already reads and decodes NMEA over BPIO2, and the terminal command returns silently without VOUT.
 - `logic`: it only records what the BP6 itself drives, and its only text output is the first 80 samples. Use the `pulseview` hand-off.
 - `tvbgone`: it cannot be interrupted, and it switches off every TV in range.
+- Macros and scripts: any byte received aborts a run, and pauses end only on the button.
+- `bridge`: it ends only on the button.
+- `fusb302 scan`: it is interactive.
+- `format`, `edit` and `hexedit`: they are interactive.
+- UART `glitch` and `sle4442`: left out of phase 3c, their source was not reviewed.
 
 ## Unverified on a real board
 
@@ -92,5 +97,13 @@ Built from the datasheets and the firmware source; all fakes pass. Check on hard
 - A cut-off sniff transaction arrives on the same line as the prompt.
 - IR decodes printed at the prompt (§6) are handled as trailing text after the prompt.
 - If the PS/2 sniffer's ready text is late, the stop key can be swallowed; hiz then needs a replug.
+- HDUART listen mode receives the card's ATR.
+- The PWM clock on IO1 runs alongside HDUART on IO0.
+- RST on IO2 idles low after `}`.
+- Whether the USB-PD plank needs VOUT from the Bus Pirate or feeds it.
+- Each firmware disk write ejects and re-mounts the USB drive (possible hang).
+- Disk commands accept absolute paths such as `/dumps/flash.bin`.
+- The `hex` rows align to 16 bytes as in ui_hex.c.
+- USB-PD `verified` reads VBUS right after the request; it may not have settled.
 
 Name the exact part for 24xx/25xx/93Cxx writes: a wrong size mis-addresses the backup and the write alike.

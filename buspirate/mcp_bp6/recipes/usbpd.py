@@ -21,6 +21,8 @@ WORDS = ("usbpd", "usb-pd", "pd", "power delivery", "usb-c", "pps", "charger", "
          "ap33772s")
 NOTES = ("the plank's output can reach 28 V; hiz and the Bus Pirate's supply do not switch "
          "it off",)
+RESET_NOTE = ("a reset power-cycles anything on the plank: VBUS drops to 0 V, then returns "
+              "at 5 V")
 NO_SOURCE_HINT = ("check that the USB-PD plank is fitted to the Bus Pirate and that a USB-C "
                   "PD source (a PD charger) is plugged into the plank, then re-run")
 
@@ -144,4 +146,5 @@ register(Recipe(
 
 register(Recipe(
     name="usbpd-reset", title="USB-PD plank: send a PD hard reset (the source drops to 5 V)",
-    options={}, check=_check, action=_reset, **_COMMON))
+    options={}, check=_check, action=_reset,
+    **dict(_COMMON, notes=NOTES + (RESET_NOTE,))))

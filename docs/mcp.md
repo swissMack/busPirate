@@ -140,6 +140,15 @@ How it differs from `buspirate`:
   entries and marked `truncated` when cut. Not automated: the USB sniffer
   (it hangs the board without traffic), `gps` (use the `gps` recipe), `logic`
   (use the `pulseview` hand-off) and `tvbgone` (it cannot be stopped).
+- **Smart card, USB-PD and disk recipes:** `smartcard-atr` reads a smart card's
+  answer to reset (read-only). `usbpd-status` reads the USB-PD plank's offers and
+  VBUS; `usbpd-request` asks the source for one offer and `usbpd-reset` sends a
+  hard reset, which power-cycles anything on the plank (VBUS drops to 0 V, then
+  5 V). The plank's output stays at the requested voltage after `hiz`; run
+  `usbpd-reset` to bring it back to 5 V. `disk-list`, `disk-show` and `disk-hex`
+  read the Bus Pirate's own disk; `disk-delete` removes a file. `usbpd-request`
+  and `disk-delete` need two yeses: they stop and return a `commit` naming the
+  voltage or the file, and `recipe_commit` runs only after the second yes.
 - **Hand-offs:** `flashrom`, `avrdude` and `pulseview` lend the board to that
   program. flashrom and avrdude switch the supply on (3.3 V by default) and
   refuse a target with its own power; PulseView gets 3.3 V at 100 mA while it

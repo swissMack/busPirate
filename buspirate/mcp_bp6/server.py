@@ -57,6 +57,11 @@ confirmed supply back on. Their voltages must be multiples of 10 mV.
 - Sniffers and IR receive listen for `seconds` (at most 60) and return what they heard, \
 so tell the owner to trigger the target now. The PS/2 sniffer needs the owner to confirm \
 the keyboard is theirs.
+- A USB-PD request and a disk delete stop and return `commit`; read its `summary` (it \
+names the voltage or the file) and call `recipe_commit` only after a second yes.
+- The USB-PD plank's output stays at the requested voltage after `hiz`; run \
+`usbpd-reset` to bring it back to 5 V. A reset power-cycles anything on the plank: \
+VBUS drops to 0 V, then 5 V.
 """
 
 #: Each built server's session, for run_stdio and tests.
