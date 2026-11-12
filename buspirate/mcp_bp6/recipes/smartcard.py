@@ -10,7 +10,7 @@ from . import Recipe, register
 Options = Dict[str, Any]
 
 #: The baud ``terminal_flags`` fixes; ISO 7816 sets baud = clock / 372.
-BAUD = 9600
+BAUD = smartcard.BAUD
 MAX_WAIT_S = 10
 
 

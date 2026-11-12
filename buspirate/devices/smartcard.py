@@ -12,11 +12,13 @@ _CONVENTIONS = {0x3B: "direct", 0x3F: "inverse"}
 def parse_atr(data: bytes) -> Dict[str, Any]:
     """Decode an ATR: TS, T0, the interface bytes, the historical bytes and TCK.
 
-    ``protocols`` lists the T numbers the TDi bytes announce (T=0 when there
-    is no TD1); T=15 marks global interface bytes, not a protocol, and is left
-    out. A TCK is expected only when a protocol other than T=0 is announced;
-    ``tck_ok`` is None when none is expected (or it has not arrived).
-    ``complete`` is False when fewer bytes arrived than T0 and the TDi announce.
+    ``protocols`` lists the transmission protocols the TDi bytes announce (T=0
+    when there is no TD1); T=15 marks global interface bytes, not a protocol,
+    and is left out. As ISO 7816-3 says, a TCK is expected whenever any TDi
+    announces a T other than 0, T=15 included. ``tck_ok`` is True or False
+    when the TCK is checked, and None when none is expected or it is missing.
+    ``complete`` is False when fewer bytes arrived than T0 and the TDi announce
+    (a missing TCK included).
     Raises ValueError on empty data or a TS that is neither 0x3B nor 0x3F.
     """
     data = bytes(data)
@@ -32,6 +34,7 @@ def parse_atr(data: bytes) -> Dict[str, Any]:
     ta1 = None  # type: Optional[int]
     historical = b""
     tck_ok = None  # type: Optional[bool]
+    tck_expected = False
     pos = 1
     if len(data) < 2:
         complete = False
@@ -56,6 +59,8 @@ def parse_atr(data: bytes) -> Dict[str, Any]:
                 pos += 1
             if td is None or not complete:
                 break
+            if td & 0x0F:
+                tck_expected = True
             if td & 0x0F != 0x0F:
                 protocols.add(td & 0x0F)
             y = td >> 4
@@ -65,9 +70,7 @@ def parse_atr(data: bytes) -> Dict[str, Any]:
             if len(historical) < k:
                 complete = False
             pos += len(historical)
-        if not protocols:
-            protocols.add(0)
-        if complete and protocols != {0}:
+        if complete and tck_expected:
             if pos < len(data):
                 check = 0
                 for byte in data[1:pos + 1]:
