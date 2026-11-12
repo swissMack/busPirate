@@ -58,7 +58,9 @@ confirmed supply back on. Their voltages must be multiples of 10 mV.
 so tell the owner to trigger the target now. The PS/2 sniffer needs the owner to confirm \
 the keyboard is theirs.
 - A USB-PD request and a disk delete stop and return `commit`; read its `summary` (it \
-names the voltage or the file) and call `recipe_commit` only after a second yes.
+names the voltage or the file) and call `recipe_commit` only after a second yes. \
+If `recipe_commit` returns `may_have_changed`, tell the owner the change may have \
+happened and read them the `hint`.
 - The USB-PD plank's output stays at the requested voltage after `hiz`; run \
 `usbpd-reset` to bring it back to 5 V. A reset power-cycles anything on the plank: \
 VBUS drops to 0 V, then 5 V.
@@ -458,7 +460,8 @@ def build_server(session: BoardSession) -> MCPServer:
         ("recipe_commit", recipe_commit, "Make the change a recipe_run stopped at, with the "
          "`commit` token it returned. Only after the owner's second yes to that change. "
          "Switches no power and touches no pull-ups. `committed` is true only when the "
-         "read-back matches; otherwise the result names the backup."),
+         "read-back matches; otherwise the result names the backup. `committed` is null with "
+         "`may_have_changed` when the change may have happened: read the owner the `hint`."),
         ("board_status", board_status, "The Bus Pirate 6, its port, approved power and live "
          "supply readings."),
         ("connect", connect, "Open the Bus Pirate 6 (give `port` to pick one of several). "

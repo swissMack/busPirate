@@ -512,7 +512,13 @@ class FakeBp6:
         self.usbpd_result = "accepted"
         self.usbpd_vbus_mv = 5000
         self.usbpd_requested = (5000, 0)
-        #: The Bus Pirate's own disk (``ls``, ``cat``, ``hex``, ``rm`` in every mode):
+        #: How many ``usbpd status`` reads still show the old VBUS after a request.
+        self.usbpd_vbus_lag = 0
+        #: Whether a ``pending``/``unknown`` request takes effect later (at the
+        #: first status read past the lag).
+        self.usbpd_pending_lands = True
+        self._usbpd_landing = None  # type: Optional[List[int]]  # [mv, ma, reads left]
+        #: The Bus Pirate's own disk (``ls``, ``hex``, ``rm`` in every mode):
         #: path from the root, lower case, such as ``dumps/flash.bin`` -> contents.
         #: Directories are the paths' parents; a key ending in ``/`` is an empty one.
         self.disk = {}  # type: Dict[str, bytes]
@@ -1139,7 +1145,7 @@ class FakeBp6:
             self._finish(text, f"\x07{self.HIZ_REFUSAL}\r\n")
         elif name == "m":
             self._cmd_mode(text, args)
-        elif name in ("ls", "cat", "hex", "rm"):
+        elif name in ("ls", "hex", "rm"):
             self._cmd_disk(text, name, args)
         elif name == "W":
             self._cmd_psu_on(text, args)
@@ -1227,11 +1233,6 @@ class FakeBp6:
         elif name == "rm":
             del self.disk[key]
             self._finish(text)
-        elif name == "cat":
-            lines = data.decode("latin-1").split("\n")
-            if lines[-1] == "":
-                lines.pop()
-            self._finish(text, "".join(ln + "\r\n" for ln in lines))
         else:
             self._cmd_hex(text, args, data)
 
@@ -1301,6 +1302,13 @@ class FakeBp6:
         return int(numbers[-1]) if numbers else pdo["mv"]
 
     def _usbpd_measure(self) -> str:
+        if self._usbpd_landing is not None:
+            mv, ma, left = self._usbpd_landing
+            if left <= 0:
+                self.usbpd_vbus_mv, self.usbpd_requested = mv, (mv, ma)
+                self._usbpd_landing = None
+            else:
+                self._usbpd_landing[2] -= 1
         return ("VBUS voltage: %d mV\r\nVBUS current: 0 mA\r\n"
                 "Requested V : %d mV\r\nRequested I : %d mA\r\nTemperature : 30 C\r\n"
                 % ((self.usbpd_vbus_mv,) + self.usbpd_requested))
@@ -1324,6 +1332,7 @@ class FakeBp6:
             self._finish(text, body)
         elif sub == "reset":
             self.usbpd_vbus_mv, self.usbpd_requested = 5000, (5000, 0)
+            self._usbpd_landing = None
             self._finish(text, "PD hard reset sent successfully\r\n")
         elif sub == "request":
             self._cmd_usbpd_request(text, args[1:])
@@ -1358,9 +1367,16 @@ class FakeBp6:
         body += "PD request %s (PD_MSGRLT=0x%02X)\r\n" % (
             self.usbpd_result, self.USBPD_RESULTS.get(self.usbpd_result, 0xFF))
         if self.usbpd_result == "accepted":
-            self.usbpd_vbus_mv, self.usbpd_requested = mv, (mv, ma)
+            self.usbpd_requested = (mv, ma)
             body += "Negotiated voltage: %d mV\r\n" % mv
-        self._finish(text, body + self._usbpd_measure())
+            if self.usbpd_vbus_lag:
+                self._usbpd_landing = [mv, ma, self.usbpd_vbus_lag]
+            else:
+                self.usbpd_vbus_mv = mv
+        elif self.usbpd_result in ("pending", "unknown") and self.usbpd_pending_lands:
+            # Measured below, in this reply: lands at the first status read past the lag.
+            self._usbpd_landing = [mv, ma, self.usbpd_vbus_lag + 1]
+        self._finish(text, body + "\r\n" + self._usbpd_measure())
 
     IR_SENSORS = {"38b": "38kHz barrier", "38d": "36-40kHz demodulator", "56d": "56kHz demodulator"}
 

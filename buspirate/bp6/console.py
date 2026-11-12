@@ -184,15 +184,23 @@ class Console:
         self.mode = found.group(1)
         return self._reply(raw[:found.end()].replace("\x03", ""), raw[found.end():])
 
-    def _inline_reply(self, raw: str) -> Optional[Reply]:
+    def _inline_reply(self, raw: str, line: str = "") -> Optional[Reply]:
         """The reply, if ``raw`` (cleaned, ETX kept) holds a main prompt with its
         ETX on the same line as earlier output.
 
         FatFs errors print ``Error: <reason>`` with no line ending, so the
         prompt follows on that line. The text before the prompt is kept as the
         reply's last body line; text after the ETX is kept at the end.
+
+        Only a prompt after the end of the echo of ``line`` (the command just
+        sent) counts: a late prompt from an earlier command, read before the
+        echo, must not end this one with an empty reply.
         """
-        found = _INLINE_ETX_PROMPT.search(raw)
+        echo = raw.find(line) if line else 0
+        after = raw.find("\n", max(echo, 0) + (len(line) if echo >= 0 else 0))
+        if after < 0:
+            return None
+        found = _INLINE_ETX_PROMPT.search(raw, after + 1)
         if found is None:
             return None
         self.mode = found.group(1)
@@ -255,7 +263,7 @@ class Console:
                 last_data = time.monotonic()
                 done = self._ended_reply(raw)
                 if done is None:
-                    done = self._inline_reply(raw)
+                    done = self._inline_reply(raw, line)
                 if done is not None:
                     return done
             # ETX ends every prompt (research doc section 0). Output without one

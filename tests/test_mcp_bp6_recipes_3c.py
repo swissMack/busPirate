@@ -170,6 +170,70 @@ def test_usbpd_request_rejected(session, confirm, plank):
     assert done["committed"] is False and done["result"]["accepted"] is False, done
 
 
+def test_usbpd_request_refuses_above_28_v(session, confirm, plank):
+    plank.usbpd_pdos.append({"type": "AVS", "domain": "EPR", "min": ">=15000 mV",
+                             "mv": 30000, "ma": 5000})
+    _, out = _run(session, confirm, "usbpd-request", {"pdo": 4, "pd_mv": 29000})
+    assert out["check"]["ok"] is False and "28000" in out["check"]["error"], out
+    assert "commit" not in out and _requests(plank) == []
+
+
+@pytest.fixture
+def no_settle_wait(monkeypatch):
+    from buspirate.mcp_bp6.recipes import usbpd as usbpd_recipe
+    monkeypatch.setattr(usbpd_recipe, "SETTLE_S", 0.0)
+
+
+def test_usbpd_request_pending_then_accepted_on_reread(session, confirm, plank,
+                                                       no_settle_wait):
+    plank.usbpd_result = "pending"
+    _, out = _run(session, confirm, "usbpd-request", {"pdo": 2})
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is True and "may_have_changed" not in done, done
+    result = done["result"]
+    assert result["result"] == "pending" and result["verified"] is True
+    assert result["vbus_mv"] == 9000 and result["rereads"] == 1
+    assert _requests(plank) == [b"usbpd request -p 2 -i 3000\r"]
+
+
+def test_usbpd_request_settles_after_a_lag(session, confirm, plank, no_settle_wait):
+    plank.usbpd_vbus_lag = 2
+    _, out = _run(session, confirm, "usbpd-request", {"pdo": 2})
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is True and done["result"]["rereads"] == 2, done
+
+
+def test_usbpd_request_unsettled_may_have_changed(session, confirm, plank, no_settle_wait):
+    plank.usbpd_vbus_lag = 10
+    _, out = _run(session, confirm, "usbpd-request", {"pdo": 2})
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is None and done["may_have_changed"] is True, done
+    assert "usbpd-reset" in done["hint"] and "measure" in done["hint"]
+    assert done["result"]["rereads"] == 3 and done["result"]["vbus_mv"] == 5000
+    assert "9000 mV" in done["result"]["hint"]
+    assert _requests(plank) == [b"usbpd request -p 2 -i 3000\r"]
+
+
+def test_usbpd_request_pending_never_lands_may_have_changed(session, confirm, plank,
+                                                            no_settle_wait):
+    plank.usbpd_result, plank.usbpd_pending_lands = "pending", False
+    _, out = _run(session, confirm, "usbpd-request", {"pdo": 2})
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is None and done["may_have_changed"] is True, done
+
+
+def test_usbpd_request_error_after_send_may_have_changed(session, confirm, plank,
+                                                         monkeypatch):
+    def broken(text, args):
+        plank._finish(text, "Requesting PDO 2, 9000mV @ 3000mA\r\n"
+                            "Failed to read PD_MSGRLT\r\n")
+    _, out = _run(session, confirm, "usbpd-request", {"pdo": 2})
+    monkeypatch.setattr(plank, "_cmd_usbpd_request", broken)
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is None and done["may_have_changed"] is True, done
+    assert "PD_MSGRLT" in done["error"] and "usbpd-reset" in done["hint"]
+
+
 def test_usbpd_reset_runs(session, confirm, plank):
     _, out = _run(session, confirm, "usbpd-reset", {})
     assert out["result"]["sent"] is True, out
@@ -242,11 +306,19 @@ def test_disk_list_missing_dir(session, confirm, drive):
 
 def test_disk_show_and_hex_run(session, confirm, drive):
     _, out = _run(session, confirm, "disk-show", {"path": "bpconfig.bp"})
-    assert out["result"] == {"text": '{"a":1}', "truncated": False}, out
+    assert out["result"] == {"text": '{"a":1}\n', "truncated": False}, out
     _, out = _run(session, confirm, "disk-hex", {"path": "dumps/flash.bin", "start": 16,
                                                  "length": 16})
     assert out["result"]["data_hex"] == bytes(range(16, 32)).hex(), out
     _no_power_lines(drive.lines_received(), mode=False)
+
+
+def test_disk_show_reads_hex_so_a_percent_is_safe(session, confirm, drive):
+    drive.disk["fmt.txt"] = b"%s%n%x\n"
+    _, out = _run(session, confirm, "disk-show", {"path": "fmt.txt"})
+    assert out["result"] == {"text": "%s%n%x\n", "truncated": False}, out
+    assert not [ln for ln in drive.lines_received() if ln.startswith(b"cat")]
+    assert any("hex" in n and "safe" in n for n in REGISTRY["disk-show"].notes)
 
 
 @pytest.mark.parametrize("name,options,word", [
@@ -298,3 +370,71 @@ def test_disk_delete_refuses(session, confirm, drive, path, word):
     assert out["check"]["ok"] is False and word in out["check"]["error"], out
     assert "commit" not in out
     assert not [ln for ln in drive.lines_received() if ln.startswith(b"rm")]
+
+
+TRIP = "\x07\r\nError: Current over limit, power supply disabled\r\n"
+
+
+def test_disk_delete_trip_after_rm_may_have_changed(session, confirm, drive, monkeypatch):
+    _, out = _run(session, confirm, "disk-delete", {"path": "bpconfig.bp"})
+    real = drive._cmd_disk
+
+    def tripping(text, name, args):
+        real(text, name, args)
+        if name == "rm":
+            drive._say(TRIP)  # the board reports the trip on its own, after the prompt
+    monkeypatch.setattr(drive, "_cmd_disk", tripping)
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is None and done["may_have_changed"] is True, done
+    assert "disk-list" in done["hint"] and "power supply disabled" in done["error"]
+    assert "bpconfig.bp" not in drive.disk
+    assert session.power is None and session.last_recipe is None
+
+
+def test_disk_delete_error_before_rm_is_not_committed(session, confirm, drive, monkeypatch):
+    from buspirate.bp6.console import TerminalError
+    from buspirate.mcp_bp6.recipes import disk as disk_recipe
+
+    def refuse(con, path):
+        raise TerminalError("the terminal did not answer")
+    _, out = _run(session, confirm, "disk-delete", {"path": "bpconfig.bp"})
+    monkeypatch.setattr(disk_recipe.disk, "delete", refuse)
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is False and "may_have_changed" not in done, done
+    assert "did not answer" in done["error"]
+    assert "bpconfig.bp" in drive.disk
+    assert not [ln for ln in drive.lines_received() if ln.startswith(b"rm")]
+
+
+def test_disk_delete_port_gone_after_rm_may_have_changed(session, confirm, drive,
+                                                         monkeypatch):
+    from buspirate.exceptions import PortGoneError
+    from buspirate.mcp_bp6.recipes import disk as disk_recipe
+    real = disk_recipe.disk.delete
+
+    def gone(con, path):
+        real(con, path)
+        raise PortGoneError("the Bus Pirate 6's terminal port stopped working")
+    _, out = _run(session, confirm, "disk-delete", {"path": "bpconfig.bp"})
+    monkeypatch.setattr(disk_recipe.disk, "delete", gone)
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is None and done["may_have_changed"] is True, done
+    assert "connect" in done["error"] and "disk-list" in done["hint"]
+    assert session.board is None
+
+
+@pytest.mark.parametrize("name,options", [("usbpd-request", {"pdo": 2}),
+                                          ("disk-delete", {"path": "bpconfig.bp"})])
+def test_terminal_commit_never_touches_power(session, confirm, plank, drive, monkeypatch,
+                                             name, options):
+    from buspirate.mcp_bp6 import console_power
+    _, out = _run(session, confirm, name, options)
+    mark = len(plank.lines_received())
+
+    def banned(*args, **kwargs):
+        raise AssertionError("a commit changed the mode, the supply or the pull-ups")
+    for fn in ("set_mode", "power_on", "pullups"):
+        monkeypatch.setattr(console_power, fn, banned)
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is True, done
+    _no_power_lines(plank.lines_received()[mark:])

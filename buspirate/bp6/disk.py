@@ -1,11 +1,13 @@
 """The Bus Pirate's own disk (its NAND drive) through the terminal's global commands.
 
-``ls -l <dir>``, ``cat <file>``, ``hex <file> -s <start> -b <bytes> -c`` and
-``rm <file>`` work in every mode. The disk is FAT with short names only (8.3,
-printed lower case) and the firmware keeps a path in a 32-byte buffer, so a
-path is at most 31 characters. ``check_path`` refuses anything else before a
-line is sent, and makes every path absolute (from the disk's root), so the
-terminal's current directory never matters.
+``ls -l <dir>``, ``hex <file> -s <start> -b <bytes> -c`` and ``rm <file>``
+work in every mode. ``cat`` is never used: it prints the file through
+``printf`` as the format string, so a ``%`` in the file can crash the board.
+The disk is FAT with short names only (8.3, printed lower case) and the
+firmware keeps a path in a 32-byte buffer, so a path is at most 31 characters.
+``check_path`` refuses anything else before a line is sent, and makes every
+path absolute (from the disk's root), so the terminal's current directory
+never matters.
 
 FatFs errors print ``Error: <reason>`` with no line ending (the prompt follows
 on that line); ``Console.command`` keeps that line as the reply's error, and
@@ -101,15 +103,30 @@ def listing(con: Any, path: str = "/") -> Dict[str, Any]:
 
 
 def show(con: Any, path: str, max_chars: int = 16384) -> Dict[str, Any]:
-    """The text of a file, cut at ``max_chars``.
+    """The text of a file, cut at ``max_chars`` bytes.
 
-    ``cat`` prints each line with ``printf``, so a ``%`` in the file comes back mangled.
+    Read as hex (``hexdump``, at most ``MAX_HEX`` bytes a command), never with
+    ``cat``: the firmware's ``cat`` hands each line to ``printf`` as the
+    format, so a ``%s`` in the file can crash the board. The bytes are decoded
+    as UTF-8 (anything else becomes U+FFFD) and CRLF becomes LF.
     """
     if not _whole(max_chars) or max_chars < 1:
         raise ValueError("max_chars must be a whole number of characters from 1, not %r"
                          % (max_chars,))
-    text = _run(con, "cat %s" % check_path(path), timeout=15.0)
-    return {"text": text[:max_chars], "truncated": len(text) > max_chars}
+    where = check_path(path)
+    parent, name = where.rsplit("/", 1)
+    entry = next((f for f in listing(con, parent or "/")["files"] if f["name"] == name), None)
+    if entry is None:
+        raise TerminalError("no file named %s on the Bus Pirate's disk" % where)
+    want = min(entry["size"], max_chars)
+    data = bytearray()
+    while len(data) < want:
+        part = hexdump(con, where, len(data), min(MAX_HEX, want - len(data)))
+        if not part["length"]:
+            break  # the file shrank since the listing
+        data += bytes.fromhex(part["data_hex"])
+    text = bytes(data).decode("utf-8", "replace").replace("\r\n", "\n")
+    return {"text": text, "truncated": entry["size"] > len(data)}
 
 
 def hexdump(con: Any, path: str, start: int = 0, length: int = 256) -> Dict[str, Any]:
@@ -118,8 +135,13 @@ def hexdump(con: Any, path: str, start: int = 0, length: int = 256) -> Dict[str,
         raise ValueError("start must be a byte offset from 0, not %r" % (start,))
     if not _whole(length) or not 1 <= length <= MAX_HEX:
         raise ValueError("length must be 1 to %d bytes, not %r" % (MAX_HEX, length))
-    text = _run(con, "hex %s -s %d -b %d -c" % (check_path(path), start, length),
-                timeout=15.0)
+    line = "hex %s -s %d -b %d -c" % (check_path(path), start, length)
+    reply = con.command(line, timeout=15.0)
+    # The console reads any body line that looks like a firmware error as one;
+    # a row whose ASCII column holds such words (``is in use by``) is data.
+    if reply.error and not _HEX_ROW.match(reply.error):
+        raise TerminalError("'%s' failed: %s" % (line, reply.error))
+    text = reply.text
     data = bytearray()
     end = start + length
     for ln in text.split("\n"):

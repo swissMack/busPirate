@@ -115,11 +115,6 @@ def test_parse_hex_keeps_only_the_requested_range():
     assert "note" not in out
 
 
-def test_show_truncates():
-    out = disk.show(_Says("abcdef"), "a.txt", max_chars=4)
-    assert out == {"text": "abcd", "truncated": True}
-
-
 # -- on the simulator ---------------------------------------------------------
 
 DISK = {"bpconfig.bp": b'{"a":1}\n', "dumps/flash.bin": bytes(range(40))}
@@ -153,7 +148,7 @@ def test_simulator_listing(fake):
 
 def test_simulator_show_hex_delete(fake):
     with make(fake).open().console() as con:
-        assert disk.show(con, "bpconfig.bp") == {"text": '{"a":1}', "truncated": False}
+        assert disk.show(con, "bpconfig.bp") == {"text": '{"a":1}\n', "truncated": False}
         out = disk.hexdump(con, "dumps/flash.bin", 16, 16)
         assert out == {"start": 16, "data_hex": bytes(range(16, 32)).hex(), "length": 16}
         tail = disk.hexdump(con, "/dumps/flash.bin", 30, 100)
@@ -193,3 +188,36 @@ def test_simulator_missing_file_errors_in_a_mode(fake):
                 call()
             assert "no file" in str(exc.value)
         assert con.command("").mode == "I2C"
+
+
+def test_simulator_show_truncates(fake):
+    fake.disk["a.txt"] = b"abcdef"
+    with make(fake).open().console() as con:
+        out = disk.show(con, "a.txt", max_chars=4)
+    assert out == {"text": "abcd", "truncated": True}
+    assert b"hex /a.txt -s 0 -b 4 -c\r" in fake.lines_received()
+
+
+def test_simulator_show_reads_hex_never_cat(fake):
+    """The firmware's cat prints a file through printf as the format: a %s can crash
+    the board. show reads hex instead, so the exact text comes back."""
+    fake.disk["fmt.txt"] = b"100%s done%n\r\nline 2 \xff\n"
+    with make(fake).open().console() as con:
+        out = disk.show(con, "fmt.txt")
+    assert out == {"text": "100%s done%n\nline 2 \ufffd\n", "truncated": False}
+    assert not [ln for ln in fake.lines_received() if ln.startswith(b"cat")]
+
+
+def test_simulator_show_reads_in_4096_byte_chunks(fake):
+    fake.disk["big.txt"] = (b"0123456789" * 500)  # 5000 bytes
+    with make(fake).open().console() as con:
+        out = disk.show(con, "big.txt", max_chars=65536)
+    assert out == {"text": "0123456789" * 500, "truncated": False}
+    hexes = [ln for ln in fake.lines_received() if ln.startswith(b"hex")]
+    assert hexes == [b"hex /big.txt -s 0 -b 4096 -c\r", b"hex /big.txt -s 4096 -b 904 -c\r"]
+
+
+def test_hex_row_that_looks_like_an_error_is_data():
+    row = "00000000: 69 73 20 69 6E 20 75 73 65 20 62 79 20 21 21 21 |is in use by !!!|"
+    out = disk.hexdump(_Says(HEX_HEAD + row, row), "a.txt", 0, 16)
+    assert bytes.fromhex(out["data_hex"]) == b"is in use by !!!"

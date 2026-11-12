@@ -41,6 +41,13 @@ class Recipe:
     supply, giving ``target_powered_error`` as the reason when it is set. A
     destructive terminal recipe's ``commit`` gets the ``Console`` too, and runs
     only while the terminal is still in ``terminal_mode``.
+
+    ``change_lines`` are the starts of the terminal lines that make the change
+    (``"rm "``, ``"usbpd request"``). The engine marks the commit as sent the
+    moment one goes out; a trip or an error after that point is reported as
+    ``committed: None`` with ``may_have_changed`` and ``change_hint`` (what the
+    owner should do to find out), never as a plain "not committed". A terminal
+    commit with no ``change_lines`` counts as sent as soon as ``commit`` runs.
     """
 
     name: str
@@ -70,6 +77,8 @@ class Recipe:
     #: Given the merged options, the wiring to show in place of ``wiring`` (a recipe
     #: whose pins depend on an option, such as which IR sensor is used).
     wiring_for: Optional[Callable[[Dict[str, Any]], Tuple[Tuple[str, str], ...]]] = None
+    change_lines: Tuple[str, ...] = ()
+    change_hint: str = ""
 
     def __post_init__(self) -> None:
         if self.bus not in BUSES:

@@ -151,8 +151,8 @@ register(Recipe(
     words=WORDS + ("cat", "show file", "read file", "text", "config"),
     options={"path": None, "max_chars": 16384}, check=_show_check, action=_show,
     notes=READ_ONLY + ("use disk-hex for binary files",
-                       "the firmware prints each line with printf, so a % in the file "
-                       "comes back mangled; use disk-hex to see the exact bytes"),
+                       "it reads the file as hex (never with cat, which can crash the board "
+                       "on a %), so any file is safe; bytes that are not UTF-8 show as U+FFFD"),
     **_COMMON))
 
 register(Recipe(
@@ -165,7 +165,8 @@ register(Recipe(
     name="disk-delete", title="Bus Pirate disk: delete a file (asks for its own yes)",
     words=WORDS + ("rm", "delete", "delete file", "remove file", "erase file"),
     options={"path": None}, risk="destructive", check=_delete_check, action=_prepare,
-    commit=_commit,
+    commit=_commit, change_lines=("rm ",),
+    change_hint="the file may already be deleted: run disk-list to see whether it is gone",
     notes=READ_ONLY + ("a deleted file cannot be recovered; copy it from the Bus Pirate's "
                        "USB drive first",),
     **_COMMON))

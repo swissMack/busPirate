@@ -148,7 +148,8 @@ How it differs from `buspirate`:
   hard reset, which power-cycles anything on the plank (VBUS drops to 0 V, then
   5 V). The plank's output stays at the requested voltage after `hiz`; run
   `usbpd-reset` to bring it back to 5 V. `disk-list`, `disk-show` and `disk-hex`
-  read the Bus Pirate's own disk; `disk-delete` removes a file. `usbpd-request`
+  read the Bus Pirate's own disk (`disk-show` reads the file as hex, never with
+  `cat`, which can crash the board on a `%`); `disk-delete` removes a file. `usbpd-request`
   and `disk-delete` need two yeses: they stop and return a `commit` naming the
   voltage or the file, and `recipe_commit` runs only after the second yes.
 - **Hand-offs:** `flashrom`, `avrdude` and `pulseview` lend the board to that
@@ -162,7 +163,11 @@ How it differs from `buspirate`:
   and a token. Nothing is written yet. After your second yes the assistant calls
   `recipe_commit(token)`, which writes and reads back. A commit is only reported
   as done (`committed: true`) when the read-back matches; otherwise
-  `committed` is false and the result names the backup file. `recipe_commit`
+  `committed` is false and the result names the backup file. When a USB-PD
+  request or a disk delete was sent but cannot be confirmed (VBUS has not
+  settled after three re-reads, or the supply tripped, the terminal failed or
+  the board vanished after the change line went out), `committed` is null with
+  `may_have_changed: true` and a `hint` saying how to find out. `recipe_commit`
   never switches power or touches the pull-ups.
 - **Primitive tools:** `board_status`, `connect`, `wiring`, `hiz`, `power_off`,
   `measure_voltages`, `power_plan`, `power_apply`, `i2c_scan`, `i2c_read`,

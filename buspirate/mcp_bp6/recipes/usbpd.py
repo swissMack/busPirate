@@ -7,6 +7,7 @@ on the plank's output pins, so it needs its own yes.
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, Optional, Tuple, Union
 
 from ...bp6 import usbpd
@@ -23,6 +24,14 @@ NOTES = ("the plank's output can reach 28 V; hiz and the Bus Pirate's supply do 
          "it off",)
 RESET_NOTE = ("a reset power-cycles anything on the plank: VBUS drops to 0 V, then returns "
               "at 5 V")
+CHANGE_HINT = ("the plank's output may have changed: measure the plank's output or run "
+               "usbpd-reset before connecting anything to it")
+#: The plank (AP33772S) takes at most 28 V, whatever a source offers (EPR goes to 48 V).
+PLANK_MAX_MV = 28000
+#: After a request that has not settled, ``usbpd status`` is read again up to
+#: SETTLE_TRIES times, SETTLE_S apart, before the result is judged.
+SETTLE_S = 0.5
+SETTLE_TRIES = 3
 NO_SOURCE_HINT = ("check that the USB-PD plank is fitted to the Bus Pirate and that a USB-C "
                   "PD source (a PD charger) is plugged into the plank, then re-run")
 
@@ -74,6 +83,9 @@ def _resolve(st: Dict[str, Any], opts: Options) -> Union[str, Tuple[Dict[str, An
     elif not _whole(mv) or not pdo["min_mv"] <= mv <= pdo["max_mv"]:
         return ("pd_mv: PDO %d is a %s range, so give pd_mv in mV from %d to %d, not %r"
                 % (pdo["index"], pdo["type"], pdo["min_mv"], pdo["max_mv"], mv))
+    if mv > PLANK_MAX_MV:
+        return ("pd_mv: the USB-PD plank takes at most %d mV, not %d"
+                % (PLANK_MAX_MV, mv))
     ma = opts.get("pd_ma")
     if ma is None:
         ma = pdo["max_ma"]
@@ -115,15 +127,43 @@ def _prepare(con: Any, opts: Options) -> Dict[str, Any]:
             "_mv": mv, "_ma": ma, "_send_mv": send_mv}
 
 
+def _near(value: Optional[int], mv: int) -> bool:
+    return value is not None and abs(value - mv) <= max(500, mv // 20)
+
+
 def _commit(con: Any, opts: Options, prepared: Dict[str, Any]) -> Dict[str, Any]:
+    """Send the request, then judge it only once VBUS has settled.
+
+    A ``rejected`` or ``failed`` answer changed nothing. Otherwise (``accepted``,
+    or ``pending``/``unknown`` when the firmware's 2 s wait ran out) the request
+    is done once the plank's requested voltage and VBUS are both at the target;
+    until then ``usbpd status`` is read again. Still unsettled after that, the
+    source may be moving to the new voltage, so the result says
+    ``may_have_changed`` (the engine reports ``committed`` None, not False).
+    """
     mv = prepared["_mv"]
     out = usbpd.request(con, prepared["start"], prepared["_send_mv"], prepared["_ma"])
-    vbus = out.get("vbus_mv")
-    out["verified"] = bool(out["accepted"] and vbus is not None
-                           and abs(vbus - mv) <= max(500, mv // 20))
+    if out["result"] in ("rejected", "failed"):
+        out["verified"] = False
+        out["hint"] = ("the source answered '%s', so the request was not made; VBUS reads "
+                       "%s mV" % (out["result"], out["vbus_mv"]))
+        return out
+    rereads = 0
+    while not ((out["accepted"] or _near(out["requested_mv"], mv))
+               and _near(out["vbus_mv"], mv)) and rereads < SETTLE_TRIES:
+        time.sleep(SETTLE_S)
+        st = usbpd.status(con)
+        rereads += 1
+        for key in ("vbus_mv", "vbus_ma", "requested_mv", "requested_ma"):
+            out[key] = st[key]
+    out["rereads"] = rereads
+    out["verified"] = bool((out["accepted"] or _near(out["requested_mv"], mv))
+                           and _near(out["vbus_mv"], mv))
     if not out["verified"]:
-        out["hint"] = ("the source %s the request and VBUS reads %s mV, not %d mV"
-                       % (out["result"], vbus, mv))
+        out["may_have_changed"] = True
+        out["hint"] = ("the source answered '%s' and VBUS still reads %s mV, not %d mV, "
+                       "after %d re-reads: the plank's output may now be at %d mV or moving "
+                       "there" % (out["result"], out["vbus_mv"], mv, rereads, mv))
     return out
 
 
@@ -142,7 +182,8 @@ register(Recipe(
 register(Recipe(
     name="usbpd-request", title="USB-PD plank: ask the source for one of its offers (a voltage)",
     risk="destructive", options={"pdo": None, "pd_mv": None, "pd_ma": None},
-    check=_request_check, action=_prepare, commit=_commit, **_COMMON))
+    check=_request_check, action=_prepare, commit=_commit,
+    change_lines=("usbpd request",), change_hint=CHANGE_HINT, **_COMMON))
 
 register(Recipe(
     name="usbpd-reset", title="USB-PD plank: send a PD hard reset (the source drops to 5 V)",
