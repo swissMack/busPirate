@@ -515,7 +515,9 @@ def test_destructive_commits_never_touch_power(session, confirm, tmp_path, monke
         "microwire-eeprom-write": {"part": "93C46", "data_hex": "01 02"},
         "onewire-eeprom-write": {"data_hex": "01 02"},
     }
-    destructive = {n for n, r in REGISTRY.items() if r.risk == "destructive"}
+    # Terminal recipes commit over the console, not BPIO2; their own tests check the lines sent.
+    destructive = {n for n, r in REGISTRY.items()
+                   if r.risk == "destructive" and r.transport == "bpio2"}
     assert destructive == set(cases)
 
     def forbid(what):
