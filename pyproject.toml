@@ -29,6 +29,7 @@ version = {attr = "buspirate.__version__"}
 "buspirate.web" = ["static/*"]
 "buspirate.mcp" = ["notes/*.md"]
 "buspirate.mcp_bp6" = ["notes/*.md"]
+"buspirate.devices" = ["data/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
