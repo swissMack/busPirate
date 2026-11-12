@@ -102,7 +102,7 @@ def test_every_module_in_the_package_is_in_the_catalog():
         name = f"{devices.__name__}.{info.name}"
         assert name in listed, f"{name} is not in devices._MODULES"
         module = importlib.import_module(name)
-        if info.name in ("eeprom24", "eeprom25", "eeprom93", "onewire_eeprom", "spd", "midi",
+        if info.name in ("eeprom24", "eeprom25", "eeprom93", "onewire_eeprom", "spd", "midi", "ir",
                          "nmea"):  # readers: no catalogue entry
             assert hasattr(module, "DEVICES")
         else:
