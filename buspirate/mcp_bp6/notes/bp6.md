@@ -53,6 +53,13 @@ range is refused.
 
 `hiz` makes everything safe.
 
+## Not automated
+
+- USB sniffer: its capture blocks until packets arrive, so with no traffic the board hangs until a replug. It also leaves the system clock at 120 MHz until a reset, which changes later PWM, UART and logic rates.
+- `gps`: the phase 1 `gps` recipe already reads and decodes NMEA over BPIO2, and the terminal command returns silently without VOUT.
+- `logic`: it only records what the BP6 itself drives, and its only text output is the first 80 samples. Use the `pulseview` hand-off.
+- `tvbgone`: it cannot be interrupted, and it switches off every TV in range.
+
 ## Unverified on a real board
 
 Built from the datasheets and the firmware source; all fakes pass. Check on hardware:
@@ -74,5 +81,14 @@ Built from the datasheets and the firmware source; all fakes pass. Check on hard
 - How long a blueTag scan takes, and the MCP client's tool timeout.
 - The PulseView driver settings, and which binary mode the owner's unit has saved.
 - The self-test button timing.
+- The sniffers' stop keys and their output format.
+- Whether a busy I2C bus loses bytes at 400 kHz while sniffing.
+- That the PS/2 supply (5.0 V, 400 mA) goes off when the mode is left.
+- The IR plank's current at 100 mA.
+- That the 256-character line limit cuts lines silently.
+- The `TX:` echo of `> 0x....` in NEC and RC5 modes.
+- The aIR timings of a real remote.
+- The IR carrier reads 0 without a learner on IO1.
+- A cut-off sniff transaction arrives on the same line as the prompt.
 
 Name the exact part for 24xx/25xx/93Cxx writes: a wrong size mis-addresses the backup and the write alike.
