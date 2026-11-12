@@ -111,7 +111,7 @@ git apply /path/to/busPirate/firmware/bitpirate-1.8-dock-pins.patch
 `webui start`, which the app's **Switch to Web CLI** button uses: it saves a
 one-shot flag and restarts, and the next boot goes straight to WiFi Connect
 without the button. It suits every board, Dock or not; apply it the same way
-(`git am` keeps its commit message).
+(`git apply`, as in the install block below).
 
 To keep the Wi-Fi network the board has saved, flash only the app
 (`$B/firmware.bin` at `0x10000`) rather than the merged image: the merged
@@ -120,6 +120,85 @@ image also blanks the settings area at `0x9000`.
 To go back to stock, flash the release `.bin` from
 [geo-tp's releases](https://github.com/geo-tp/ESP32-Bit-Pirate/releases/tag/v1.8)
 at `0x0` the same way.
+
+### Status LCD (optional, local patch)
+
+A 16x2 HD44780 LCD with an FC-113 (PCF8574) I2C backpack can show how to
+reach the board and which wire goes where. It is a local patch, not offered
+upstream: `firmware/bitpirate-1.8-lcd.patch`. Without an LCD fitted the
+firmware behaves as before, and the RGB LED keeps working the same.
+
+**What it shows**
+
+- At start-up, `Bit Pirate 1.8` for about 2 s.
+- In HiZ, or any mode without pins, the connection screen: `Bit Pirate WiFi`
+  with the full IP on line 2, or `Bit Pirate USB` with line 2 blank.
+- In a mode with pins, a wiring guide for that mode: only the pins in use,
+  named by signal and by the Dock's silkscreen (`IO15`, not `GPIO 15`). It
+  follows the pins actually configured. Modes with more pins than fit
+  alternate pages every 3 s. Frequency and baud are not shown.
+
+**Wiring.** All four wires go to the DevKit's left header row:
+
+| Backpack | DevKit pin |
+|---|---|
+| VCC | 5V |
+| GND | G |
+| SDA | GPIO 8 |
+| SCL | GPIO 9 |
+
+GPIO 8 and 9 are unused in the s3-devkit build and are added to the
+protected pins, so no mode can be configured onto them. They sit on the
+DevKit's own header, not behind the Dock's level shifters, so the VIO switch
+does not matter. Leave the Dock's POWER header alone.
+
+**Resistors.** The FC-113 pulls SDA and SCL up to its 5 V. Remove those two
+pull-ups from the backpack, and fit 4.7 kΩ from SDA and from SCL to 3V3 (the
+top of the same header row), so the ESP32 never sees 5 V. The firmware only accepts an LCD when both
+lines have working pull-ups, so a backpack with its pull-ups removed and no
+4.7 kΩ fitted is treated as absent.
+
+**Level fallback.** The PCF8574 at 5 V wants a high of at least 3.5 V and the
+ESP32 only gives 3.3 V, so wire it directly first. If the screen shows
+garbage, misses updates or does not answer, put one 1N4148 or 1N400x diode in
+series in the backpack's 5 V lead and re-check the contrast. The firmware
+looks for the LCD at address 0x27 (PCF8574T) and then 0x3F. Turn the
+contrast pot on the backpack after first power-up.
+
+**Installing.** Apply it last, after the other three patches, in this order:
+mode-LED, dock-pins, webui-start, then LCD. No other order is supported.
+
+```sh
+git apply /path/to/busPirate/firmware/bitpirate-1.8-mode-led.patch
+git apply /path/to/busPirate/firmware/bitpirate-1.8-dock-pins.patch
+git apply /path/to/busPirate/firmware/bitpirate-1.8-webui-start.patch
+git apply /path/to/busPirate/firmware/bitpirate-1.8-lcd.patch
+pio run -e s3-devkit-n16-r8
+```
+
+Flash only the app over the UART port (the CP2102), so the saved Wi-Fi stays:
+
+```sh
+B=.pio/build/s3-devkit-n16-r8
+python3 -m esptool --chip esp32s3 --port /dev/cu.usbserial-0001 \
+  --baud 460800 write_flash 0x10000 $B/firmware.bin
+```
+
+**Bring-up check.** To decide between direct wiring and the diode, build a
+self-test firmware:
+
+```sh
+PLATFORMIO_BUILD_FLAGS="-DLCD_SELFTEST=10000" pio run -e s3-devkit-n16-r8
+```
+
+The 10000-round test runs for some seconds at boot before the result appears,
+so the board can look hung until then. The result screen then stays for 5 s:
+it shows `LCD selftest` and `errors <E>` on the LCD, and
+prints the same on the UART0 log. With 0 errors, keep the direct wiring;
+otherwise fit the diode. Flash the normal build afterwards.
+
+Hardware verification of this patch is still pending: it builds and its
+native tests pass, but it has not yet been run on the board.
 
 ## How it differs from a Bus Pirate
 
