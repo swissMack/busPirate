@@ -453,3 +453,23 @@ def test_listen_ends_early_at_prompt_with_a_decode_after_it():
     assert time.monotonic() - start < 0.5
     assert reply.mode == "INFRARED" and reply.error.startswith("Invalid command")
     assert port.sent == [b"sniff\r"]
+
+
+def test_collect_returns_text_after_prompt():
+    port = ScriptPort(lambda port, data: None)
+    port.say_at(0.05, b"0x3b 0x9f ")
+    con = Console(port, lambda *a: None)
+    assert con.collect(0.3).strip() == "0x3b 0x9f"
+    assert port.sent == []
+
+
+def test_command_ends_at_inline_prompt_with_error():
+    port = _answering({b"cat x\r": b"cat x\r\n\x1b[31mError:\x1b[0m no file\x1b[0m"
+                                  b"HiZ> \x03"})
+    con = Console(port, lambda *a: None)
+    start = time.monotonic()
+    reply = con.command("cat x")
+    assert time.monotonic() - start < 1.0
+    assert reply.mode == "HiZ"
+    assert "Error: no file" in reply.text
+    assert reply.error == "Error: no file"

@@ -184,6 +184,21 @@ class Console:
         self.mode = found.group(1)
         return self._reply(raw[:found.end()].replace("\x03", ""), raw[found.end():])
 
+    def _inline_reply(self, raw: str) -> Optional[Reply]:
+        """The reply, if ``raw`` (cleaned, ETX kept) holds a main prompt with its
+        ETX on the same line as earlier output.
+
+        FatFs errors print ``Error: <reason>`` with no line ending, so the
+        prompt follows on that line. The text before the prompt is kept as the
+        reply's last body line; text after the ETX is kept at the end.
+        """
+        found = _INLINE_ETX_PROMPT.search(raw)
+        if found is None:
+            return None
+        self.mode = found.group(1)
+        head = raw[:found.start()] + "\n" + raw[found.start():found.end()]
+        return self._reply(head.replace("\x03", ""), raw[found.end():])
+
     def _read_to_prompt(self, line: str, timeout: float) -> None:
         out = _Output()
         deadline = time.monotonic() + timeout
@@ -239,6 +254,8 @@ class Console:
                 waiting_since = waiting_for = None
                 last_data = time.monotonic()
                 done = self._ended_reply(raw)
+                if done is None:
+                    done = self._inline_reply(raw)
                 if done is not None:
                     return done
             # ETX ends every prompt (research doc section 0). Output without one
@@ -267,6 +284,22 @@ class Console:
             if not chunk:
                 time.sleep(0.005)
         raise TerminalError(f"the terminal did not answer {line}")
+
+    def collect(self, seconds: float) -> str:
+        """Read for ``seconds`` and return the cleaned text. Sends nothing.
+
+        A main prompt in the output does not end it early: output printed
+        after a prompt (a reply to keys a recipe typed) is what it is for.
+        """
+        seen = bytearray()
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            chunk = self._read()
+            if chunk:
+                seen += chunk
+            else:
+                time.sleep(0.005)
+        return clean(seen.decode("utf-8", "replace"))
 
     def listen(self, line: str, seconds: float, stop: str, ready: Optional[str] = None,
                keys: Sequence[Answer] = (), timeout: float = 3.0) -> Reply:

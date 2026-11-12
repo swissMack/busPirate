@@ -38,8 +38,9 @@ class Recipe:
     when the firmware's own prompt sets it) and the pull-ups. ``precheck``,
     if given, runs over BPIO2 with the board before the terminal opens. A
     recipe with ``target_powered_ok`` False refuses a target that has its own
-    supply, giving ``target_powered_error`` as the reason when it is set. No
-    terminal recipe may be destructive.
+    supply, giving ``target_powered_error`` as the reason when it is set. A
+    destructive terminal recipe's ``commit`` gets the ``Console`` too, and runs
+    only while the terminal is still in ``terminal_mode``.
     """
 
     name: str
@@ -90,8 +91,6 @@ class Recipe:
                                              or self.terminal_flags or self.supply_by != "engine"):
             raise ValueError("recipe %r: terminal_mode, terminal_flags, precheck and supply_by are for "
                              "terminal recipes" % self.name)
-        if self.transport == "terminal" and self.risk == "destructive":
-            raise ValueError("recipe %r: a terminal recipe may not change a chip" % self.name)
 
 
 REGISTRY = {}  # type: Dict[str, Recipe]
