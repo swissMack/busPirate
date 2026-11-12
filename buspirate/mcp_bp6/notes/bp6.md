@@ -124,6 +124,8 @@ Built from the datasheets and the firmware source; all fakes pass. Check on hard
 - A card's first bytes could be lost while `RST HIGH` prints; the owner's SIM answered in full (22).
 - T=0 timing through the terminal on a real card: the 8-byte receive FIFO while the firmware prints.
 - The USIM route (class 00, the USIM application from `EF_DIR`) on a real card.
-- The class switch after VERIFY on a USIM.
+- Reading on after VERIFY without a re-select keeps the PIN's status on a real USIM.
+- SIM: the firmware does not check received parity; the ICCID's Luhn digit is the only check.
+- SIM: listen-mode TX drives IO0 all byte long; a card's parity-error low would briefly contend.
 
 Name the exact part for 24xx/25xx/93Cxx writes: a wrong size mis-addresses the backup and the write alike.

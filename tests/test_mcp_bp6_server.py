@@ -212,7 +212,7 @@ def test_bp6_notes_state_the_sim_rules():
                  "`EF_ADN`", "`EF_SMS`", "`EF_MSISDN`", "`EF_FDN`", "`EF_SDN`",
                  "one attempt after its own yes", "refused at 1", "never stored, logged",
                  "CARD LED", "8-byte receive FIFO", "The USIM route",
-                 "class switch after VERIFY"):
+                 "without a re-select", "received parity", "Luhn", "contend"):
         assert word in text, word
 
 
@@ -221,6 +221,7 @@ def test_instructions_name_the_sim_report():
     assert "run `sim-report`: it reads only" in text
     assert "`sim-report-pin` only if the owner offers the PIN" in text
     assert "attempts left" in text and "before the commit" in text
+    assert "After a wrong PIN, never plan it again unless the owner gives the PIN again" in text
 
 
 def test_instructions_are_short_and_state_the_rules():

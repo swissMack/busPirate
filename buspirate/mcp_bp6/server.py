@@ -46,12 +46,14 @@ and the plan in one message.
 `summary` to the owner, and call `recipe_commit` only after a second yes to that change.
 - Never pass backup=False unless the owner asked for no backup.
 - A target-powered plan switches nothing on. If the check fails, read the `hint` to the owner. `hiz` makes everything safe.
-- For a SIM card run `sim-report`: it reads only, and its `summary` is what to show the owner. Run `sim-report-pin` only if the owner offers the PIN; read the attempts left to them and ask before the commit.
+- For a SIM card run `sim-report`: it reads only; show its `summary`. Run \
+`sim-report-pin` only if the owner offers the PIN; read the attempts left to them and ask \
+before the commit. After a wrong PIN, never plan it again unless the owner gives the PIN again.
 - A hand-off (flashrom, avrdude, pulseview) lends the board to that program until \
 `connect` or `hiz` takes it back; give the owner the `command` and `how_to_return`.
 - The self-test needs nothing on the pins, but the owner must press the board's button.
-- Terminal recipes switch the supply off while they change mode, then switch the \
-confirmed supply back on. Their voltages must be multiples of 10 mV.
+- Terminal recipes switch the supply off while they change mode, then back on to the \
+confirmed level. Their voltages must be multiples of 10 mV.
 - A blueTag pin scan can take a minute at 8 channels; say so before you start.
 - Sniffers and IR receive listen for `seconds` (at most 60) and return what they heard, \
 so tell the owner to trigger the target now. The PS/2 sniffer needs the owner to confirm \
@@ -60,9 +62,8 @@ the keyboard is theirs.
 names the voltage or the file) and call `recipe_commit` only after a second yes. \
 If `recipe_commit` returns `may_have_changed`, tell the owner the change may have \
 happened and read them the `hint`.
-- The USB-PD plank's output stays at the requested voltage after `hiz`; run \
-`usbpd-reset` to bring it back to 5 V. A reset power-cycles anything on the plank: \
-VBUS drops to 0 V, then 5 V.
+- The USB-PD plank's output stays at the requested voltage after `hiz`; \
+`usbpd-reset` brings it back to 5 V and power-cycles anything on the plank (0 V, then 5 V).
 """
 
 #: Each built server's session, for run_stdio and tests.
