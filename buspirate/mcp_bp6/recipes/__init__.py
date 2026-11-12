@@ -79,6 +79,9 @@ class Recipe:
     wiring_for: Optional[Callable[[Dict[str, Any]], Tuple[Tuple[str, str], ...]]] = None
     change_lines: Tuple[str, ...] = ()
     change_hint: str = ""
+    #: Set by a recipe whose options hold a secret (a PIN): why ``recipe_run(token=None)``
+    #: refuses it. The engine then keeps none of its options after a run or a commit.
+    no_rerun: str = ""
 
     def __post_init__(self) -> None:
         if self.bus not in BUSES:

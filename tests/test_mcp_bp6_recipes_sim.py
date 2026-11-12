@@ -304,3 +304,212 @@ def test_capability_table_cites_services():
         assert all(n in recipe_sim.UST_SERVICES for n in ust)
         assert all(n in recipe_sim.SST_SERVICES for n in sst)
     assert not [p for p, *_ in recipe_sim.CAPABILITIES if "eSIM" in p]
+
+
+# -- sim-report-pin: the PIN, once, on its own yes ----------------------------------
+
+import json  # noqa: E402
+
+from buspirate.bp6 import sim as bp6_sim  # noqa: E402
+
+PIN = "9876"  # 0x39 0x38 0x37 0x36: none of these bytes is in the ATR or the files
+PIN_HINT = "a PIN attempt may have been used: run sim-report to see how many attempts are left"
+
+
+def _verifies(card):
+    """Every VERIFY that carried a PIN (header plus 8 data bytes)."""
+    return [a for a in card.apdus if a[1] == 0x20 and len(a) > 5]
+
+
+def _leaks(*things):
+    """Where the PIN shows up in ``things`` (results, errors, plans), as text or bytes."""
+    found = []
+    for thing in things:
+        text = json.dumps(thing, default=str)
+        if PIN in text or "39383736" in text.replace(" ", "").replace("0x", ""):
+            found.append(text[:200])
+    return found
+
+
+def _log_leaks(log):
+    blob = b"".join(data for _, data in log).lower()
+    # Whole sequences only: a lone 0x38 is also the 38 of EF_SST (6F38).
+    found = [PIN.encode(), b"39 38 37 36", b"393837",
+             b" ".join(b"0x%02x" % b for b in PIN.encode())]
+    return [f for f in found if f.lower() in blob]
+
+
+def _logged(session):
+    log = []
+    session.board.add_traffic_hook(lambda direction, data: log.append((direction, bytes(data))))
+    return log
+
+
+def _pin_card(profile="pin-on", attempts=3):
+    card = make_sim(profile)
+    card.pin, card.pin_enabled, card.attempts = PIN, True, attempts
+    return card
+
+
+def _pin_run(session, confirm, card, pin=PIN):
+    """Plan and run sim-report-pin on ``card``: the prepare, not the commit."""
+    fake = _fake(session)
+    fake.sim = card
+    plan = engine.plan_recipe(session, confirm, "sim-report-pin",
+                              {"millivolts": 3000, "wait_s": 0.3, "pin": pin})
+    assert "error" not in plan, plan
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert fake.pwm == {} and not fake._hduart_printing  # clock and async print off
+    return plan, out
+
+
+def test_sim_report_pin_registered():
+    r, plain = REGISTRY["sim-report-pin"], REGISTRY["sim-report"]
+    assert r.risk == "destructive" and r.commit is not None
+    assert (r.transport, r.terminal_mode, r.terminal_flags, r.wiring) == (
+        plain.transport, plain.terminal_mode, plain.terminal_flags, plain.wiring)
+    assert r.options == {"clock_hz": 3_571_200, "wait_s": 1.0, "pin": None}
+    assert "pin" not in plain.options
+    assert set(r.change_lines) == {bp6_sim.verify_line(0x00), bp6_sim.verify_line(0xA0)}
+    assert r.change_hint == PIN_HINT
+    assert find_recipes("sim")[0]["name"] == "sim-report"
+
+
+@pytest.mark.parametrize("profile,cla", [("pin-on", 0xA0), ("usim", 0x00)])
+def test_right_pin_gives_the_full_report(session, confirm, profile, cla):
+    card = _pin_card(profile)
+    log = _logged(session)
+    plan, out = _pin_run(session, confirm, card)
+    assert out["stopped"] == "the change needs its own yes", out
+    assert out["result"]["summary"] == (
+        "Try the SIM PIN once. The SIM has 3 attempts left; a wrong PIN leaves 2, and at 0 "
+        "the SIM is blocked until its PUK is entered.")
+    assert ICCID in out["check"]["identity"]
+    assert not _verifies(card)  # the prepare sends no PIN
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is True, done
+    s = done["result"]["summary"]
+    assert set(s) == SUMMARY_KEYS
+    assert s["pin"] == "on, verified"
+    assert (s["operator"], s["imsi"], s["iccid"]) == ("Swisscom", IMSI, ICCID)
+    assert s["not_readable"] == [KI]
+    assert "EF_IMSI" in done["result"]["raw"]
+    verifies = _verifies(card)
+    assert len(verifies) == 1 and verifies[0][0] == cla  # exactly one, in the route's class
+    assert _leaks(plan, out, done) == []
+    assert log and _log_leaks(log) == [], _log_leaks(log)
+    assert any(data == bp6_sim.REDACTED for _, data in log)
+    _no_private_files_but_pin(card)
+
+
+def _no_private_files_but_pin(card):
+    assert not NEVER & set(_selected(card)), _selected(card)
+    assert {a[1] for a in card.apdus} <= {0xA4, 0xB0, 0xB2, 0xC0, 0xF2, 0x20}
+
+
+def test_wrong_pin_is_not_committed_and_says_attempts_left(session, confirm):
+    card = _pin_card()
+    card.pin = "1111"  # the owner's PIN (PIN) is wrong for this card
+    log = _logged(session)
+    plan, out = _pin_run(session, confirm, card)
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is False, done
+    result = done["result"]
+    assert result["verified"] is False and result["attempts_left"] == 2
+    assert "2 attempts left" in result["hint"]
+    s = result["summary"]
+    assert s["pin"] == "on, 2 attempts left"
+    assert s["imsi"] == s["operator"] == s["blocked_networks"] == "locked by the SIM PIN"
+    assert len(_verifies(card)) == 1  # never retried
+    assert card.attempts == 2
+    assert _leaks(plan, out, done) == []
+    assert _log_leaks(log) == []
+
+
+def test_wrong_pin_on_a_usim_says_attempts_left(session, confirm):
+    card = _pin_card("usim")
+    card.pin = "1111"
+    _, out = _pin_run(session, confirm, card)
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is False
+    assert done["result"]["attempts_left"] == 2 and len(_verifies(card)) == 1
+
+
+@pytest.mark.parametrize("attempts", [1, 0])
+def test_one_attempt_left_or_blocked_is_refused_at_the_check(session, confirm, attempts):
+    card = _pin_card(attempts=attempts)
+    plan, out = _pin_run(session, confirm, card)
+    assert out["stopped"] == "check failed" and "commit" not in out, out
+    assert ("blocked" if attempts == 0 else "1 attempt left") in out["check"]["error"]
+    assert not _verifies(card)
+    assert _leaks(plan, out) == []
+
+
+def test_pin_off_is_refused_at_the_check(session, confirm):
+    card = make_sim("gsm")
+    plan, out = _pin_run(session, confirm, card)
+    assert out["stopped"] == "check failed", out
+    assert "off" in out["check"]["error"] and "sim-report" in out["check"]["error"]
+    assert not _verifies(card)
+
+
+@pytest.mark.parametrize("pin", ["123", "123456789", "12a4", "", " 9876", 9876,
+                                 "９８７６"])
+def test_pin_not_4_to_8_digits_is_refused_before_the_card(session, confirm, pin):
+    card = _pin_card()
+    plan, out = _pin_run(session, confirm, card, pin=pin)
+    assert out["stopped"] == "check failed", out
+    assert "4 to 8 digits" in out["check"]["error"]
+    assert card.apdus == []  # the card was never spoken to
+    assert _leaks(plan, out) == []
+
+
+def test_a_rerun_refuses_and_the_pin_is_not_kept(session, confirm):
+    card = _pin_card()
+    _, out = _pin_run(session, confirm, card)
+    assert PIN not in json.dumps(session.last_recipe, default=str)
+    again = engine.run_recipe(session, confirm, None, {})
+    assert "give the PIN again with a fresh plan" in again["error"], again
+    assert PIN not in again["error"]
+    engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert session.last_recipe is None
+    again = engine.run_recipe(session, confirm, None, {})
+    assert "error" in again and len(_verifies(card)) == 1
+
+
+def test_the_pin_is_fixed_by_the_plan(session, confirm):
+    card = _pin_card()
+    _fake(session).sim = card
+    plan = engine.plan_recipe(session, confirm, "sim-report-pin",
+                              {"millivolts": 3000, "wait_s": 0.3, "pin": PIN})
+    out = engine.run_recipe(session, confirm, plan["token"], {"pin": "1111"})
+    assert out == {"error": "plan again: pin was fixed by the plan"}
+    assert card.apdus == []
+
+
+def test_attempts_changed_since_the_prepare_refuses_the_commit(session, confirm):
+    card = _pin_card()
+    _, out = _pin_run(session, confirm, card)
+    card.attempts = 2  # someone tried a PIN in a phone meanwhile
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert "not the one that was prepared" in done["error"], done
+    assert not _verifies(card)
+    assert PIN not in json.dumps(done)
+
+
+def test_card_silent_after_the_verify_header_may_have_changed(session, confirm, monkeypatch):
+    card = _pin_card()
+    _, out = _pin_run(session, confirm, card)
+    real = bp6_sim.SimLink.verify_pin_once
+
+    def mute_then_verify(link, pin):
+        card.silent_after = len(card.apdus)  # the VERIFY header gets no answer
+        return real(link, pin)
+
+    monkeypatch.setattr(bp6_sim.SimLink, "verify_pin_once", mute_then_verify)
+    done = engine.commit_recipe(session, confirm, out["commit"]["token"])
+    assert done["committed"] is None and done["may_have_changed"] is True, done
+    assert done["hint"] == PIN_HINT
+    assert PIN not in json.dumps(done)
+    assert session.last_recipe is None
+    _ended_cleanly(_fake(session))

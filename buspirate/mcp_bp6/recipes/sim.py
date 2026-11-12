@@ -1,5 +1,8 @@
 """SIM card: a business summary of the card (``sim-report``). Read-only.
 
+``sim-report-pin`` is the same report with the owner's SIM PIN, tried
+exactly once on ``recipe_commit``, after its own yes, and never retried.
+
 The report reads only operator and network files. It never selects the
 phone book, text messages, the own phone number or call records (EF_ADN,
 EF_SMS, EF_MSISDN, EF_FDN, EF_SDN, the logs), and :class:`SimLink` can send
@@ -12,10 +15,11 @@ only when no USIM is listed or the card refuses that select.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+import re
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ...bp6.console import TerminalError
-from ...bp6.sim import GSM_CLA, SELECT, UICC_CLA, SimLink
+from ...bp6.sim import GSM_CLA, SELECT, UICC_CLA, SimLink, verify_line
 from ...devices import sim as dec
 from ...devices.sim import SST_SERVICES, UST_SERVICES  # noqa: F401  (cited by CAPABILITIES)
 from . import Recipe, register
@@ -301,16 +305,13 @@ def _capabilities(reader: _Reader, gsm: bool) -> Tuple[Any, str]:
 
 # -- the report ----------------------------------------------------------------
 
-def build_report(link: SimLink) -> Dict[str, Any]:
-    """Read the card's operator and network files and summarise them in plain words.
+def _route(link: SimLink) -> Tuple["_Reader", bool, Dict[str, Any], int]:
+    """Read the card files and take the route to the network files.
 
-    The card files (EF_ICCID, EF_DIR, EF_PL) are read with class ``A0``, or
-    class ``00`` when the card refuses ``A0`` (``6E 00`` / ``6D 00``). When
-    EF_DIR lists a USIM application, the network files are read through it
-    (class ``00``, SELECT by AID); DF_GSM (class ``A0``, ``7F20``) is used only
-    when no USIM is listed or the card refuses that select. The summary has
-    the same keys either way; the file bytes are under ``raw``.
-
+    Returns the reader (EF_ICCID, EF_DIR, EF_PL read), whether the USIM is
+    used, the PIN status from that route, and the status word of reaching the
+    network files (``90 00``: reached). The link is left in the route's class
+    with its application (or DF_GSM) selected, ready for the PIN.
     Raises ``TerminalError`` when the card refuses both classes.
     """
     link.cla = GSM_CLA
@@ -341,6 +342,27 @@ def build_report(link: SimLink) -> Dict[str, Any]:
         link.cla = GSM_CLA
         pin = link.pin_status()  # selects DF_GSM
         reach = 0x9000 if pin["sw"] == "9000" else int(pin["sw"], 16)
+    return reader, through_usim, pin, reach
+
+
+def build_report(link: SimLink) -> Dict[str, Any]:
+    """Read the card's operator and network files and summarise them in plain words.
+
+    The card files (EF_ICCID, EF_DIR, EF_PL) are read with class ``A0``, or
+    class ``00`` when the card refuses ``A0`` (``6E 00`` / ``6D 00``). When
+    EF_DIR lists a USIM application, the network files are read through it
+    (class ``00``, SELECT by AID); DF_GSM (class ``A0``, ``7F20``) is used only
+    when no USIM is listed or the card refuses that select. The summary has
+    the same keys either way; the file bytes are under ``raw``.
+
+    Raises ``TerminalError`` when the card refuses both classes.
+    """
+    return _build(link)[0]
+
+
+def _build(link: SimLink) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """:func:`build_report`, and the PIN status it read on the way."""
+    reader, through_usim, pin, reach = _route(link)
     for name, fid, label in APP_FILES:
         if reach == 0x9000:
             reader.read(name, fid, label)
@@ -352,7 +374,7 @@ def build_report(link: SimLink) -> Dict[str, Any]:
     raw.update(reader.raw())
     if through_usim and "EF_SST" in raw:
         raw["EF_UST"] = raw.pop("EF_SST")  # 6F38 is the USIM service table under the USIM
-    return {"summary": summary, "raw": raw}
+    return {"summary": summary, "raw": raw}, pin
 
 
 def _summary(reader: _Reader, through_usim: bool, pin: Dict[str, Any]) -> Dict[str, Any]:
@@ -435,5 +457,136 @@ register(Recipe(
     check=check_clock, action=_report, wiring=WIRING,
     notes=("read-only: it reads the operator and network files only, never contacts, text "
            "messages, the phone number or call records, and never sends a PIN",
+           "3 V suits most SIMs; an old 5 V-only SIM needs 5000 mV"),
+    source=SOURCE))
+
+
+# -- the PIN, once, on its own yes (sim-report-pin) ----------------------------------
+
+PIN_HINT = ("a PIN attempt may have been used: run sim-report to see how many attempts "
+            "are left")
+NO_RERUN = ("sim-report-pin does not keep the PIN for a re-run; give the PIN again with a "
+            "fresh plan")
+NOTHING_SENT = "nothing was sent to the SIM's PIN; run sim-report to read what needs no PIN"
+_PIN_RE = re.compile(r"[0-9]{4,8}")
+
+
+def _attempts(n: int) -> str:
+    return "%d attempt%s" % (n, "" if n == 1 else "s")
+
+
+def _pin_refusal(pin: Dict[str, Any]) -> Optional[str]:
+    """Why the PIN must not be tried on a card with this PIN status, or None."""
+    left = pin.get("attempts_left")
+    if pin.get("blocked"):
+        return ("the SIM PIN is blocked: only its PUK (from the operator) unlocks it, and "
+                "this tool never sends a PUK")
+    if pin.get("needed") is False:
+        return "the SIM PIN is off, so nothing needs it: run sim-report instead"
+    if not pin.get("needed") or not isinstance(left, int):
+        return ("the card did not say whether its PIN is on or how many attempts are left, "
+                "so the PIN is not tried")
+    if left <= 1:
+        return ("the SIM has only %s left: a wrong PIN would block it until its PUK is "
+                "entered, so the PIN is not tried here" % _attempts(left))
+    return None
+
+
+def _pin_state(con: Any, opts: Options) -> Union[str, Dict[str, Any]]:
+    """Open the link, read the card number and the PIN status, close the link.
+
+    Returns why the PIN must not be tried, or ``{"identity", "attempts_left"}``.
+    """
+    with SimLink.open(con, opts["clock_hz"], atr_wait_s=float(opts["wait_s"])) as link:
+        reader, _, pin, _ = _route(link)
+    why = _pin_refusal(pin)
+    if why:
+        return why
+    iccid, _ = _decoded(reader, "EF_ICCID", dec.decode_iccid)
+    number = iccid["iccid"] if iccid else "unknown"
+    return {"identity": "ICCID %s, %s left" % (number, _attempts(pin["attempts_left"])),
+            "attempts_left": pin["attempts_left"]}
+
+
+def _pin_check(con: Any, opts: Options) -> Dict[str, Any]:
+    """The clock, the PIN's form, then the card: ICCID and attempts left are the identity.
+
+    Never names the PIN. Refuses (no VERIFY with a PIN is sent) when the PIN
+    is not 4 to 8 digits, when the PIN is off or blocked, or when one attempt
+    or fewer is left."""
+    clock = check_clock(con, opts)
+    if not clock.get("ok"):
+        return clock
+    pin = opts.get("pin")
+    if not isinstance(pin, str) or not _PIN_RE.fullmatch(pin):
+        return {"ok": False, "error": "the SIM PIN must be 4 to 8 digits (0-9), given as text",
+                "hint": "plan again with the PIN; " + NOTHING_SENT}
+    state = _pin_state(con, opts)
+    if isinstance(state, str):
+        return {"ok": False, "error": state, "hint": NOTHING_SENT}
+    return {"ok": True, "identity": state["identity"],
+            "attempts_left": state["attempts_left"]}
+
+
+def _pin_prepare(con: Any, opts: Options) -> Dict[str, Any]:
+    """Read a SIM card with its PIN: the PIN is tried once, only after its own yes."""
+    state = _pin_state(con, opts)
+    if isinstance(state, str):  # the check passed a moment ago, so this is unexpected
+        raise TerminalError(state)
+    left = state["attempts_left"]
+    summary = ("Try the SIM PIN once. The SIM has %d attempts left; a wrong PIN leaves %d, "
+               "and at 0 the SIM is blocked until its PUK is entered." % (left, left - 1))
+    return {"chip": "SIM card", "operation": "verify PIN", "start": 0, "length": 0,
+            "summary": summary, "backup": None}
+
+
+def _pin_commit(con: Any, opts: Options, prepared: Dict[str, Any]) -> Dict[str, Any]:
+    """Present the PIN exactly once, then read the report. Never retried.
+
+    The PIN status is read again on this link first: a card that no longer
+    allows a try gets no VERIFY. A wrong PIN is not a commit: the result says
+    how many attempts are left now, and the fields that need the PIN stay
+    locked."""
+    link = SimLink.open(con, opts["clock_hz"], atr_wait_s=float(opts["wait_s"]))
+    # The context manager closes the link (async print off, clock off) on every path.
+    with link:
+        _, _, pin, _ = _route(link)
+        why = _pin_refusal(pin)
+        if why:
+            return {"error": why, "hint": NOTHING_SENT}
+        tried = link.verify_pin_once(opts["pin"])
+        report, after = _build(link)
+    left = tried["attempts_left"]
+    if left is None and not tried["verified"]:
+        left = after.get("attempts_left")
+    out = {"verified": tried["verified"], "attempts_left": left,
+           "blocked": bool(tried["blocked"] or after.get("blocked"))}  # type: Dict[str, Any]
+    if tried["verified"]:
+        report["summary"]["pin"] = "on, verified"
+    elif out["blocked"]:
+        out["hint"] = ("the SIM refused the PIN and is now blocked: only its PUK (from the "
+                       "operator) unlocks it; the fields that need the PIN stay locked")
+    else:
+        count = _attempts(left) if isinstance(left, int) else "an unknown number of attempts"
+        out["hint"] = ("the SIM refused the PIN: it has %s left now. Nothing was retried; "
+                       "the fields that need the PIN stay locked" % count)
+    out.update(report)
+    return out
+
+
+register(Recipe(
+    name="sim-report-pin",
+    title="SIM card: the business summary with the SIM PIN (tried once, after its own yes)",
+    words=("sim", "sim card", "sim pin", "pin", "usim", "locked", "report"),
+    bus="uart", transport="terminal", terminal_mode="hduart", terminal_flags=TERMINAL_FLAGS,
+    default_mv=3000, min_mv=1800, max_mv=5000, milliamps=100, pullups=True,
+    target_powered_ok=False, options=dict(OPTIONS, pin=None), risk="destructive",
+    check=_pin_check, action=_pin_prepare, commit=_pin_commit, wiring=WIRING,
+    change_lines=(verify_line(GSM_CLA), verify_line(UICC_CLA)), change_hint=PIN_HINT,
+    no_rerun=NO_RERUN,
+    notes=("reads like sim-report, and with the SIM PIN reads the files the PIN locks; it "
+           "still never reads contacts, text messages, the phone number or call records",
+           "the PIN (4 to 8 digits) is tried exactly once, only after its own yes, and never "
+           "retried; it is refused when the SIM has one attempt or fewer left",
            "3 V suits most SIMs; an old 5 V-only SIM needs 5000 mV"),
     source=SOURCE))

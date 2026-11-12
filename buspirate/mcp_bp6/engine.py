@@ -26,7 +26,7 @@ from .recipes import REGISTRY, Recipe
 ACTION = "recipe_run"  #: the ConfirmStore action recipe tokens are issued for
 WINDOW_S = 300.0       #: how long a token, and a re-run after a run, stays valid
 LOCKED = ("millivolts", "address")  #: options a re-run may not change
-LOCKED_DESTRUCTIVE = ("backup",)  #: more options a destructive recipe fixes at the plan
+LOCKED_DESTRUCTIVE = ("backup", "pin")  #: more options a destructive recipe fixes at the plan
 
 # How a recipe's target is powered.
 SUPPLY_BP6 = "bp6"        # our supply, from the plan
@@ -278,6 +278,8 @@ def _power_error(bp: Any, session: Any, recipe: Recipe, mv: int,
 
 def _remember(session: Any, recipe: Recipe, options: Dict[str, Any], mv: int,
               supply: str) -> None:
+    if recipe.no_rerun:
+        options = {}  # it holds a secret, and a re-run is refused anyway
     session.last_recipe = {"name": recipe.name, "options": options, "mv": mv,
                            "supply": supply, "until": time.monotonic() + WINDOW_S}
 
@@ -357,6 +359,16 @@ class _TripWatch:
             self.tripped = self.tripped or (
                 "%s; the supply is off, so plan again" % reply.error)
         return reply
+
+    # The traffic log hook, forwarded so that a caller swapping it (SimLink
+    # redacting the PIN block) swaps the console's own, not a copy on the wrapper.
+    @property
+    def notify(self) -> Any:
+        return self._con.notify
+
+    @notify.setter
+    def notify(self, value: Any) -> None:
+        self._con.notify = value
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._con, name)
@@ -468,6 +480,8 @@ def _rerun(session: Any, confirm: ConfirmStore, options: Dict[str, Any]) -> Dict
         recipe = REGISTRY.get(last["name"])
         if recipe is None:
             return {"error": "plan again: recipe %r is gone" % last["name"]}
+        if recipe.no_rerun:
+            return {"error": "plan again: %s" % recipe.no_rerun}
         key = _changed_locked(recipe, last["options"], options)
         if key:
             return {"error": "plan again: a re-run cannot change %s" % key}
@@ -539,6 +553,10 @@ def commit_recipe(session: Any, confirm: ConfirmStore, token: str) -> Dict[str, 
         if sent.change:
             return _may_have_changed(recipe, {"error": GONE_AFTER_CHANGE})
         raise
+    finally:
+        last = session.last_recipe
+        if recipe.no_rerun and last is not None and last.get("name") == recipe.name:
+            session.last_recipe = None  # nothing of a secret-holding run is kept
 
 
 def _check_then_commit(dev: Any, recipe: Recipe, payload: Dict[str, Any],
