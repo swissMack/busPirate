@@ -56,6 +56,7 @@ PIN_LABELS = {
     "2WIRE": ["VOUT", "SDA", "SCLK", "RST", "", "", "", "", "", "GND"],
     "PS2": ["VOUT", "DAT", "CLK", "", "", "", "", "", "", "GND"],
     "INFRARED": ["VOUT"] + [""] * 8 + ["GND"],
+    "HDUART": ["VOUT", "RXTX", "", "RST", "", "", "", "", "", "GND"],
 }
 
 
@@ -498,6 +499,9 @@ class FakeBp6:
         #: Text the receiver prints at the prompt after each IR send (it hears the
         #: board's own LED): a NEC/RC5 decode or an aIR line, straight after the ETX.
         self.ir_heard = ""
+        #: The smart card's answer to reset, printed after ``{`` while ``[`` printing is on.
+        self.card_atr = b""
+        self._hduart_printing = False
         #: Self-test (``~``): whether a human presses the button, whether the NAND
         #: has a file system, and extra failing lines to print (each is one error).
         self.button_pressed = True
@@ -861,7 +865,7 @@ class FakeBp6:
     # -- the text terminal ----------------------------------------------------
 
     HIZ_REFUSAL = "Command has no effect in HiZ mode, press 'm' to choose a mode"
-    TERMINAL_MODES = ("HiZ", "DIO", "JTAG", "I2C", "2WIRE", "PS2", "INFRARED")
+    TERMINAL_MODES = ("HiZ", "DIO", "JTAG", "I2C", "2WIRE", "PS2", "INFRARED", "HDUART")
 
     def lines_received(self) -> List[bytes]:
         """Every write the terminal port received, in order."""
@@ -933,6 +937,7 @@ class FakeBp6:
     def _set_mode(self, name: str) -> None:
         self.mode = name
         self.ir_protocol = "RAW"
+        self._hduart_printing = False
         self.psu_enabled = False   # the HiZ setup of every mode switches these off
         self.pullups = False
         self.pwm.clear()
@@ -1152,10 +1157,25 @@ class FakeBp6:
             self._cmd_irtx(text, text[len("irtx"):].strip())
         elif text.lstrip().startswith(">") and self.mode == "INFRARED" and self.ir_protocol != "RAW":
             self._cmd_ir_write(text)
+        elif name in ("}", "{", "[", "]") and self.mode == "HDUART":
+            self._cmd_hduart_bus(text, name)
         elif name == "bluetag" and self.mode == "JTAG":
             self._cmd_bluetag(text, args)
         else:
             self._finish(text, f"Invalid command: {text}. Type ? for help.\r\n")
+
+    HDUART_BUS = {"}": "RST LOW", "{": "RST HIGH", "[": "UART OPEN (ASYNC READ)",
+                   "]": "UART CLOSE"}
+
+    def _cmd_hduart_bus(self, text: str, name: str) -> None:
+        """HDUART bus syntax: ``}``/``{`` drive RST, ``[``/``]`` start/stop printing bytes."""
+        if name == "[":
+            self._hduart_printing = True
+        elif name == "]":
+            self._hduart_printing = False
+        self._finish(text, self.HDUART_BUS[name] + "\r\n")
+        if name == "{" and self._hduart_printing:
+            self._say("".join("0x%02x " % b for b in self.card_atr))
 
     IR_SENSORS = {"38b": "38kHz barrier", "38d": "36-40kHz demodulator", "56d": "56kHz demodulator"}
 
