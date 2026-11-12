@@ -45,9 +45,8 @@ and the plan in one message.
 - A recipe that changes a chip stops after its backup and returns `commit`. Read its \
 `summary` to the owner, and call `recipe_commit` only after a second yes to that change.
 - Never pass backup=False unless the owner asked for no backup.
-- A target-powered plan switches nothing on.
-- If the check fails, read the `hint` to the owner.
-- `hiz` makes everything safe.
+- A target-powered plan switches nothing on. If the check fails, read the `hint` to the owner. `hiz` makes everything safe.
+- For a SIM card run `sim-report`: it reads only, and its `summary` is what to show the owner. Run `sim-report-pin` only if the owner offers the PIN; read the attempts left to them and ask before the commit.
 - A hand-off (flashrom, avrdude, pulseview) lends the board to that program until \
 `connect` or `hiz` takes it back; give the owner the `command` and `how_to_return`.
 - The self-test needs nothing on the pins, but the owner must press the board's button.

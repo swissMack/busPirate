@@ -201,9 +201,26 @@ def test_pins_set_and_read():
 def test_bp6_notes():
     out = call(build_server(BoardSession(simulated="bp6")), "bp6_notes")
     text = out["text"]
-    assert len(text.splitlines()) < 120
+    assert len(text.splitlines()) < 135  # raised from 120 for the SIM report's rules
     for word in ("5 V", "pull-up", "orange", "SHT4x", "SLE4442", "owner-only", "HiZ"):
         assert word in text
+
+
+def test_bp6_notes_state_the_sim_rules():
+    text = call(build_server(BoardSession(simulated="bp6")), "bp6_notes")["text"]
+    for word in ("SELECT, READ BINARY, READ RECORD", "GET RESPONSE, STATUS and VERIFY",
+                 "`EF_ADN`", "`EF_SMS`", "`EF_MSISDN`", "`EF_FDN`", "`EF_SDN`",
+                 "one attempt after its own yes", "refused at 1", "never stored, logged",
+                 "CARD LED", "8-byte receive FIFO", "The USIM route",
+                 "class switch after VERIFY"):
+        assert word in text, word
+
+
+def test_instructions_name_the_sim_report():
+    text = build_server(BoardSession(simulated="bp6")).instructions
+    assert "run `sim-report`: it reads only" in text
+    assert "`sim-report-pin` only if the owner offers the PIN" in text
+    assert "attempts left" in text and "before the commit" in text
 
 
 def test_instructions_are_short_and_state_the_rules():

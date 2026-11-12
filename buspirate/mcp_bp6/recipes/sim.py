@@ -458,7 +458,7 @@ register(Recipe(
     notes=("read-only: it reads the operator and network files only, never contacts, text "
            "messages, the phone number or call records, and never sends a PIN",
            "3 V suits most SIMs; an old 5 V-only SIM needs 5000 mV"),
-    source=SOURCE))
+    source=SOURCE, plank="sim-iccard"))
 
 
 # -- the PIN, once, on its own yes (sim-report-pin) ----------------------------------
@@ -589,4 +589,4 @@ register(Recipe(
            "the PIN (4 to 8 digits) is tried exactly once, only after its own yes, and never "
            "retried; it is refused when the SIM has one attempt or fewer left",
            "3 V suits most SIMs; an old 5 V-only SIM needs 5000 mV"),
-    source=SOURCE))
+    source=SOURCE, plank="sim-iccard"))

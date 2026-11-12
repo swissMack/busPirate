@@ -114,7 +114,11 @@ How it differs from `buspirate`:
   check, then the action. A target that already has its own voltage is
   *target-powered*: the supply stays off. If the check fails, power stays as
   planned so you can fix the wiring and re-run with `recipe_run(token=None)`
-  within 5 minutes.
+  within 5 minutes. A plan's `wiring` is a list of `{pin, colour, target, note}`
+  steps and its `plank` is null, except for a recipe that runs on a plank: then
+  `wiring` is the plank's setup steps (plain sentences) and `plank` is
+  `{key, name, setup, notes, source}`. `recipes("plank")` lists the plank
+  recipes first; each result names its `plank` (or null).
 - **Memory recipes:** read-only `i2c-eeprom`, `spi-eeprom`, `microwire-eeprom`,
   `onewire-eeprom`, `ddr4-spd`, `ddr5-spd` and `midi`; changing ones
   `i2c-eeprom-write`, `fram-write`, `spi-flash-write`, `spi-eeprom-write`,
@@ -142,8 +146,22 @@ How it differs from `buspirate`:
   (use the `pulseview` hand-off) and `tvbgone` (it cannot be stopped). Also not automated: macros and scripts, `button`,
   `pause -b`, `bridge`, `fusb302 scan`, `format`, `edit`, `hexedit`, UART `glitch`
   and `sle4442`.
-- **Smart card, USB-PD and disk recipes:** `smartcard-atr` reads a smart card's
-  answer to reset (read-only). `usbpd-status` reads the USB-PD plank's offers and
+- **Smart card and SIM recipes (the IC card and SIM adapter plank):** plug the
+  plank into the main header, set its switches to VCC:VOUT and GND:GND, and put
+  the card in the mini, micro or nano SIM socket (or a smart card in the socket
+  on the back). The CARD LED lights only for the large socket on the back; for a
+  SIM the power LED shows the card is powered. `smartcard-atr` reads a smart
+  card's answer to reset. `sim-report` is a business summary of a SIM card:
+  operator, country, brand, ICCID and IMSI, capabilities and networks, with the
+  raw values underneath. It is read-only by construction: only SELECT, READ
+  BINARY, READ RECORD, GET RESPONSE, STATUS and VERIFY are ever sent, and
+  contacts, SMS, the phone number (MSISDN), FDN, SDN and call logs are never
+  read. With the SIM PIN on, the files it locks show as locked.
+  `sim-report-pin` takes the PIN: `recipe_run` reads the attempts left and stops
+  with a `commit`; after its own yes `recipe_commit` tries the PIN exactly once,
+  never retried, refused at one attempt left, and never stored or logged. A
+  wrong PIN reports the attempts now left.
+- **USB-PD and disk recipes:** `usbpd-status` reads the USB-PD plank's offers and
   VBUS; `usbpd-request` asks the source for one offer and `usbpd-reset` sends a
   hard reset, which power-cycles anything on the plank (VBUS drops to 0 V, then
   5 V). The plank's output stays at the requested voltage after `hiz`; run

@@ -1,12 +1,14 @@
 """The sim-report recipe: a business summary of a SIM card, on the simulated SIM."""
 
+import dataclasses
+
 import pytest
 
 from buspirate.bp6.console import TerminalError
 from buspirate.mcp.confirm import ConfirmStore
 from buspirate.mcp.session import BoardSession
 from buspirate.mcp_bp6 import engine
-from buspirate.mcp_bp6.recipes import REGISTRY, find_recipes
+from buspirate.mcp_bp6.recipes import PLANKS, REGISTRY, find_recipes
 from buspirate.mcp_bp6.recipes import sim as recipe_sim
 from buspirate.mcp_bp6.recipes import smartcard
 from buspirate.simulator_bp6 import make_sim
@@ -513,3 +515,60 @@ def test_card_silent_after_the_verify_header_may_have_changed(session, confirm, 
     assert PIN not in json.dumps(done)
     assert session.last_recipe is None
     _ended_cleanly(_fake(session))
+
+
+# -- the SIM card plank ----------------------------------------------------------
+
+PLANK_RECIPES = ["sim-report", "sim-report-pin", "smartcard-atr"]
+
+
+def test_the_plank_is_described():
+    plank = PLANKS["sim-iccard"]
+    assert plank["name"] == "IC card and SIM adapter plank"
+    assert plank["setup"] == (
+        "plug the plank into the Bus Pirate's main header",
+        "set the switches to VCC:VOUT and GND:GND",
+        "put the card in the mini, micro or nano SIM socket (or a smart card in the socket "
+        "on the back)")
+    assert plank["source"] == "https://docs.buspirate.com/docs/overview/sim-iccard-adapter/"
+    assert any("CARD LED" in n and "power LED" in n for n in plank["notes"])
+    assert sorted(n for n, r in REGISTRY.items() if r.plank == "sim-iccard") == PLANK_RECIPES
+
+
+@pytest.mark.parametrize("name", PLANK_RECIPES)
+def test_plank_recipe_plan_shows_the_setup_steps(session, confirm, name):
+    plan = engine.plan_recipe(session, confirm, name, {"millivolts": 3000})
+    assert "error" not in plan, plan
+    assert plan["wiring"] == list(PLANKS["sim-iccard"]["setup"])
+    assert plan["plank"] == {"key": "sim-iccard", "name": "IC card and SIM adapter plank",
+                             "setup": list(PLANKS["sim-iccard"]["setup"]),
+                             "notes": list(PLANKS["sim-iccard"]["notes"]),
+                             "source": PLANKS["sim-iccard"]["source"]}
+    assert _fake(session).psu_enabled is False  # planning switches nothing on
+
+
+def test_a_wired_recipe_has_no_plank(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "i2c-eeprom", {})
+    assert plan["plank"] is None
+    assert plan["wiring"] and all("pin" in step for step in plan["wiring"])
+
+
+@pytest.mark.parametrize("query", ["sim plank", "sim", "plank", "sim-iccard", "adapter"])
+def test_the_plank_finds_its_recipes(query):
+    found = find_recipes(query)
+    assert [r["name"] for r in found][:3] == PLANK_RECIPES
+    assert [r["name"] for r in found if r["plank"]] == PLANK_RECIPES
+    assert all(r["plank"] == "IC card and SIM adapter plank" for r in found[:3])
+
+
+def test_plank_finds_exactly_the_plank_recipes_and_the_usb_pd_plank():
+    # The USB-PD recipes say "plank" in their own words and titles; they have no setup steps.
+    names = [r["name"] for r in find_recipes("plank")]
+    assert names == PLANK_RECIPES + ["usbpd-request", "usbpd-reset", "usbpd-status"]
+    assert [r["name"] for r in find_recipes("sim plank")] == PLANK_RECIPES
+
+
+def test_an_unknown_plank_is_refused():
+    r = REGISTRY["sim-report"]
+    with pytest.raises(ValueError, match="plank"):
+        dataclasses.replace(r, name="x", plank="nope")

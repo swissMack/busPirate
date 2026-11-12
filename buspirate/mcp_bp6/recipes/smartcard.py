@@ -53,4 +53,4 @@ register(Recipe(
     notes=("cards are 5 V (class A), 3 V (B) or 1.8 V (C): use the card's class; "
            "3 V suits most SIMs",
            "read-only: this never sends a command or a PIN to the card"),
-    source=SOURCE))
+    source=SOURCE, plank="sim-iccard"))

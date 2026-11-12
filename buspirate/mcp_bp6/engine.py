@@ -21,7 +21,7 @@ from ..mcp.confirm import ConfirmError, ConfirmStore
 from ..mcp.session import BoardGone, NotConnected
 from ..mcp.wiring import WiringStep, cable_colour
 from . import console_power, state
-from .recipes import REGISTRY, Recipe
+from .recipes import PLANKS, REGISTRY, Recipe
 
 ACTION = "recipe_run"  #: the ConfirmStore action recipe tokens are issued for
 WINDOW_S = 300.0       #: how long a token, and a re-run after a run, stays valid
@@ -117,6 +117,15 @@ def _wiring(recipe: Recipe, target_powered: bool,
     return steps
 
 
+def _plank(recipe: Recipe) -> Optional[Dict[str, Any]]:
+    """The plank a recipe runs on: its name, setup steps, notes and docs page; else None."""
+    if recipe.plank is None:
+        return None
+    plank = PLANKS[recipe.plank]
+    return {"key": recipe.plank, "name": plank["name"], "setup": list(plank["setup"]),
+            "notes": list(plank.get("notes", ())), "source": plank["source"]}
+
+
 def _describe(recipe: Recipe) -> str:
     doc = (recipe.action.__doc__ or "").strip()
     return doc.splitlines()[0] if doc else recipe.title
@@ -204,7 +213,10 @@ def plan_recipe(session: Any, confirm: ConfirmStore, name: str,
     return {
         "recipe": recipe.name,
         "title": recipe.title,
-        "wiring": _wiring(recipe, supply == SUPPLY_TARGET, merged),
+        # A plank recipe's wiring is the plank's setup steps (strings), not per-wire steps.
+        "wiring": (list(PLANKS[recipe.plank]["setup"]) if recipe.plank
+                   else _wiring(recipe, supply == SUPPLY_TARGET, merged)),
+        "plank": _plank(recipe),
         "power": plan.to_dict() if plan else None,
         "target_powered": supply == SUPPLY_TARGET,
         "target_mv": target_mv,

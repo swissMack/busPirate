@@ -16,6 +16,26 @@ BUSES = JOBS + ("led", "jtag", "board", "infrared")
 TRANSPORTS = ("bpio2", "terminal")
 SUPPLIED_BY = ("engine", "action")
 
+#: Planks: an adapter that plugs into the main header in place of loose wires. A recipe
+#: with ``plank`` set shows the plank's ``setup`` steps (and its ``notes``) as its wiring.
+PLANKS = {
+    "sim-iccard": {
+        "name": "IC card and SIM adapter plank",
+        "setup": (
+            "plug the plank into the Bus Pirate's main header",
+            "set the switches to VCC:VOUT and GND:GND",
+            "put the card in the mini, micro or nano SIM socket (or a smart card in the "
+            "socket on the back)",
+        ),
+        "notes": (
+            "the CARD LED lights only for a card in the large socket on the back; a SIM in "
+            "the nano, micro or mini socket leaves it dark — the power LED shows the card "
+            "is powered",
+        ),
+        "source": "https://docs.buspirate.com/docs/overview/sim-iccard-adapter/",
+    },
+}  # type: Dict[str, Dict[str, Any]]
+
 
 @dataclass(frozen=True)
 class Recipe:
@@ -82,8 +102,13 @@ class Recipe:
     #: Set by a recipe whose options hold a secret (a PIN): why ``recipe_run(token=None)``
     #: refuses it. The engine then keeps none of its options after a run or a commit.
     no_rerun: str = ""
+    #: A key of ``PLANKS``: the recipe runs on that plank, and its plan shows the plank's
+    #: setup steps in place of the per-wire ``wiring`` (which still names the pins used).
+    plank: Optional[str] = None
 
     def __post_init__(self) -> None:
+        if self.plank is not None and self.plank not in PLANKS:
+            raise ValueError("recipe %r: plank must be one of %s" % (self.name, sorted(PLANKS)))
         if self.bus not in BUSES:
             raise ValueError("recipe %r: bus must be one of %s" % (self.name, BUSES))
         if self.risk not in RISKS:
@@ -115,11 +140,21 @@ def register(recipe: Recipe) -> Recipe:
     return recipe
 
 
-def _rank(recipe: Recipe, query: str) -> Optional[int]:
-    """0 exact name, 1 one of its words, 2 a substring of name, words or title."""
+def _plank_words(recipe: Recipe) -> List[str]:
+    """The plank's key, its name and the word "plank"."""
+    if recipe.plank is None:
+        return []
+    return [recipe.plank.lower(), PLANKS[recipe.plank]["name"].lower(), "plank"]
+
+
+def _rank_one(recipe: Recipe, query: str) -> Optional[int]:
+    """0 exact name, 1 one of its words, 2 a substring of name, words or title.
+
+    The words include the plank's (``_plank_words``), so "plank" finds a plank's recipes.
+    """
     if recipe.name.lower() == query:
         return 0
-    words = [w.lower() for w in recipe.words]
+    words = [w.lower() for w in recipe.words] + _plank_words(recipe)
     if query in words:
         return 1
     if any(query in text for text in [recipe.name.lower(), recipe.title.lower()] + words):
@@ -127,7 +162,20 @@ def _rank(recipe: Recipe, query: str) -> Optional[int]:
     return None
 
 
-def find_recipes(query: Optional[str]) -> List[Dict[str, str]]:
+def _rank(recipe: Recipe, query: str) -> Optional[int]:
+    """The whole query's rank; failing that, a query of several words matches when every
+    word does, ranked by its worst word ("sim plank")."""
+    rank = _rank_one(recipe, query)
+    terms = query.split()
+    if rank is not None or len(terms) < 2:
+        return rank
+    ranks = [_rank_one(recipe, term) for term in terms]
+    if any(r is None for r in ranks):
+        return None
+    return 2 + max(ranks)  # type: ignore[operator]
+
+
+def find_recipes(query: Optional[str]) -> List[Dict[str, Any]]:
     """Recipes matching ``query``, best first; with no query, all of them by bus."""
     q = (query or "").strip().lower()
     if not q:
@@ -136,7 +184,8 @@ def find_recipes(query: Optional[str]) -> List[Dict[str, str]]:
         ranked = [(rank, r.name, r) for r in REGISTRY.values()
                   for rank in [_rank(r, q)] if rank is not None]
         found = [r for _, _, r in sorted(ranked, key=lambda item: item[:2])]
-    return [{"name": r.name, "title": r.title, "bus": r.bus, "source": r.source}
+    return [{"name": r.name, "title": r.title, "bus": r.bus, "source": r.source,
+             "plank": PLANKS[r.plank]["name"] if r.plank else None}
             for r in found]
 
 
