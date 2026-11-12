@@ -4,12 +4,17 @@ The report reads only operator and network files. It never selects the
 phone book, text messages, the own phone number or call records (EF_ADN,
 EF_SMS, EF_MSISDN, EF_FDN, EF_SDN, the logs), and :class:`SimLink` can send
 nothing but SELECT, READ BINARY, READ RECORD, GET RESPONSE and STATUS.
+
+Route: when EF_DIR lists a USIM application, the network files are read
+through it (class ``00``, SELECT by AID); DF_GSM (class ``A0``, ``7F20``)
+only when no USIM is listed or the card refuses that select.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from ...bp6.console import TerminalError
 from ...bp6.sim import GSM_CLA, SELECT, UICC_CLA, SimLink
 from ...devices import sim as dec
 from ...devices.sim import SST_SERVICES, UST_SERVICES  # noqa: F401  (cited by CAPABILITIES)
@@ -20,7 +25,10 @@ Options = Dict[str, Any]
 
 NOT_ON_CARD = "not on this card"
 LOCKED = "locked by the SIM PIN"
-EMPTY = "empty on this card"
+UNREADABLE = "could not be read (the file is empty or malformed)"
+#: What ``capabilities`` lists, and what it does not promise.
+CAPABILITIES_NOTE = "what the SIM supports; the subscription itself may differ"
+PARTLY_LOCKED = "; more may be listed once the SIM PIN is given"
 NONE_RECORDED = "none recorded"
 KI = "secret key (Ki) and authentication keys — no SIM allows reading them"
 
@@ -60,7 +68,8 @@ APP_FILES = (
     ("EF_ACC", 0x6F78, "access class"),
 )
 
-#: What the operator has enabled, in plain words, in report order. A phrase is
+#: What the SIM is ready for, in plain words, in report order (readiness: the
+#: subscription may not include it, see CAPABILITIES_NOTE). A phrase is
 #: listed when any of its sources is on:
 #:   USIM services: EF_UST bits, TS 31.102 §4.2.8 (names in ``devices.sim.UST_SERVICES``);
 #:   GSM services: EF_SST, TS 51.011 §10.3.7 (``devices.sim.SST_SERVICES``);
@@ -70,24 +79,24 @@ APP_FILES = (
 #: provisioning", so the report never claims it.
 CAPABILITIES = (
     # phrase, UST services, SST services, radio types
-    ("2G (GSM)", (27,), (), ("2G (GSM)",)),                     # UST 27 GSM access
-    ("EC-GSM-IoT", (), (), ("2G (EC-GSM-IoT)",)),
-    ("3G (UMTS)", (), (), ("3G (UTRAN)",)),
-    ("4G (LTE)", (85,), (), ("4G (E-UTRAN)",)),                 # UST 85 EPS mobility information
-    ("NB-IoT", (121,), (), ("4G NB-IoT (E-UTRAN NB-S1)",)),     # UST 121 EARFCN list for MTC/NB-IoT
-    ("5G", (122, 123), (), ("5G (NG-RAN)",)),                   # UST 122 5GS mobility, 123 5G security
-    ("4G by satellite", (), (), ("4G by satellite (E-UTRAN WB-S1)",
-                                 "4G by satellite (E-UTRAN NB-S1)")),
-    ("5G by satellite", (), (), ("5G by satellite (NG-RAN)",)),
-    ("mobile data (GPRS)", (), (38,), ()),                      # SST 38 GPRS
-    ("voice over LTE (VoLTE)", (95,), (), ()),                  # UST 95 UICC access to IMS
-    ("SMS over IP", (91,), (), ()),                             # UST 91 SMS over IP
-    ("Wi-Fi calling", (106, 107), (), ()),                      # UST 106/107 ePDG configuration
-    ("Wi-Fi emergency calling", (110, 111), (), ()),            # UST 110/111 ePDG for emergency
-    ("emergency calls from vehicles (eCall)", (89, 112), (), ()),  # UST 89 eCall, 112 IMS eCall
-    ("5G identity privacy (SUCI)", (124,), (), ()),             # UST 124 subscription identifier privacy
-    ("picture messages (MMS)", (52,), (57,), ()),               # UST 52 / SST 57 MMS
-    ("operator can update the SIM over the air (OTA)", (28,), (26,), ()),  # UST 28 / SST 26 SMS-PP download
+    ("2G-ready (GSM)", (27,), (), ("2G (GSM)",)),               # UST 27 GSM access
+    ("EC-GSM-IoT-ready", (), (), ("2G (EC-GSM-IoT)",)),
+    ("3G-ready (UMTS)", (), (), ("3G (UTRAN)",)),
+    ("4G-ready (LTE)", (85,), (), ("4G (E-UTRAN)",)),           # UST 85 EPS mobility information
+    ("NB-IoT-ready", (121,), (), ("4G NB-IoT (E-UTRAN NB-S1)",)),  # UST 121 EARFCN list for MTC/NB-IoT
+    ("5G-ready", (122, 123), (), ("5G (NG-RAN)",)),             # UST 122 5GS mobility, 123 5G security
+    ("4G-by-satellite-ready", (), (), ("4G by satellite (E-UTRAN WB-S1)",
+                                       "4G by satellite (E-UTRAN NB-S1)")),
+    ("5G-by-satellite-ready", (), (), ("5G by satellite (NG-RAN)",)),
+    ("mobile-data-ready (GPRS)", (), (38,), ()),                # SST 38 GPRS
+    ("VoLTE-ready (voice over LTE)", (95,), (), ()),            # UST 95 UICC access to IMS
+    ("SMS-over-IP-ready", (91,), (), ()),                       # UST 91 SMS over IP
+    ("Wi-Fi-calling-ready", (106, 107), (), ()),                # UST 106/107 ePDG configuration
+    ("Wi-Fi-emergency-calling-ready", (110, 111), (), ()),      # UST 110/111 ePDG for emergency
+    ("eCall-ready (emergency calls from vehicles)", (89, 112), (), ()),  # UST 89 eCall, 112 IMS eCall
+    ("SUCI-ready (5G identity privacy)", (124,), (), ()),       # UST 124 subscription identifier privacy
+    ("MMS-ready (picture messages)", (52,), (57,), ()),         # UST 52 / SST 57 MMS
+    ("OTA-updatable (the operator can update the SIM over the air)", (28,), (26,), ()),  # UST 28 / SST 26
 )
 
 #: Access classes 11 to 15 (3GPP TS 22.011 §4.2): special, high-priority users.
@@ -106,16 +115,6 @@ _LANGUAGES = {
 
 # -- reading -------------------------------------------------------------------
 
-def _tlv(data: bytes) -> Dict[int, bytes]:
-    out = {}
-    i = 0
-    while i + 1 < len(data):
-        tag, length = data[i], data[i + 1]
-        out.setdefault(tag, data[i + 2:i + 2 + length])
-        i += 2 + length
-    return out
-
-
 def _shape(response: bytes, gsm: bool) -> Tuple[Optional[int], Optional[int]]:
     """(file size, record length or None for a transparent file) from a SELECT
     response: GSM bytes 3-4 / 14 / 15 (TS 51.011 §9.2.1), or the UICC FCP
@@ -125,7 +124,7 @@ def _shape(response: bytes, gsm: bool) -> Tuple[Optional[int], Optional[int]]:
             return None, None
         size = response[2] << 8 | response[3]
         return size, (response[14] or None) if response[13] in (0x01, 0x03) else None
-    fcp = _tlv(response[2:]) if response[:1] == b"\x62" else {}
+    fcp = dict(dec._tlv(response[2:])) if response[:1] == b"\x62" else {}
     size = int.from_bytes(fcp[0x80], "big") if fcp.get(0x80) else None
     desc = fcp.get(0x82, b"")
     record = None
@@ -207,8 +206,8 @@ def _decoded(reader: _Reader, name: str, decode: Any) -> Tuple[Any, Optional[str
         return None, why
     try:
         return decode(reader.data[name]), None
-    except ValueError:
-        return None, EMPTY
+    except (ValueError, IndexError):
+        return None, UNREADABLE
 
 
 # -- wording -------------------------------------------------------------------
@@ -280,19 +279,24 @@ def _last_network(reader: _Reader) -> str:
     return LOCKED if LOCKED in why else NONE_RECORDED
 
 
-def _capabilities(reader: _Reader, gsm: bool) -> Any:
+def _capabilities(reader: _Reader, gsm: bool) -> Tuple[Any, str]:
+    """(the readiness phrases, or LOCKED; the note that goes with them).
+
+    ``gsm``: the service table is a GSM SST (read under DF_GSM), not a USIM UST.
+    """
     services, why_services = _decoded(reader, "EF_SST",
                                       lambda b: dec.decode_service_table(b, "sst" if gsm else "ust"))
     home, why_home = _decoded(reader, "EF_HPLMNwAcT", lambda b: dec.decode_plmn_list(b, True))
-    if services is None and home is None and LOCKED in (why_services, why_home):
-        return LOCKED
+    locked = LOCKED in (why_services, why_home)
+    if services is None and home is None and locked:
+        return LOCKED, CAPABILITIES_NOTE
     on = {s["number"] for s in services or () if s["enabled"]}
     radio = {t for network in home or () for t in network["technologies"]}
     out = []
     for phrase, ust, sst, techs in CAPABILITIES:
         if on & set(sst if gsm else ust) or radio & set(techs):
             out.append(phrase)
-    return out
+    return out, CAPABILITIES_NOTE + (PARTLY_LOCKED if locked else "")
 
 
 # -- the report ----------------------------------------------------------------
@@ -300,17 +304,24 @@ def _capabilities(reader: _Reader, gsm: bool) -> Any:
 def build_report(link: SimLink) -> Dict[str, Any]:
     """Read the card's operator and network files and summarise them in plain words.
 
-    GSM commands (class ``A0``, DF_GSM ``7F20``) first; a card that refuses
-    class ``A0`` (``6E 00`` / ``6D 00``) is read with the UICC commands (class
-    ``00``, the USIM application from EF_DIR). The summary has the same keys
-    either way; the file bytes are under ``raw``.
+    The card files (EF_ICCID, EF_DIR, EF_PL) are read with class ``A0``, or
+    class ``00`` when the card refuses ``A0`` (``6E 00`` / ``6D 00``). When
+    EF_DIR lists a USIM application, the network files are read through it
+    (class ``00``, SELECT by AID); DF_GSM (class ``A0``, ``7F20``) is used only
+    when no USIM is listed or the card refuses that select. The summary has
+    the same keys either way; the file bytes are under ``raw``.
+
+    Raises ``TerminalError`` when the card refuses both classes.
     """
     link.cla = GSM_CLA
     _, sw = link.select(MF)
-    if sw in REFUSED_CLASS:
+    answers_gsm = sw not in REFUSED_CLASS
+    if not answers_gsm:
         link.cla = UICC_CLA
-        link.select(MF)
-    gsm = link.cla == GSM_CLA
+        _, sw = link.select(MF)
+        if sw in REFUSED_CLASS:
+            raise TerminalError("the card refuses both GSM (class A0) and UICC (class 00) "
+                                "commands (it answered %04X): it does not look like a SIM" % sw)
     reader = _Reader(link)
     for name, fid, label in MF_FILES:
         reader.read(name, fid, label)
@@ -318,30 +329,33 @@ def build_report(link: SimLink) -> Dict[str, Any]:
     apps, _ = _decoded(reader, "EF_DIR", dec.decode_dir)
     usim = next((a for a in apps or () if a["aid"].startswith(USIM_AID_PREFIX)), None)
     pin = {}  # type: Dict[str, Any]
-    if gsm:
+    through_usim = False
+    reach = 0x6A82  # neither route: the network files are not on this card
+    if usim is not None:
+        link.cla = UICC_CLA
+        _, reach = link.command(UICC_CLA, SELECT, 0x04, 0x04, bytes.fromhex(usim["aid"]))
+        through_usim = reach == 0x9000
+    if through_usim:
+        pin = link.pin_status()
+    elif answers_gsm:
+        link.cla = GSM_CLA
         pin = link.pin_status()  # selects DF_GSM
         reach = 0x9000 if pin["sw"] == "9000" else int(pin["sw"], 16)
-    elif usim is not None:
-        _, reach = link.command(UICC_CLA, SELECT, 0x04, 0x04, bytes.fromhex(usim["aid"]))
-        if reach == 0x9000:
-            pin = link.pin_status()
-    else:
-        reach = 0x6A82
     for name, fid, label in APP_FILES:
         if reach == 0x9000:
             reader.read(name, fid, label)
         else:
             reader.mark(name, label, reader._why(reach))
 
-    summary = _summary(reader, gsm, usim is not None, pin)
+    summary = _summary(reader, through_usim, pin)
     raw = {"ATR": link.atr_bytes.hex().upper()}
     raw.update(reader.raw())
-    if not gsm and "EF_SST" in raw:
+    if through_usim and "EF_SST" in raw:
         raw["EF_UST"] = raw.pop("EF_SST")  # 6F38 is the USIM service table under the USIM
     return {"summary": summary, "raw": raw}
 
 
-def _summary(reader: _Reader, gsm: bool, has_usim: bool, pin: Dict[str, Any]) -> Dict[str, Any]:
+def _summary(reader: _Reader, through_usim: bool, pin: Dict[str, Any]) -> Dict[str, Any]:
     iccid, why_iccid = _decoded(reader, "EF_ICCID", dec.decode_iccid)
     ad = reader.data.get("EF_AD", b"")
     imsi, why_imsi = _decoded(reader, "EF_IMSI", lambda b: dec.decode_imsi(b, dec.mnc_digits(ad)))
@@ -365,6 +379,7 @@ def _summary(reader: _Reader, gsm: bool, has_usim: bool, pin: Dict[str, Any]) ->
         operator = why_imsi
         country = (iccid or {}).get("country") or why_imsi
 
+    capabilities, capabilities_note = _capabilities(reader, gsm=not through_usim)
     if search is None:
         search_text = why_search
     elif search == 0:
@@ -384,12 +399,13 @@ def _summary(reader: _Reader, gsm: bool, has_usim: bool, pin: Dict[str, Any]) ->
         "brand_on_phones": why_spn or (spn["name"] or "none set"),
         "iccid": why_iccid or iccid["iccid"],
         "imsi": why_imsi or imsi["imsi"],
-        "card_type": "USIM" if has_usim or not gsm else "SIM",
+        "card_type": "USIM" if through_usim else "SIM",
         "pin": _pin_text(pin),
         "home_network": _network_name(home) if home is not None else why_imsi,
         "equivalent_home_networks": why_ehplmn or _names(ehplmn) or "none set",
         "home_network_search": search_text,
-        "capabilities": _capabilities(reader, gsm),
+        "capabilities": capabilities,
+        "capabilities_note": capabilities_note,
         "preferred_roaming": why_roaming or _names(roaming),
         "blocked_networks": why_blocked or _names(blocked),
         "last_network": _last_network(reader),

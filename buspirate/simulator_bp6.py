@@ -733,18 +733,24 @@ _UST_ON = (1, 2, 10, 19, 20, 21, 27, 28, 33, 42, 43, 71, 85, 91, 95, 106, 107, 1
 def make_sim(profile: str = "gsm", without=()) -> "FakeSim":
     """A FakeSim with a realistic Swisscom (MCC 228, MNC 01) subscription.
 
-    ``"gsm"``: an old GSM SIM (class ``A0`` only), PIN off. ``"usim"``: a USIM
-    that refuses class ``A0`` (``6E 00``) and keeps its files in the USIM
-    application, listed in EF_DIR. ``"pin-on"``: the GSM SIM with the PIN on,
-    its network files needing it. ``without``: file IDs to leave out.
+    ``"gsm"``: an old GSM SIM (class ``A0`` only, no EF_DIR), PIN off.
+    ``"pin-on"``: that SIM with the PIN on, its network files needing it.
+    ``"usim"``: a USIM that refuses class ``A0`` (``6E 00``), its files in the
+    USIM application listed in EF_DIR. ``"usim-a0"``: the common real card, a
+    USIM that also answers class ``A0`` (its DF_GSM is there but empty: the
+    simulator keys files by FID alone). ``"usim-adf-refused"``: EF_DIR lists
+    a USIM but selecting it fails (``6A 82``); the files are under DF_GSM.
+    ``without``: file IDs to leave out.
     """
-    if profile not in ("gsm", "usim", "pin-on"):
-        raise ValueError("profile must be gsm, usim or pin-on")
-    usim = profile == "usim"
+    profiles = ("gsm", "pin-on", "usim", "usim-a0", "usim-adf-refused")
+    if profile not in profiles:
+        raise ValueError("profile must be one of %s" % (profiles,))
+    usim = profile in ("usim", "usim-a0")  # the files live in the USIM application
     iccid = _swapped("89410112345678901231")
     card = FakeSim(iccid=iccid, pin_enabled=profile == "pin-on")
     del card.files[0x7F20]
-    card.classes = (0x00,) if usim else (0xA0,)
+    card.classes = {"usim": (0x00,), "usim-a0": (0xA0, 0x00),
+                    "usim-adf-refused": (0xA0, 0x00)}.get(profile, (0xA0,))
     swisscom, sunrise, salt = _bcd_plmn("228", "01"), _bcd_plmn("228", "02"), _bcd_plmn("228", "03")
     imsi = "228011234567890"
     files = {
@@ -770,14 +776,16 @@ def make_sim(profile: str = "gsm", without=()) -> "FakeSim":
         0x6F40: b"\xff" * 28,                                            # EF_MSISDN
     }
     no_pin = (0x6F46, 0x6FAD)
-    if usim:
+    if profile.startswith("usim") and 0x2F00 not in without:
         card.add_file(0x3F00, 0x2F00, records=[
             bytes.fromhex("61144F0C") + USIM_AID + bytes.fromhex("5004") + b"USIM"
             + b"\xff" * 10])
+    if profile != "usim":
+        card.add_file(0x3F00, 0x7F20, df=True)
+    if usim:
         card.add_file(0x3F00, _ADF, df=True, aid=USIM_AID)
         home = _ADF
     else:
-        card.add_file(0x3F00, 0x7F20, df=True)
         home = 0x7F20
     if 0x2F05 not in without:
         # EF_PL (UICC) / EF_ELP (GSM): ISO 639 language codes, German then English.
