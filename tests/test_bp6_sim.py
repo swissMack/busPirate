@@ -69,8 +69,8 @@ def test_open_reads_the_atr_and_keeps_printing(fake):
         finally:
             link.close()
     assert fake.pwm == {} and not fake._hduart_printing
-    tail = sent(fake)[-2:]
-    assert tail == [b"]\r", b"g 1\r"], tail
+    tail = sent(fake)[-3:]
+    assert tail == [b"]\r", b"}\r", b"g 1\r"], tail
 
 
 def test_open_with_no_card_cleans_up(fake):
@@ -79,7 +79,7 @@ def test_open_with_no_card_cleans_up(fake):
         with pytest.raises(TerminalError) as exc:
             open_link(con)
     assert "no answer from the card" in str(exc.value)
-    assert sent(fake)[-2:] == [b"]\r", b"g 1\r"]
+    assert sent(fake)[-3:] == [b"]\r", b"}\r", b"g 1\r"]
     assert fake.pwm == {}
 
 
@@ -87,7 +87,7 @@ def test_link_is_a_context_manager(fake):
     with make(fake).open().console() as con:
         with open_link(con) as link:
             link.select(0x3F00)
-    assert sent(fake)[-2:] == [b"]\r", b"g 1\r"] and fake.pwm == {}
+    assert sent(fake)[-3:] == [b"]\r", b"}\r", b"g 1\r"] and fake.pwm == {}
 
 
 # -- commands ------------------------------------------------------------------
@@ -216,9 +216,9 @@ def test_close_runs_both_steps_and_keeps_the_first_error():
     link = SimLink(con)
     with pytest.raises(TerminalError):
         link.close()
-    assert con.lines == ["]", "g 1"]
+    assert con.lines == ["]", "}", "g 1"]
     link.close()  # a second close sends nothing
-    assert con.lines == ["]", "g 1"]
+    assert con.lines == ["]", "}", "g 1"]
 
 
 # -- the PIN -------------------------------------------------------------------
@@ -354,7 +354,7 @@ def test_pin_line_failure_keeps_the_pin_out_of_log_and_error(fake):
     assert "PIN block" in message
     assert "9876" not in message and "0x39" not in message.lower()
     assert _leaks(log) == [], _leaks(log)
-    assert sent(fake)[-2:] == [b"]\r", b"g 1\r"]
+    assert sent(fake)[-3:] == [b"]\r", b"}\r", b"g 1\r"]
 
 
 def test_read_binary_refuses_an_sfi_offset(fake):

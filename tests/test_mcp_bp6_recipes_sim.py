@@ -64,9 +64,11 @@ def _report(session, confirm, card):
 
 
 def _ended_cleanly(fake):
-    """The link's close went out: async print off (``]``), then the clock off (``g 1``)."""
+    """The link's close went out: async print off (``]``), RST low (``}``), then the clock off (``g 1``)."""
     lines = [ln for ln in fake.lines_received() if ln != b"\r"]
-    assert b"]\r" in lines and b"g 1\r" in lines[lines.index(b"]\r"):], lines[-6:]
+    assert b"]\r" in lines, lines[-6:]
+    after = lines[len(lines) - 1 - lines[::-1].index(b"]\r"):]
+    assert after[:3] == [b"]\r", b"}\r", b"g 1\r"], lines[-6:]
 
 
 def _aid_selects(card):

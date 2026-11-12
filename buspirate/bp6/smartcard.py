@@ -58,9 +58,10 @@ def reset_card(con: Any, wait_s: float) -> bytes:
 
 
 def stop(con: Any, first: Optional[BaseException] = None) -> Optional[BaseException]:
-    """Send ``]`` (print off) and ``g 1`` (clock off), each even when the other
-    fails; return ``first`` or else the first error they raised."""
-    for line in ("]", "g %d" % CLOCK_PIN):
+    """Send ``]`` (print off), ``}`` (RST low) and ``g 1`` (clock off), each
+    even when another fails; return ``first`` or else the first error they
+    raised. RST goes low before the clock stops (ISO 7816-3 deactivation)."""
+    for line in ("]", "}", "g %d" % CLOCK_PIN):
         try:
             con.command(line)
         except Exception as exc:
@@ -73,8 +74,8 @@ def read_atr(con: Any, clock_hz: int, wait_s: float) -> Dict[str, Any]:
     """Clock the card, pulse RST and return the bytes it answers, decoded.
 
     Refuses, before releasing reset, a clock whose ``actual_hz / 372`` is more
-    than 2 % from the 9600 baud the terminal listens at. Always sends ``]``
-    and ``g 1`` at the end, each even when a step (or the other) fails; the
+    than 2 % from the 9600 baud the terminal listens at. Always sends ``]``,
+    ``}`` and ``g 1`` at the end, each even when a step (or another) fails; the
     first error is the one raised.
     """
     first = None  # type: Optional[BaseException]

@@ -4,7 +4,7 @@ The board must already be in ``m hduart -b 9600 -d 8 -p even -s 2 -l listen``
 (IO0 = RXTX, IO2 = RST; listen mode drives the line only while a byte goes
 out). :meth:`SimLink.open` starts the card clock on IO1, resets the card,
 reads its ATR and leaves the async print (``[``) on; :meth:`SimLink.close`
-sends ``]`` and ``g 1``.
+sends ``]``, ``}`` and ``g 1``.
 
 Each command header goes out as one terminal line of five bytes
 (``0xA0 0xA4 0x00 0x00 0x02``), each data block as one more line after the
@@ -153,8 +153,8 @@ class SimLink:
         return link
 
     def close(self) -> None:
-        """Async print off (``]``) and clock off (``g 1``), each even when the
-        other fails; the first error is raised. A second close sends nothing."""
+        """Async print off (``]``), RST low (``}``) and clock off (``g 1``), each
+        even when another fails; the first error is raised. A second close sends nothing."""
         if self._closed:
             return
         self._closed = True
