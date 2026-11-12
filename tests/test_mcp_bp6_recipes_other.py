@@ -861,3 +861,126 @@ def test_ps2_recipe_shape():
     assert (r.risk, r.supply_by, r.terminal_mode, r.pullups) == ("owner-only", "action", "ps2", False)
     assert (r.default_mv, r.min_mv, r.max_mv, r.milliamps) == (5000, 5000, 5000, 400)
     assert r.target_powered_ok is False and r.options == {"seconds": 10}
+
+
+# -- infrared -----------------------------------------------------------------
+
+from buspirate.devices import ir  # noqa: E402
+
+NEC_AIR = ir.to_air(38, ir.encode_nec(4, 8))
+SHORT_AIR = "$38:900,450,560,560,560,"
+
+
+def _ir(session, confirm, name, opts):
+    return _run(session, confirm, name, dict(opts, millivolts=3300))
+
+
+def test_ir_receive_decodes_nec(session, confirm):
+    fake = _fake(session)
+    fake.ir_frames = [NEC_AIR]
+    _, out = _ir(session, confirm, "ir-receive", {"seconds": 0.3})
+    frame = out["result"]["frames"][0]
+    assert frame["decoded"] == {"protocol": "nec", "address": 4, "command": 8}, out
+    assert frame["air"].startswith("$38:9000,4500,")
+    assert b"m infrared -p raw -r 38k_demod\r" in fake.lines_received()
+    assert b"irrx -s 38d\r" in fake.lines_received()
+
+
+def test_ir_receive_two_frames_space_between(session, confirm):
+    fake = _fake(session)
+    fake.ir_frames = [SHORT_AIR, SHORT_AIR]
+    _, out = _ir(session, confirm, "ir-receive", {"seconds": 0.3})
+    assert out["result"]["count"] == 2, out
+    # one space per menu shown (the last one asks for a frame that never comes), then x:
+    # raw keys, no Enter
+    assert fake.keys_seen == [b" ", b" ", b"x"], fake.keys_seen
+    assert not any(k.endswith(b"\r") for k in fake.keys_seen)
+
+
+def test_ir_receive_marks_long_frames(session, confirm):
+    fake = _fake(session)
+    fake.ir_frames = [NEC_AIR, SHORT_AIR]
+    _, out = _ir(session, confirm, "ir-receive", {"seconds": 0.3})
+    frames = out["result"]["frames"]
+    assert frames[0]["resendable"] is False and frames[1]["resendable"] is True
+    assert frames[1]["decoded"] is None
+
+
+def test_ir_send_nec(session, confirm):
+    fake = _fake(session)
+    _, out = _ir(session, confirm, "ir-send-nec", {"address": 4, "command": 8})
+    assert out["result"]["tx"] == "0x0408", out
+    assert b"> 0x0408\r" in fake.lines_received()
+    assert b"m infrared -p nec\r" in fake.lines_received()
+    assert fake.ir_sent == [("nec", 0x0408)]
+
+
+def test_ir_send_rc5(session, confirm):
+    fake = _fake(session)
+    _, out = _ir(session, confirm, "ir-send-rc5", {"address": 5, "command": 12, "toggle": 1})
+    assert b"> 0x094C\r" in fake.lines_received()
+    assert fake.ir_sent == [("rc5", 0x094C)]
+    # tx is what the firmware echoed: it forces S1 and S2 (0x3000) into the value
+    assert out["result"]["tx"] == "0x394C" and out["result"]["sent"] is True
+
+
+def test_ir_send_raw_resends_received(session, confirm):
+    fake = _fake(session)
+    _, out = _ir(session, confirm, "ir-send-raw", {"air": SHORT_AIR})
+    assert fake.ir_sent == [("raw", SHORT_AIR)], out
+    assert b"irtx " + SHORT_AIR.encode() + b"\r" in fake.lines_received()
+    assert out["result"] == {"sent": True, "carrier_khz": 38, "pairs": 3}
+
+
+def test_ir_send_raw_too_long(session, confirm):
+    fake = _fake(session)
+    plan = engine.plan_recipe(session, confirm, "ir-send-raw", {"millivolts": 3300, "air": NEC_AIR})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    err = out["check"]["error"]
+    assert out["check"]["ok"] is False and "256" in err and "ir-send-nec" in err, out
+    assert not any(l.startswith(b"irtx") for l in fake.lines_received())
+    assert fake.ir_sent == []
+
+
+def test_ir_send_refuses_semicolon(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "ir-send-raw",
+                              {"millivolts": 3300, "air": "$38:9000,4500,;"})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out["check"]["ok"] is False, out
+
+
+def test_ir_sensor_refused(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "ir-receive", {"millivolts": 3300, "sensor": "99"})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out["check"]["ok"] is False and "38d, 56d, 38b" in out["check"]["error"], out
+
+
+def test_ir_send_values_refused(session, confirm):
+    cases = [("ir-send-nec", {"address": 256, "command": 0}),
+             ("ir-send-nec", {"address": 1}),
+             ("ir-send-rc5", {"address": 32, "command": 0}),
+             ("ir-send-rc5", {"address": 0, "command": 64}),
+             ("ir-send-rc5", {"address": 0, "command": 0, "toggle": 2}),
+             ("ir-receive", {"seconds": 61})]
+    for name, opts in cases:
+        plan = engine.plan_recipe(session, confirm, name, dict(opts, millivolts=3300))
+        out = engine.run_recipe(session, confirm, plan["token"], {})
+        assert out["check"]["ok"] is False, (name, opts, out)
+    assert not _fake(session).ir_sent
+
+
+def test_ir_wiring_follows_sensor(session, confirm):
+    def rx(sensor):
+        plan = engine.plan_recipe(session, confirm, "ir-receive", {"sensor": sensor})
+        return [w["bp6_pin"] if "bp6_pin" in w else w["pin"] for w in plan["wiring"]
+                if "receiver" in w["target"].lower()]
+    assert rx("56d") == ["IO7"] and rx("38d") == ["IO5"] and rx("38b") == ["IO3"]
+    plan = engine.plan_recipe(session, confirm, "ir-receive", {"sensor": "56d"})
+    pins = [w["pin"] for w in plan["wiring"]]
+    assert "IO4" in pins and "IO5" not in pins and "VOUT" in pins and "GND" in pins
+
+
+def test_ir_recipes_found_by_words():
+    from buspirate.mcp_bp6.recipes import find_recipes
+    assert {r["name"] for r in find_recipes("blast")} == {"ir-send-nec", "ir-send-rc5", "ir-send-raw"}
+    assert find_recipes("learn")[0]["name"] == "ir-receive"

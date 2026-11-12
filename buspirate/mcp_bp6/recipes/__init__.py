@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from ...mcp.wiring import JOBS
 
 RISKS = ("none", "destructive", "owner-only")
-BUSES = JOBS + ("led", "jtag", "board")
+BUSES = JOBS + ("led", "jtag", "board", "infrared")
 TRANSPORTS = ("bpio2", "terminal")
 SUPPLIED_BY = ("engine", "action")
 
@@ -66,6 +66,9 @@ class Recipe:
     supply_by: str = "engine"
     target_powered_ok: bool = True
     target_powered_error: str = ""
+    #: Given the merged options, the wiring to show in place of ``wiring`` (a recipe
+    #: whose pins depend on an option, such as which IR sensor is used).
+    wiring_for: Optional[Callable[[Dict[str, Any]], Tuple[Tuple[str, str], ...]]] = None
 
     def __post_init__(self) -> None:
         if self.bus not in BUSES:
@@ -127,4 +130,4 @@ def find_recipes(query: Optional[str]) -> List[Dict[str, str]]:
 
 
 from . import i2c  # noqa: E402,F401  (registers the I2C recipes)
-from . import board, ddr, handoff, identify, jtag, led, onewire, pins, signals, sniff, spi, uart  # noqa: E402,F401  (the other buses)
+from . import board, ddr, handoff, identify, jtag, led, infrared, onewire, pins, signals, sniff, spi, uart  # noqa: E402,F401  (the other buses)

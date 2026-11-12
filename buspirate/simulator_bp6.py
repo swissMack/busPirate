@@ -491,6 +491,10 @@ class FakeBp6:
         self.ps2_psu_error = None
         #: The infrared protocol (-p) the INFRARED prompt shows: RAW, NEC or RC5.
         self.ir_protocol = "RAW"
+        #: aIR strings (no ``;``) the receiver hears one after another on ``irrx``.
+        self.ir_frames = []
+        #: What the board was told to send: ("raw", air), ("nec", value) or ("rc5", value).
+        self.ir_sent = []
         #: Self-test (``~``): whether a human presses the button, whether the NAND
         #: has a file system, and extra failing lines to print (each is one error).
         self.button_pressed = True
@@ -905,6 +909,8 @@ class FakeBp6:
         self.keys_seen.append(bytes(keys))
         if time.monotonic() < s.get("drain_until", 0):
             return  # the firmware discards input it drains before its ready line
+        if s.get("on_key") is not None:
+            s["on_key"](keys.decode("ascii", "replace"))
         if any(k in keys.decode("ascii", "replace") for k in s["stop"]):
             self._streaming = None
             self._terminal_state = "prompt"
@@ -1097,7 +1103,11 @@ class FakeBp6:
         self._gone_from = time.monotonic() + self.reset_lag_s
         self._gone_until = self._gone_from + self.reset_seconds
 
+    #: The line editor keeps 256 characters and drops the rest without a sound.
+    MAX_LINE = 256
+
     def _command(self, text: str) -> None:
+        text = text[:self.MAX_LINE]
         words = text.split()
         if not words:  # a stray space at the prompt: the firmware just redraws it
             self._say("\n" + self._prompt())
@@ -1133,10 +1143,73 @@ class FakeBp6:
                           for i in range(0, len(self.sniff_lines), 10)], inline_prompt=True)
         elif name == "sniff" and self.mode == "PS2":
             self._cmd_ps2_sniff(text)
+        elif name == "irrx" and self.mode == "INFRARED":
+            self._cmd_irrx(text, args)
+        elif name == "irtx" and self.mode == "INFRARED":
+            self._cmd_irtx(text, text[len("irtx"):].strip())
+        elif text.lstrip().startswith(">") and self.mode == "INFRARED" and self.ir_protocol != "RAW":
+            self._cmd_ir_write(text)
         elif name == "bluetag" and self.mode == "JTAG":
             self._cmd_bluetag(text, args)
         else:
             self._finish(text, f"Invalid command: {text}. Type ? for help.\r\n")
+
+    IR_SENSORS = {"38b": "38kHz barrier", "38d": "36-40kHz demodulator", "56d": "56kHz demodulator"}
+
+    def _cmd_irrx(self, text: str, args) -> None:
+        sensor = args[args.index("-s") + 1].lower() if "-s" in args[:-1] else "38d"
+        name = self.IR_SENSORS.get(sensor, self.IR_SENSORS["38d"])
+        banner = ("No file specified, packets cannot be saved\r\nRX sensor: %s\r\n"
+                  "\r\nListening for IR packets (x to exit)...\r\n" % name)
+        advance = []   # a space at the menu asks for the next frame
+
+        def frames():
+            for i, air in enumerate(list(self.ir_frames)):
+                while i and not advance:
+                    yield ""
+                if advance:
+                    advance.pop()
+                pairs = (air.count(",") + 1) // 2
+                carrier = int(air[1:air.index(":")])
+                yield ("\r\n%s;\r\n\r\nModulation frequency %dkHz, %d MARK/SPACE pairs\r\n\r\n"
+                       "'r' or 't' to re-transmit, space for next, 'x' to exit > "
+                       % (air, carrier, pairs))
+
+        self._stream(text, banner, ("x",), "Exiting...\r\n", frames())
+        self._streaming["on_key"] = lambda k: advance.append(1) if k == " " else None
+
+    def _cmd_irtx(self, text: str, air: str) -> None:
+        found = re.fullmatch(r"\$(\d+):((?:\d+,)+)", air)
+        if not found:
+            problem = ("Unable to find start of data ($) in AIR packet" if not air.startswith("$")
+                       else "Unable to find modulation frequency (:) in AIR packet" if ":" not in air
+                       else "Unable to find end of MARK/SPACE data (,) in AIR packet")
+            self._finish(text, "\x07\r\nTransmitting from command line\r\n%s\r\n"
+                         "Error parsing AIR packet\r\n" % problem)
+            return
+        values = found.group(2).split(",")[:-1]
+        pairs = (len(values) + 1) // 2
+        if pairs > 127:
+            self._finish(text, "\x07\r\nTransmitting from command line\r\nToo many MARK/SPACE "
+                         "pairs in AIR packet, max 127\r\nError parsing AIR packet\r\n")
+            return
+        self.ir_sent.append(("raw", air))
+        self._finish(text, "\r\nTransmitting from command line\r\n\r\n%s;\r\n\r\n"
+                     "Parsed AIR packet: modulation frequency %dkHz, %d MARK/SPACE pairs\r\n"
+                     "Transmitting...done\r\n" % (air, int(found.group(1)), pairs))
+
+    def _cmd_ir_write(self, text: str) -> None:
+        sent = []
+        for word in text.lstrip()[1:].split():
+            try:
+                value = int(word, 0)
+            except ValueError:
+                self._finish(text, "\x07\r\nError: invalid number %s\r\n" % word)
+                return
+            self.ir_sent.append((self.ir_protocol.lower(), value))
+            sent.append(value | 0x3000 if self.ir_protocol == "RC5" else value)
+        self._finish(text, "\r\nTX: %s\r\n" % " ".join("0x%04X.16 " % v for v in sent).rstrip(" ")
+                     + " ")
 
     PS2_BANNER = ("\r\npico-ps2-sniffer started! for Bus Pirate\r\n"
                   "https://github.com/therealdreg/pico-ps2-sniffer\r\n"
