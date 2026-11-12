@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from ...bp6 import ps2, sniff
+from ...mcp import power
 from . import Recipe, register
 
 DOCS = "https://docs.buspirate.com/docs/"
@@ -53,7 +54,15 @@ register(Recipe(
 
 
 def _ps2_action(con: Any, opts: Options) -> Dict[str, Any]:
-    return ps2.listen(con, float(opts["seconds"]))
+    def record(supply: Optional[Dict[str, Any]]) -> None:
+        # The sniffer switches the supply itself: note it so hiz and status
+        # know, and forget it when the firmware could not switch it on.
+        session = getattr(con, "session", None)
+        if session is None:
+            return
+        session.power = None if supply is None else power.plan_power(
+            "bp6", supply["millivolts"], power.SOURCE_OWNER, False, supply["milliamps"])
+    return ps2.listen(con, float(opts["seconds"]), on_supply=record)
 
 
 register(Recipe(

@@ -79,7 +79,7 @@ def _receive_wiring(opts: Options) -> Tuple[Tuple[str, str], ...]:
 _COMMON = dict(bus="infrared", transport="terminal", terminal_mode="infrared", risk="none",
                pullups=False, default_mv=3300, min_mv=2700, max_mv=5000, milliamps=100,
                source=DOCS + "command-reference/")
-_VOLTS = "VOUT is set to 3.3 V, the default, to power the receiver and the LED driver"
+_VOLTS = "VOUT powers the receiver and the LED driver at the planned voltage (3.3 V by default)"
 _SEND_NOTES = (_VOLTS, "the LED on IO4 needs a transistor driver; the IR Toy plank has one",
                "leave IO0 unconnected: the receiver drives it internally")
 _SEND_WIRING = _receive_wiring({"sensor": "38d"})

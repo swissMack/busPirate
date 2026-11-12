@@ -495,6 +495,9 @@ class FakeBp6:
         self.ir_frames = []
         #: What the board was told to send: ("raw", air), ("nec", value) or ("rc5", value).
         self.ir_sent = []
+        #: Text the receiver prints at the prompt after each IR send (it hears the
+        #: board's own LED): a NEC/RC5 decode or an aIR line, straight after the ETX.
+        self.ir_heard = ""
         #: Self-test (``~``): whether a human presses the button, whether the NAND
         #: has a file system, and extra failing lines to print (each is one error).
         self.button_pressed = True
@@ -1197,6 +1200,7 @@ class FakeBp6:
         self._finish(text, "\r\nTransmitting from command line\r\n\r\n%s;\r\n\r\n"
                      "Parsed AIR packet: modulation frequency %dkHz, %d MARK/SPACE pairs\r\n"
                      "Transmitting...done\r\n" % (air, int(found.group(1)), pairs))
+        self._say(self.ir_heard)
 
     def _cmd_ir_write(self, text: str) -> None:
         sent = []
@@ -1210,6 +1214,7 @@ class FakeBp6:
             sent.append(value | 0x3000 if self.ir_protocol == "RC5" else value)
         # _finish adds the CRLF after the echo: the firmware prints "\r\n\r\nTX: ...16 \r\n"
         self._finish(text, "\r\nTX: %s\r\n" % "".join("0x%04X.16 " % v for v in sent))
+        self._say(self.ir_heard)
 
     PS2_BANNER = ("\r\npico-ps2-sniffer started! for Bus Pirate\r\n"
                   "https://github.com/therealdreg/pico-ps2-sniffer\r\n"

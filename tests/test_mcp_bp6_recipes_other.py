@@ -825,6 +825,17 @@ def test_ps2_psu_error(session, confirm):
     assert session.power is None and not fake.psu_enabled
 
 
+def test_ps2_rerun_psu_error_clears_the_power(session, confirm):
+    fake = _fake(session)
+    fake.ps2_lines = PS2_LINES
+    _, first = _run(session, confirm, "ps2-sniff", {"seconds": 0.2})
+    assert "result" in first and session.power is not None, first
+    fake.ps2_psu_error = 2
+    again = engine.run_recipe(session, confirm, None, {})
+    assert "PSU ERROR CODE 2" in again.get("error", ""), again
+    assert session.power is None
+
+
 def test_ps2_power_recorded_even_if_parsing_raises(session, confirm, monkeypatch):
     from buspirate.bp6 import ps2
 
@@ -932,6 +943,26 @@ def test_ir_send_raw_resends_received(session, confirm):
     assert out["result"] == {"sent": True, "carrier_khz": 38, "pairs": 3}
 
 
+NEC_HEARD = "\r\n(0x00f7fb04) Address: 4 (0x04) Command: 8 (0x08)"
+
+
+def test_ir_send_nec_heard_by_its_own_receiver(session, confirm):
+    # The board prints the code its receiver heard straight after the prompt.
+    fake = _fake(session)
+    fake.ir_heard = NEC_HEARD
+    _, out = _ir(session, confirm, "ir-send-nec", {"address": 4, "command": 8})
+    assert out["result"] == {"sent": True, "tx": "0x0408"}, out
+    assert fake.ir_sent == [("nec", 0x0408)]
+
+
+def test_ir_send_raw_heard_by_its_own_receiver(session, confirm):
+    fake = _fake(session)
+    fake.ir_heard = SHORT_AIR + ";\r\n"
+    _, out = _ir(session, confirm, "ir-send-raw", {"air": SHORT_AIR})
+    assert out["result"] == {"sent": True, "carrier_khz": 38, "pairs": 3}, out
+    assert fake.ir_sent == [("raw", SHORT_AIR)]
+
+
 def test_ir_send_raw_too_long(session, confirm):
     fake = _fake(session)
     plan = engine.plan_recipe(session, confirm, "ir-send-raw", {"millivolts": 3300, "air": NEC_AIR})
@@ -966,6 +997,14 @@ def test_ir_recipes_name_voltage():
     for n in ("ir-receive", "ir-send-nec", "ir-send-rc5", "ir-send-raw"):
         assert any("3.3 V" in note for note in REGISTRY[n].notes), n
     assert any("IO1" in note for note in REGISTRY["ir-receive"].notes)
+
+
+def test_ir_voltage_note_follows_the_plan():
+    # Plans allow 2.7-5.0 V: the note names the default, not a fixed 3.3 V.
+    for n in ("ir-receive", "ir-send-nec", "ir-send-rc5", "ir-send-raw"):
+        note = next(note for note in REGISTRY[n].notes if "3.3 V" in note)
+        assert "planned voltage" in note and "default" in note, note
+        assert "is set to 3.3 V" not in note, note
 
 
 def test_ir_sensor_refused(session, confirm):

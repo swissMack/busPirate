@@ -1,6 +1,9 @@
 """The I2C and 2WIRE sniffer parsers."""
 
+import pytest
+
 from buspirate.bp6 import sniff
+from buspirate.bp6.console import TerminalError
 
 
 def test_parse_i2c_default():
@@ -56,3 +59,67 @@ def test_ps2_dropped():
     text = ("\r\n!! ring buffer full, 3 packet(s) dropped !!\r\n"
             "\r\n!! ring buffer full, 4 packet(s) dropped !!\r\n")
     assert ps2.parse(text)["dropped"] == 7
+
+
+# -- ps2.listen keeps clear of the MCP layer (final review F4) ------------------
+
+def test_ps2_core_does_not_import_mcp():
+    import ast
+    import inspect
+    tree = ast.parse(inspect.getsource(ps2))
+    names = [n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
+    names += [a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names]
+    assert not [n for n in names if "mcp" in n], names
+    assert "session" not in inspect.getsource(ps2)
+
+
+class _PS2Con:
+    def __init__(self, text=None, raises=None):
+        self.text, self.raises = text, raises
+
+    def listen(self, *args, **kwargs):
+        from buspirate.bp6.console import Reply
+        if self.raises is not None:
+            raise self.raises
+        return Reply(self.text, "PS2", None)
+
+
+SUPPLY = {"millivolts": 5000, "milliamps": 400, "on": True}
+
+
+def test_ps2_listen_reports_the_supply():
+    seen = []
+    out = ps2.listen(_PS2Con("PSU 5v Enabled\nSniffing...\n"), 1, on_supply=seen.append)
+    assert out["supply"] == SUPPLY and seen == [SUPPLY]
+
+
+def test_ps2_listen_reports_the_supply_before_parsing(monkeypatch):
+    seen = []
+
+    def boom(text):
+        raise ValueError("parse blew up")
+    monkeypatch.setattr(ps2, "parse", boom)
+    with pytest.raises(ValueError):
+        ps2.listen(_PS2Con("PSU 5v Enabled\n"), 1, on_supply=seen.append)
+    assert seen == [SUPPLY]
+
+
+def test_ps2_listen_psu_error_reports_the_supply_off():
+    seen = []
+    with pytest.raises(TerminalError, match="PSU ERROR CODE 2"):
+        ps2.listen(_PS2Con("PSU ERROR CODE 2\n"), 1, on_supply=seen.append)
+    assert seen == [None]
+    seen.clear()
+    with pytest.raises(TerminalError):
+        ps2.listen(_PS2Con(raises=TerminalError("sniff: PSU ERROR CODE 3")), 1,
+                   on_supply=seen.append)
+    assert seen == [None]
+
+
+def test_ps2_listen_failure_counts_the_supply_as_on():
+    # The firmware enables the supply before the banner.
+    seen = []
+    with pytest.raises(TerminalError):
+        ps2.listen(_PS2Con(raises=TerminalError("sniff did not start")), 1,
+                   on_supply=seen.append)
+    assert seen == [SUPPLY]

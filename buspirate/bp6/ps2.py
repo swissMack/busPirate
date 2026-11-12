@@ -7,9 +7,8 @@ The firmware switches the supply on by itself (5.0 V, 400 mA, with pull-ups to
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
-from ..mcp import power
 from .console import Console, TerminalError
 
 MAX_PACKETS = 200
@@ -45,30 +44,33 @@ def parse(text: str) -> Dict[str, Any]:
             "dropped": sum(int(n) for n in _DROPPED.findall(text))}
 
 
-def _record_supply(con: Any) -> None:
-    """Note the supply as on, so hiz and status know. Called before any parsing."""
-    session = getattr(con, "session", None)
-    if session is not None:
-        session.power = power.plan_power("bp6", MILLIVOLTS, power.SOURCE_OWNER, False, MILLIAMPS)
+#: What the firmware switches on by itself before sniffing.
+SUPPLY = {"millivolts": MILLIVOLTS, "milliamps": MILLIAMPS, "on": True}
 
 
-def listen(con: Console, seconds: float) -> Dict[str, Any]:
+def listen(con: Console, seconds: float,
+           on_supply: Optional[Callable[[Optional[Dict[str, Any]]], None]] = None
+           ) -> Dict[str, Any]:
+    """Sniff for ``seconds``. ``on_supply`` hears what became of the supply
+    (``SUPPLY``, or None when the firmware could not switch it on) before
+    anything that could raise, so the caller can record it either way."""
+    tell = on_supply or (lambda supply: None)
     try:
         reply = con.listen("sniff", seconds, "q", ready="Sniffing...")
     except TerminalError as exc:
         # The firmware enables the supply before the banner: unless it said it
         # could not, count it as on (hiz switches it off either way).
-        if "PSU ERROR CODE" not in str(exc):
-            _record_supply(con)
+        tell(None if "PSU ERROR CODE" in str(exc) else dict(SUPPLY))
         raise
     text = reply.text
     error = _PSU_ERROR.search(text)
     if error:
+        tell(None)
         raise TerminalError("sniff failed: %s" % error.group(0).strip())
     supply = None
     if "PSU 5v Enabled" in text:
-        _record_supply(con)  # before anything below that could raise
-        supply = {"millivolts": MILLIVOLTS, "milliamps": MILLIAMPS, "on": True}
+        supply = dict(SUPPLY)
+        tell(dict(SUPPLY))  # before anything below that could raise
     if reply.error:
         raise TerminalError("sniff failed: %s" % reply.error)
     out = parse(text)
