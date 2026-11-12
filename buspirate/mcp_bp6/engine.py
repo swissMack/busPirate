@@ -358,7 +358,7 @@ def _run_terminal(bp: Any, session: Any, confirm: ConfirmStore, recipe: Recipe,
                 # Recorded first, so hiz cleans up even after a switch that failed.
                 state.of(session).terminal_mode = recipe.terminal_mode
                 state.of(session).pwm_pins.clear()
-                console_power.set_mode(con, want)
+                console_power.set_mode(con, want, recipe.terminal_flags)
                 if supply == SUPPLY_BP6 and recipe.supply_by == "engine":
                     power_out = _terminal_power(con, plan)
                     session.power = plan

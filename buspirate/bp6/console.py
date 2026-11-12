@@ -179,6 +179,85 @@ class Console:
                 time.sleep(0.005)
         raise TerminalError(f"the terminal did not answer {line}")
 
+    def listen(self, line: str, seconds: float, stop: str, ready: Optional[str] = None,
+               keys: Sequence[Answer] = (), timeout: float = 3.0) -> Reply:
+        """Run a streaming command for ``seconds``, then stop it with ``stop``.
+
+        ``stop`` is one raw key (no Enter, never Ctrl-C). With ``ready`` the
+        clock starts when that text appears; if it does not within ``timeout``
+        the command is stopped and ``TerminalError`` says it did not start.
+        Each of ``keys`` is answered every time its pattern shows up in new
+        output (a menu that asks again and again). A main prompt that appears
+        first ends the call at once, without ``stop``. A line ending in ``>``
+        is never taken for a stray question: menus end in ``> `` too.
+        """
+        self._drain()
+        self._write(line.encode() + b"\r")
+        seen = bytearray()
+        text = ""
+        mark = 0            # start of the output not yet answered
+        waiting_for = None
+        waiting_since = None
+        began = time.monotonic()
+        started = began if ready is None else None
+        last_data = began
+        while True:
+            now = time.monotonic()
+            chunk = self._read()
+            if chunk:
+                seen += chunk
+                text = clean(seen.decode("utf-8", "replace"))
+                waiting_for = waiting_since = None
+                last_data = now = time.monotonic()
+            ended = seen.decode("utf-8", "replace").rstrip().endswith("\x03")
+            settled = ended or (bool(seen) and now - last_data >= self.QUIET_S)
+            if settled and self._at_main_prompt(text):
+                return self._reply(text)
+            if started is None and ready is not None and ready in text:
+                started = now
+            due = next((a for a in keys if a.pattern in text[mark:]), None)
+            if due is not None:
+                if waiting_for is not due:
+                    waiting_for, waiting_since = due, now
+                if now - waiting_since >= due.wait_s:
+                    self._write(b" " if due.reply == " " else due.reply.encode())
+                    mark = len(text)
+                    waiting_for = waiting_since = None
+                    continue
+            if started is None and now - began >= timeout:
+                self._stop_listening(stop, seen)
+                asked = text.strip()[-200:]
+                raise TerminalError(f"{line} did not start: {asked}")
+            if started is not None and now - started >= seconds:
+                break
+            if not chunk:
+                time.sleep(0.005)
+        self._write(stop.encode())
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            chunk = self._read()
+            if not chunk:
+                time.sleep(0.005)
+                continue
+            seen += chunk
+            text = clean(seen.decode("utf-8", "replace"))
+            if self._at_main_prompt(text):
+                return self._reply(text)
+        raise TerminalError(f"the terminal did not answer {line}")
+
+    def _stop_listening(self, stop: str, seen: bytearray) -> None:
+        """Send ``stop`` and wait briefly for the prompt, so the board is not left listening."""
+        self._write(stop.encode())
+        deadline = time.monotonic() + self.QUIET_S * 10
+        while time.monotonic() < deadline:
+            chunk = self._read()
+            if not chunk:
+                time.sleep(0.005)
+                continue
+            seen += chunk
+            if self._at_main_prompt(clean(seen.decode("utf-8", "replace"))):
+                return
+
     def _abort(self, line: str, tail: str) -> None:
         asked = tail.strip()[-200:]
         self._write(b"x\r")

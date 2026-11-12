@@ -33,7 +33,8 @@ class Recipe:
     A ``transport="terminal"`` recipe runs in the board's text terminal: its
     ``check`` and ``action`` get the ``Console`` in place of the board. The
     engine first switches to ``terminal_mode`` (the ``m`` argument; None stays
-    in HiZ), then applies the planned supply (unless ``supply_by="action"``,
+    in HiZ), adding ``terminal_flags`` (the rest of the ``m`` line, such as
+    ``-s 400``), then applies the planned supply (unless ``supply_by="action"``,
     when the firmware's own prompt sets it) and the pull-ups. ``precheck``,
     if given, runs over BPIO2 with the board before the terminal opens. A
     recipe with ``target_powered_ok`` False refuses a target that has its own
@@ -60,6 +61,7 @@ class Recipe:
     commit: Optional[Callable[[Any, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]] = None
     transport: str = "bpio2"
     terminal_mode: Optional[str] = None
+    terminal_flags: str = ""
     precheck: Optional[Callable[[Any, Dict[str, Any]], Dict[str, Any]]] = None
     supply_by: str = "engine"
     target_powered_ok: bool = True
@@ -82,8 +84,8 @@ class Recipe:
         if self.supply_by not in SUPPLIED_BY:
             raise ValueError("recipe %r: supply_by must be one of %s" % (self.name, SUPPLIED_BY))
         if self.transport != "terminal" and (self.terminal_mode or self.precheck
-                                             or self.supply_by != "engine"):
-            raise ValueError("recipe %r: terminal_mode, precheck and supply_by are for "
+                                             or self.terminal_flags or self.supply_by != "engine"):
+            raise ValueError("recipe %r: terminal_mode, terminal_flags, precheck and supply_by are for "
                              "terminal recipes" % self.name)
         if self.transport == "terminal" and self.risk == "destructive":
             raise ValueError("recipe %r: a terminal recipe may not change a chip" % self.name)

@@ -756,3 +756,17 @@ def test_terminal_recipe_refuses_a_voltage_off_the_10_mv_step(session, confirm):
 def test_bpio2_recipe_keeps_any_millivolt(session, confirm, recipes):
     recipes()
     assert "token" in engine.plan_recipe(session, confirm, "toy-backpack", {"millivolts": 3333})
+
+
+def test_terminal_flags_on_m_line(session, confirm, recipes):
+    recipes(**_term(terminal_mode="i2c", terminal_flags="-s 400"))
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    mark = _mark(session)
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "error" not in result, result
+    assert _sent(session, mark)[0] == b"m i2c -s 400\r"
+
+
+def test_terminal_flags_only_for_terminal():
+    with pytest.raises(ValueError):
+        _toy(transport="bpio2", terminal_flags="-s 400")

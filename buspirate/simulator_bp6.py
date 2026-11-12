@@ -100,6 +100,18 @@ class _Port:
         self.is_open = False
 
 
+class _TerminalPort(_Port):
+    """The terminal port: a streaming command's chunks come out 20 ms apart."""
+
+    def __init__(self, owner) -> None:
+        super().__init__(owner._on_terminal)
+        self.owner = owner
+
+    def read(self, count: int) -> bytes:
+        self.owner._pump_stream()
+        return super().read(count)
+
+
 class _BinaryPort(_Port):
     """The BPIO2 port, with replies that can arrive late.
 
@@ -466,6 +478,11 @@ class FakeBp6:
         #: What ``bluetag`` finds per protocol, e.g. {"jtag": BLUETAG_JTAG_HIT}; empty: nothing.
         self.bluetag_hit = {}
         self._terminal_lines = []
+        #: Every key received while a command was streaming (see ``_stream``).
+        self.keys_seen = []
+        self._streaming = None
+        #: The infrared protocol (-p) the INFRARED prompt shows: RAW, NEC or RC5.
+        self.ir_protocol = "RAW"
         #: Self-test (``~``): whether a human presses the button, whether the NAND
         #: has a file system, and extra failing lines to print (each is one error).
         self.button_pressed = True
@@ -507,7 +524,7 @@ class FakeBp6:
         self._gone_from = 0.0
         self._gone_until = 0.0
         self.binary = _BinaryPort(self)
-        self.terminal = _Port(self._on_terminal)
+        self.terminal = _TerminalPort(self)
 
     @property
     def present(self) -> bool:
@@ -829,7 +846,7 @@ class FakeBp6:
     # -- the text terminal ----------------------------------------------------
 
     HIZ_REFUSAL = "Command has no effect in HiZ mode, press 'm' to choose a mode"
-    TERMINAL_MODES = ("HiZ", "DIO", "JTAG", "I2C")
+    TERMINAL_MODES = ("HiZ", "DIO", "JTAG", "I2C", "2WIRE", "PS2", "INFRARED")
 
     def lines_received(self) -> List[bytes]:
         """Every write the terminal port received, in order."""
@@ -839,7 +856,42 @@ class FakeBp6:
         self.terminal.out += text.encode()
 
     def _prompt(self) -> str:
+        if self.mode == "INFRARED":
+            return f"\r\nINFRARED-({self.ir_protocol})> \x03"
         return f"\r\n{self.mode}> \x03"
+
+    def _stream(self, text: str, banner: str, stop_keys, end_text: str, chunks) -> None:
+        """Start a command that streams until a key in ``stop_keys`` is pressed.
+
+        Echoes ``text``, prints ``banner``, then one chunk of ``chunks`` (any
+        iterable of strings) every 20 ms. A stop key prints ``end_text`` and the
+        prompt; other keys are ignored. Every key is kept in ``keys_seen``.
+        """
+        self._terminal_state = "stream"
+        self._streaming = {"stop": tuple(stop_keys), "end": end_text,
+                           "chunks": iter(chunks), "due": time.monotonic() + 0.02}
+        self._say(f"{text}\x1b[0K\r\n{banner}")
+
+    def _pump_stream(self) -> None:
+        s = self._streaming
+        if s is None:
+            return
+        for _ in range(50):  # a slow reader catches up, but never floods
+            if time.monotonic() < s["due"]:
+                break
+            s["due"] += 0.02
+            chunk = next(s["chunks"], None)
+            if chunk is None:
+                break
+            self._say(chunk)
+
+    def _stream_key(self, keys: bytes) -> None:
+        s = self._streaming
+        self.keys_seen.append(bytes(keys))
+        if any(k in keys.decode("ascii", "replace") for k in s["stop"]):
+            self._streaming = None
+            self._terminal_state = "prompt"
+            self._say(s["end"] + self._prompt())
 
     def _finish(self, echo: str, body: str = "") -> None:
         """Echo (with the redraw noise the real line editor adds), output, prompt."""
@@ -851,6 +903,7 @@ class FakeBp6:
 
     def _set_mode(self, name: str) -> None:
         self.mode = name
+        self.ir_protocol = "RAW"
         self.psu_enabled = False   # the HiZ setup of every mode switches these off
         self.pullups = False
         self.pwm.clear()
@@ -858,6 +911,9 @@ class FakeBp6:
     def _on_terminal(self, keys: bytes) -> None:
         self._terminal_lines.append(bytes(keys))
         if self.terminal_wedged:
+            return
+        if self._streaming is not None:
+            self._stream_key(keys)
             return
         if keys == b"\x03" and self.color_prompt:
             # Seen on the real board (firmware built 2026-10-12): Ctrl-C stops
@@ -1065,6 +1121,8 @@ class FakeBp6:
                       "Speed: 400kHz\r\n\r\ny/n, x to exit (Y) >", "i2c-previous")
             return
         self._set_mode(match)
+        if match == "INFRARED" and "-p" in args[:-1]:
+            self.ir_protocol = args[args.index("-p") + 1].upper()
         self._finish(text, f"\r\nMode: {match}")
 
     def _cmd_psu_on(self, text: str, args) -> None:

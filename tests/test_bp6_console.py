@@ -177,3 +177,124 @@ def test_an_error_raised_between_commands_is_not_lost(fake):
         reply = con.command("i")
         assert reply.error == "Error: Current over limit, power supply disabled"
         assert con.command("i").error is None
+
+
+# -- listen: a streaming command, bounded in time, stopped with a raw key ----------
+
+class ScriptPort:
+    """A scripted terminal: ``on_write(port, data)`` decides what the board says."""
+
+    def __init__(self, on_write):
+        self.out = bytearray()
+        self.sent = []
+        self.timed = []  # (due, bytes)
+        self.on_write = on_write
+
+    def say_at(self, delay, data):
+        self.timed.append((time.monotonic() + delay, data))
+
+    def write(self, data):
+        self.sent.append(bytes(data))
+        self.on_write(self, bytes(data))
+        return len(data)
+
+    def read(self, n):
+        now = time.monotonic()
+        for item in [t for t in self.timed if t[0] <= now]:
+            self.timed.remove(item)
+            self.out += item[1]
+        data, self.out = bytes(self.out[:n]), self.out[n:]
+        return data
+
+
+def test_listen_stops_after_seconds():
+    def on_write(port, data):
+        if data == b"sniff\r":
+            port.out += b"sniff\r\nPress x to exit\r\n[ [0xA0]+]\r\n"
+        elif data == b"x":
+            port.out += b"\r\nI2C> \x03"
+
+    port = ScriptPort(on_write)
+    con = Console(port, lambda *a: None)
+    start = time.monotonic()
+    reply = con.listen("sniff", 0.2, "x")
+    assert time.monotonic() - start >= 0.2
+    assert "[0xA0]+" in reply.text
+    assert reply.mode == "I2C" and reply.error is None
+    assert port.sent == [b"sniff\r", b"x"]
+    assert b"\x03" not in b"".join(port.sent)
+
+
+def test_listen_returns_early_at_prompt():
+    def on_write(port, data):
+        if data == b"sniff\r":
+            port.out += b"sniff\r\nInvalid command: sniff. Type ? for help.\r\nHiZ> \x03"
+
+    port = ScriptPort(on_write)
+    con = Console(port, lambda *a: None)
+    start = time.monotonic()
+    reply = con.listen("sniff", 5, "x")
+    assert time.monotonic() - start < 0.5
+    assert reply.mode == "HiZ" and reply.error.startswith("Invalid command")
+    assert port.sent == [b"sniff\r"]
+
+
+def test_listen_waits_for_ready():
+    stopped = []
+
+    def on_write(port, data):
+        if data == b"sniff\r":
+            port.say_at(0.3, b"Sniffing...\r\n")
+        elif data == b"q":
+            stopped.append("Sniffing..." in bytes(port.seen).decode())
+            port.out += b"\r\nI2C> \x03"
+
+    port = ScriptPort(on_write)
+    port.seen = bytearray()
+    real_read = port.read
+
+    def read(n):
+        data = real_read(n)
+        port.seen += data
+        return data
+
+    port.read = read
+    con = Console(port, lambda *a: None)
+    start = time.monotonic()
+    con.listen("sniff", 0.1, "q", ready="Sniffing...")
+    assert time.monotonic() - start >= 0.4
+    assert stopped == [True]
+
+
+def test_listen_ready_missing_raises():
+    def on_write(port, data):
+        if data == b"sniff\r":
+            port.out += b"sniff\r\nWarming up\r\n"
+        elif data == b"q":
+            port.out += b"\r\nI2C> \x03"
+
+    port = ScriptPort(on_write)
+    con = Console(port, lambda *a: None)
+    with pytest.raises(TerminalError, match="did not start"):
+        con.listen("sniff", 0.1, "q", ready="Sniffing...", timeout=0.3)
+    assert port.sent[-1] == b"q"
+
+
+def test_listen_answers_menu_repeatedly():
+    asked = []
+
+    def on_write(port, data):
+        if data == b"sniff\r":
+            port.out += b"sniff\r\nspace for next, 'x' to exit > "
+        elif data == b" ":
+            asked.append(1)
+            if len(asked) == 1:
+                port.out += b"\r\nspace for next, 'x' to exit > "
+        elif data == b"x":
+            port.out += b"\r\nI2C> \x03"
+
+    port = ScriptPort(on_write)
+    con = Console(port, lambda *a: None)
+    con.listen("sniff", 0.3, "x", keys=[Answer("space for next", " ", 0)])
+    assert port.sent[:3] == [b"sniff\r", b" ", b" "] and port.sent[-1] == b"x"
+    assert port.sent.count(b" ") == 2
