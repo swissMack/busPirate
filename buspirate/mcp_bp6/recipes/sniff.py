@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from ...bp6 import sniff
+from ...bp6 import ps2, sniff
 from . import Recipe, register
 
 DOCS = "https://docs.buspirate.com/docs/"
@@ -50,3 +50,25 @@ register(Recipe(
            "2WIRE's RST)",
            "no ACK bits on this bus"),
     **_COMMON))
+
+
+def _ps2_action(con: Any, opts: Options) -> Dict[str, Any]:
+    return ps2.listen(con, float(opts["seconds"]))
+
+
+register(Recipe(
+    name="ps2-sniff", title="Sniff PS/2: record what is typed on a keyboard you own",
+    words=("ps2", "ps/2", "keyboard", "sniff", "sniffer", "keylogger", "mouse"),
+    bus="pins", transport="terminal", terminal_mode="ps2", risk="owner-only",
+    supply_by="action", pullups=False, default_mv=5000, min_mv=5000, max_mv=5000,
+    milliamps=400, target_powered_ok=False, options={"seconds": 10}, check=_check,
+    action=_ps2_action,
+    target_powered_error=("VOUT reads a voltage: the PS/2 sniffer drives VOUT to 5 V itself, "
+                          "so leave VOUT unconnected (the keyboard keeps its own supply from "
+                          "the computer)"),
+    wiring=(("keyboard DATA", "IO4"), ("keyboard CLOCK", "IO5"), ("GND", "GND")),
+    notes=("the sniffer switches the Bus Pirate's supply on at 5.0 V (400 mA) and the "
+           "pull-ups to 5 V by itself; it stays on until hiz",
+           "leave VOUT, IO6 and IO7 unconnected; IO6 and IO7 are driven by the sniffer",
+           "only for a keyboard you own: everything typed on it is recorded"),
+    source=DOCS + "command-reference/"))

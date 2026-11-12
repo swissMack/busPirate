@@ -486,6 +486,9 @@ class FakeBp6:
         self._streaming = None
         #: What ``sniff`` streams in I2C and 2WIRE modes, one string per chunk.
         self.sniff_lines = []
+        #: What PS2 ``sniff`` streams, one string per chunk; and a PSU error code to print instead.
+        self.ps2_lines = []
+        self.ps2_psu_error = None
         #: The infrared protocol (-p) the INFRARED prompt shows: RAW, NEC or RC5.
         self.ir_protocol = "RAW"
         #: Self-test (``~``): whether a human presses the button, whether the NAND
@@ -866,7 +869,7 @@ class FakeBp6:
         return f"\r\n{self.mode}> \x03"
 
     def _stream(self, text: str, banner: str, stop_keys, end_text: str, chunks,
-                inline_prompt: bool = False) -> None:
+                inline_prompt: bool = False, drain: float = 0.0) -> None:
         """Start a command that streams until a key in ``stop_keys`` is pressed.
 
         Echoes ``text``, prints ``banner``, then one chunk of ``chunks`` (any
@@ -879,7 +882,8 @@ class FakeBp6:
         self._terminal_state = "stream"
         self._streaming = {"stop": tuple(stop_keys), "end": end_text,
                            "chunks": iter(chunks), "due": time.monotonic() + 0.02,
-                           "inline": inline_prompt, "last": banner}
+                           "inline": inline_prompt, "last": banner,
+                           "drain_until": time.monotonic() + drain}
         self._say(f"{text}\x1b[0K\r\n{banner}")
 
     def _pump_stream(self) -> None:
@@ -899,6 +903,8 @@ class FakeBp6:
     def _stream_key(self, keys: bytes) -> None:
         s = self._streaming
         self.keys_seen.append(bytes(keys))
+        if time.monotonic() < s.get("drain_until", 0):
+            return  # the firmware discards input it drains before its ready line
         if any(k in keys.decode("ascii", "replace") for k in s["stop"]):
             self._streaming = None
             self._terminal_state = "prompt"
@@ -1125,10 +1131,30 @@ class FakeBp6:
             self._stream(text, banner + "\r\nPress x to exit\r\n", ("x",), "",
                          ["".join(self.sniff_lines[i:i + 10])
                           for i in range(0, len(self.sniff_lines), 10)], inline_prompt=True)
+        elif name == "sniff" and self.mode == "PS2":
+            self._cmd_ps2_sniff(text)
         elif name == "bluetag" and self.mode == "JTAG":
             self._cmd_bluetag(text, args)
         else:
             self._finish(text, f"Invalid command: {text}. Type ? for help.\r\n")
+
+    PS2_BANNER = ("\r\npico-ps2-sniffer started! for Bus Pirate\r\n"
+                  "https://github.com/therealdreg/pico-ps2-sniffer\r\n"
+                  "MIT License David Reguera Garcia aka Dreg\r\n"
+                  "---------------------------------------------------------------\r\n\r\n")
+
+    def _cmd_ps2_sniff(self, text: str) -> None:
+        if self.ps2_psu_error is not None:
+            self._finish(text, "\r\nPSU ERROR CODE %d\r\n" % self.ps2_psu_error)
+            return
+        self.psu_enabled, self.psu_mv, self.psu_ma = True, 5000, 400
+        self.psu_tripped = False
+        self.pullups = True
+        ready = "\r\nPress 'q' to exit\r\n\r\nSniffing...\r\n\r\n"
+        # Five empty 20 ms chunks are the 0.1 s drain before the ready line.
+        self._stream(text, "\r\nPSU 5v Enabled\r\n" + self.PS2_BANNER, ("q", "Q"),
+                     "\r\n\r\nexit...\r\n", [""] * 5 + [ready] + list(self.ps2_lines),
+                     drain=0.1)
 
     def _cmd_mode(self, text: str, args) -> None:
         match = next((m for m in self.TERMINAL_MODES if args and m.lower() == args[0].lower()), None)

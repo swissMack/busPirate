@@ -780,3 +780,84 @@ def test_i2c_sniff_keeps_cut_off_last_transaction(session, confirm):
 def test_sniff_notes_name_driven_pins():
     for n in ("i2c-sniff", "2wire-sniff"):
         assert any("IO2 and IO3" in note for note in REGISTRY[n].notes)
+
+
+# -- PS/2 sniffer -------------------------------------------------------------
+
+PS2_LINES = ["[0x0000] t:0x00001234 D:0x1C\r\nMAKE_A --> a\r\n-----------\r\n",
+             "[0x0001] t:0x00001240 D:0xF0\r\n[0x0002] t:0x00001241 D:0x1C\r\n"
+             "BREAK_A --> a\r\n**********\r\nkey break tracker (limit 0x13F bytes): a\r\n"
+             "**********\r\n-----------\r\n"]
+
+
+def test_ps2_sniff_recipe_runs(session, confirm):
+    fake = _fake(session)
+    fake.ps2_lines = PS2_LINES
+    _, result = _run(session, confirm, "ps2-sniff", {"seconds": 0.2})
+    r = result["result"]
+    assert r["typed"] == "a" and r["keys"] == ["MAKE_A", "BREAK_A"], result
+    assert r["supply"] == {"millivolts": 5000, "milliamps": 400, "on": True}
+    assert session.power.millivolts == 5000 and session.power.milliamps == 400
+    assert fake.psu_enabled and fake.pullups
+    assert b"m ps2\r" in fake.lines_received()
+    assert fake.keys_seen == [b"q"]  # raw, after Sniffing..., no Enter
+
+
+def test_ps2_plan_is_owner_only_and_names_5v(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "ps2-sniff", {})
+    assert "token" in plan, plan
+    text = " ".join(plan["warnings"])
+    assert "ask the owner to confirm the device is theirs" in text
+    assert "5.0 V (400 mA)" in text
+
+
+def test_ps2_refuses_live_vout(session, confirm):
+    _fake(session).vout_mv = 3300
+    plan = engine.plan_recipe(session, confirm, "ps2-sniff", {})
+    assert "VOUT reads a voltage" in plan.get("error", ""), plan
+
+
+def test_ps2_psu_error(session, confirm):
+    fake = _fake(session)
+    fake.ps2_psu_error = 2
+    _, result = _run(session, confirm, "ps2-sniff", {"seconds": 0.2})
+    assert "PSU ERROR CODE 2" in result["error"], result
+    assert session.power is None and not fake.psu_enabled
+
+
+def test_ps2_power_recorded_even_if_parsing_raises(session, confirm, monkeypatch):
+    from buspirate.bp6 import ps2
+
+    def boom(text):
+        raise ValueError("parse blew up")
+    monkeypatch.setattr(ps2, "parse", boom)
+    with pytest.raises(ValueError):
+        _run(session, confirm, "ps2-sniff", {"seconds": 0.2})
+    assert session.power is not None and session.power.millivolts == 5000
+
+
+def test_ps2_seconds_refused(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "ps2-sniff", {"seconds": 61})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out["check"]["ok"] is False
+
+
+def test_ps2_hiz_turns_supply_off(session, confirm):
+    pytest.importorskip("mcp")
+    import asyncio
+    import json
+    from buspirate.mcp_bp6.server import build_server
+    fake = _fake(session)
+    _run(session, confirm, "ps2-sniff", {"seconds": 0.2})
+    assert fake.psu_enabled
+    server = build_server(session)
+    out = json.loads(asyncio.run(server.call_tool("hiz", {})).content[0].text)
+    assert out["hiz"] is True, out
+    assert fake.psu_enabled is False and fake.mode == "HiZ" and session.power is None
+
+
+def test_ps2_recipe_shape():
+    r = REGISTRY["ps2-sniff"]
+    assert (r.risk, r.supply_by, r.terminal_mode, r.pullups) == ("owner-only", "action", "ps2", False)
+    assert (r.default_mv, r.min_mv, r.max_mv, r.milliamps) == (5000, 5000, 5000, 400)
+    assert r.target_powered_ok is False and r.options == {"seconds": 10}

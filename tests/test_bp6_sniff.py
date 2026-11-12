@@ -28,3 +28,31 @@ def test_parse_i2c_skips_u_lines():
 
 def test_parse_2wire():
     assert sniff.parse_2wire("[ 0x30 0x00 0xFF]\r\n") == [{"data": "30 00 FF", "complete": True}]
+
+
+# -- PS/2 ---------------------------------------------------------------------
+
+from buspirate.bp6 import ps2  # noqa: E402
+
+
+def test_ps2_parse():
+    text = ("[0x0000] t:0x00001234 D:0x1C\r\nMAKE_A --> a\r\n-----------\r\n"
+            "[0x0001] t:0x00001240 D:0xF0\r\n[0x0002] t:0x00001241 D:0x1C\r\n"
+            "BREAK_A --> a\r\n**********\r\nkey break tracker (limit 0x13F bytes): a\r\n"
+            "**********\r\n-----------\r\n")
+    out = ps2.parse(text)
+    assert out["keys"] == ["MAKE_A", "BREAK_A"]
+    assert out["typed"] == "a"
+    assert out["packets"][0] == {"index": 0, "ms": 0x1234, "from": "keyboard", "byte": "1C"}
+    assert len(out["packets"]) == 3 and out["dropped"] == 0
+
+
+def test_ps2_parse_host_and_empty():
+    out = ps2.parse("[0x0003] t:0x00000010 H:0xED\r\n")
+    assert out["packets"][0]["from"] == "host" and out["typed"] == "" and out["keys"] == []
+
+
+def test_ps2_dropped():
+    text = ("\r\n!! ring buffer full, 3 packet(s) dropped !!\r\n"
+            "\r\n!! ring buffer full, 4 packet(s) dropped !!\r\n")
+    assert ps2.parse(text)["dropped"] == 7
