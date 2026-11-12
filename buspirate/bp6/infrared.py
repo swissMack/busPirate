@@ -16,8 +16,24 @@ MAX_FRAMES = 50
 MAX_LINE = 256
 _PARSED = re.compile(r"Parsed AIR packet: modulation frequency (\d+)kHz, (\d+) MARK/SPACE pairs")
 _TX = re.compile(r"TX: 0x([0-9A-Fa-f]+)\.16")
-_FIRMWARE_ERRORS = ("Unable to find", "Too many MARK/SPACE", "Error parsing AIR", "PIO TX timeout",
-                    "Nothing to do")
+_FIRMWARE_ERRORS = ("Unable to find", "Too many MARK/SPACE", "Error parsing AIR", "Nothing to do")
+_AIR = re.compile(r"\$\d{2}:(\d{1,5},)+")
+
+
+def air_error(air: Any) -> str:
+    """Why ``air`` cannot go out as one ``irtx`` line, or "" when it can."""
+    if not isinstance(air, str) or not _AIR.fullmatch(air):
+        return ("air must be aIR text such as $38:9000,4500,560,560, with a two-digit carrier in "
+                "kHz, then mark and space times in microseconds, each followed by a comma and no "
+                "';'; got %r" % (air,))
+    carrier = int(air[1:3])
+    if not 20 <= carrier <= 60:
+        return "the carrier must be 20 to 60 kHz, got %d" % carrier
+    if len("irtx " + air) > MAX_LINE:
+        return ("this packet makes a line of %d characters and the terminal keeps only %d, so it "
+                "would be cut: use ir-send-nec or ir-send-rc5 for a NEC or RC5 code"
+                % (len("irtx " + air), MAX_LINE))
+    return ""
 
 
 def receive(con: Console, seconds: float, sensor: str) -> Dict[str, Any]:
@@ -29,10 +45,10 @@ def receive(con: Console, seconds: float, sensor: str) -> Dict[str, Any]:
     found = ir.parse_air(reply.text)
     frames = []
     for f in found[:MAX_FRAMES]:
-        air = ir.to_air(f["carrier_khz"], f["durations"])
+        air = "$%d:%s" % (f["carrier_khz"], "".join("%d," % d for d in f["durations"]))
         frames.append({"carrier_khz": f["carrier_khz"], "durations": f["durations"], "air": air,
                        "decoded": ir.decode(f["durations"]),
-                       "resendable": len("irtx " + air) <= MAX_LINE})
+                       "resendable": not air_error(air)})
     return {"frames": frames, "count": len(found), "truncated": len(found) > MAX_FRAMES,
             "sensor": sensor, "seconds": seconds}
 
@@ -50,7 +66,7 @@ def send_air(con: Console, air: str) -> Dict[str, Any]:
     if parsed and re.search(r"done\s*$", text, re.M):
         return {"sent": True, "carrier_khz": int(parsed.group(1)), "pairs": int(parsed.group(2))}
     why = next((ln.strip() for ln in text.split("\n")
-                if ln.strip().startswith(_FIRMWARE_ERRORS)), None)
+                if ln.strip().startswith(_FIRMWARE_ERRORS) or "PIO TX timeout" in ln), None)
     raise TerminalError("irtx failed: %s" % (why or reply.error or text.strip()[-200:] or "no reply"))
 
 

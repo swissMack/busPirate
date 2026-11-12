@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, Tuple
 
 from ...bp6 import infrared
@@ -12,7 +11,6 @@ DOCS = "https://docs.buspirate.com/docs/"
 Options = Dict[str, Any]
 
 _RX_PIN = {"38d": "IO5", "56d": "IO7", "38b": "IO3"}
-_AIR = re.compile(r"^\$\d{2}:(\d{1,5},)+$")
 
 
 def _int_in(value: Any, low: int, high: int) -> bool:
@@ -59,15 +57,9 @@ def _send_rc5(con: Any, opts: Options) -> Dict[str, Any]:
 
 
 def _check_raw(con: Any, opts: Options) -> Dict[str, Any]:
-    air = opts.get("air")
-    if not isinstance(air, str) or not _AIR.match(air):
-        return {"ok": False, "error": "air must be aIR text such as $38:9000,4500,560,560, "
-                "with a carrier in kHz, then mark and space times in microseconds, each followed "
-                "by a comma and no ';'; got %r" % (air,)}
-    if len("irtx " + air) > infrared.MAX_LINE:
-        return {"ok": False, "error": "this packet makes a line of %d characters and the terminal "
-                "keeps only %d, so it would be cut: use ir-send-nec or ir-send-rc5 for a NEC or "
-                "RC5 code" % (len("irtx " + air), infrared.MAX_LINE)}
+    problem = infrared.air_error(opts.get("air"))
+    if problem:
+        return {"ok": False, "error": problem}
     return {"ok": True}
 
 
@@ -87,7 +79,8 @@ def _receive_wiring(opts: Options) -> Tuple[Tuple[str, str], ...]:
 _COMMON = dict(bus="infrared", transport="terminal", terminal_mode="infrared", risk="none",
                pullups=False, default_mv=3300, min_mv=2700, max_mv=5000, milliamps=100,
                source=DOCS + "command-reference/")
-_SEND_NOTES = ("the LED on IO4 needs a transistor driver; the IR Toy plank has one",
+_VOLTS = "VOUT is set to 3.3 V, the default, to power the receiver and the LED driver"
+_SEND_NOTES = (_VOLTS, "the LED on IO4 needs a transistor driver; the IR Toy plank has one",
                "leave IO0 unconnected: the receiver drives it internally")
 _SEND_WIRING = _receive_wiring({"sensor": "38d"})
 _SEND_WORDS = ("ir", "infrared", "remote", "send", "transmit", "blast")
@@ -98,7 +91,9 @@ register(Recipe(
     terminal_flags="-p raw -r 38k_demod", options={"seconds": 10, "sensor": "38d"},
     check=_check_receive, action=_receive, wiring=_receive_wiring({"sensor": "38d"}),
     wiring_for=_receive_wiring,
-    notes=("leave IO0 unconnected: the receiver drives it internally",
+    notes=(_VOLTS, "leave IO0 unconnected: the receiver drives it internally",
+           "the carrier frequency is measured only when a learner sensor is wired to IO1; "
+           "without it the carrier reads 0 and the frame cannot be resent raw",
            "point the remote at the receiver from about 10 cm and press the button briefly"),
     **_COMMON))
 

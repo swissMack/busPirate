@@ -947,6 +947,25 @@ def test_ir_send_refuses_semicolon(session, confirm):
                               {"millivolts": 3300, "air": "$38:9000,4500,;"})
     out = engine.run_recipe(session, confirm, plan["token"], {})
     assert out["check"]["ok"] is False, out
+    plan = engine.plan_recipe(session, confirm, "ir-send-raw",
+                              {"millivolts": 3300, "air": "$38:1,\n"})
+    assert engine.run_recipe(session, confirm, plan["token"], {})["check"]["ok"] is False
+
+
+def test_ir_receive_keeps_carrierless_frame(session, confirm):
+    fake = _fake(session)
+    fake.ir_frames = ["$0:" + NEC_AIR.split(":", 1)[1]]
+    _, out = _ir(session, confirm, "ir-receive", {"seconds": 0.3})
+    frame = out["result"]["frames"][0]
+    assert out["result"]["count"] == 1 and frame["resendable"] is False
+    assert frame["carrier_khz"] == 0 and frame["air"].startswith("$0:9000,")
+    assert frame["decoded"] == {"protocol": "nec", "address": 4, "command": 8}
+
+
+def test_ir_recipes_name_voltage():
+    for n in ("ir-receive", "ir-send-nec", "ir-send-rc5", "ir-send-raw"):
+        assert any("3.3 V" in note for note in REGISTRY[n].notes), n
+    assert any("IO1" in note for note in REGISTRY["ir-receive"].notes)
 
 
 def test_ir_sensor_refused(session, confirm):
@@ -972,7 +991,7 @@ def test_ir_send_values_refused(session, confirm):
 def test_ir_wiring_follows_sensor(session, confirm):
     def rx(sensor):
         plan = engine.plan_recipe(session, confirm, "ir-receive", {"sensor": sensor})
-        return [w["bp6_pin"] if "bp6_pin" in w else w["pin"] for w in plan["wiring"]
+        return [w["pin"] for w in plan["wiring"]
                 if "receiver" in w["target"].lower()]
     assert rx("56d") == ["IO7"] and rx("38d") == ["IO5"] and rx("38b") == ["IO3"]
     plan = engine.plan_recipe(session, confirm, "ir-receive", {"sensor": "56d"})

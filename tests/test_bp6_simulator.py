@@ -156,3 +156,15 @@ def test_sim_stream_ignores_other_keys_and_stops_on_a_stop_key():
     out = fake.terminal.read(4096)
     assert out.startswith(b"DONE\r\n") and out.endswith(b"HiZ> \x03")
     assert fake.keys_seen == [b"z", b"x"]
+
+
+def test_sim_ir_tx_echo_matches_firmware():
+    from buspirate.bp6.console import Console
+    fake = FakeBp6()
+    con = Console(fake.terminal, lambda *a: None)
+    con.command("m infrared -p nec")
+    fake.terminal.read(4096)
+    fake.terminal.write(b"> 0x0408\r")
+    out = fake.terminal.read(4096).decode()
+    assert out.replace("\x1b[0K", "").startswith("> 0x0408\r\n\r\nTX: 0x0408.16 \r\n"), repr(out)
+    assert out.endswith("INFRARED-(NEC)> \x03")

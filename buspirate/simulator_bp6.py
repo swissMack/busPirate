@@ -1208,8 +1208,8 @@ class FakeBp6:
                 return
             self.ir_sent.append((self.ir_protocol.lower(), value))
             sent.append(value | 0x3000 if self.ir_protocol == "RC5" else value)
-        self._finish(text, "\r\nTX: %s\r\n" % " ".join("0x%04X.16 " % v for v in sent).rstrip(" ")
-                     + " ")
+        # _finish adds the CRLF after the echo: the firmware prints "\r\n\r\nTX: ...16 \r\n"
+        self._finish(text, "\r\nTX: %s\r\n" % "".join("0x%04X.16 " % v for v in sent))
 
     PS2_BANNER = ("\r\npico-ps2-sniffer started! for Bus Pirate\r\n"
                   "https://github.com/therealdreg/pico-ps2-sniffer\r\n"
