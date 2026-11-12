@@ -311,8 +311,10 @@ def _destructive(recipes, calls, identity=None, result=None):
         calls.append(("commit", prepared["_data"], prepared["_identity"]))
         return dict(result) if result is not None else {"written": 4}
 
+    # A backup option, as the memory write recipes have: the plan says it saves one.
     return recipes(name="toy-write", risk="destructive", check=check, action=prepare,
-                   commit=commit, default_mv=3300, max_mv=3600)
+                   commit=commit, default_mv=3300, max_mv=3600,
+                   options={"address": LCD, "byte": 0x08, "backup": True})
 
 
 def _prepared(session, confirm, **options):
@@ -659,9 +661,73 @@ def test_rerun_same_mode_sends_no_m_or_W(session, confirm, recipes):
     assert result["result"] == {"mode": "DIO"}
 
 
-def test_terminal_destructive_refused():
-    with pytest.raises(ValueError):
-        _toy(**_term(risk="destructive", commit=lambda con, opts, prepared: {}))
+def _destructive_term(ran, ident=None):
+    def check(con, opts):
+        assert con.mode  # the console, not the board
+        return {"ok": True, "identity": ident[0] if ident else opts.get("ident", "X")}
+
+    def action(con, opts):
+        """Prepare a change."""
+        return {"chip": "c", "operation": "op", "start": 0, "length": 1, "summary": "s",
+                "backup": None}
+
+    def commit(con, opts, prepared):
+        ran.append(con)
+        return {"done": True}
+
+    return _term(risk="destructive", check=check, action=action, commit=commit)
+
+
+def test_terminal_destructive_allowed():
+    _toy(**_destructive_term([]))
+
+
+def test_terminal_destructive_commit_runs_in_terminal(session, confirm, recipes):
+    ran = []
+    recipes(**_destructive_term(ran))
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "error" not in result, result
+    done = engine.commit_recipe(session, confirm, result["commit"]["token"])
+    assert done["committed"] is True and done["result"] == {"done": True}, done
+    assert len(ran) == 1 and callable(getattr(ran[0], "command", None))
+
+
+def test_terminal_commit_refused_after_mode_change(session, confirm, recipes):
+    ran = []
+    # No supply, so the power check passes and the mode check is what refuses.
+    recipes(**dict(_destructive_term(ran), default_mv=0, min_mv=0, max_mv=0, pullups=False))
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "error" not in result, result
+
+    def switch(bp):
+        with bp.console() as con:
+            con.command("m i2c -s 400")
+    session.run(switch)
+    done = engine.commit_recipe(session, confirm, result["commit"]["token"])
+    assert done["error"].startswith("plan again") and "I2C" in done["error"], done
+    assert ran == []
+
+
+def test_terminal_commit_refused_on_identity_change(session, confirm, recipes):
+    ran = []
+    ident = ["X"]
+    recipes(**_destructive_term(ran, ident))
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "error" not in result, result
+    ident[0] = "Y"
+    done = engine.commit_recipe(session, confirm, result["commit"]["token"])
+    assert done["error"].startswith("plan again"), done
+    assert ran == []
+
+
+def test_change_note_without_backup_option(session, confirm, recipes):
+    recipes(**_destructive_term([]))
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    assert engine.CHANGE_NOTE in plan["warnings"]
+    assert engine.PREPARE_NOTE not in plan["warnings"]
 
 
 def test_precheck_runs_over_bpio2_first(session, confirm, recipes):

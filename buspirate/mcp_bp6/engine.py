@@ -15,10 +15,10 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..bp6.console import TerminalError
-from ..exceptions import BusPirateError, NackError
+from ..exceptions import BusPirateError, NackError, PortGoneError
 from ..mcp import power
 from ..mcp.confirm import ConfirmError, ConfirmStore
-from ..mcp.session import NotConnected
+from ..mcp.session import BoardGone, NotConnected
 from ..mcp.wiring import WiringStep, cable_colour
 from . import console_power, state
 from .recipes import REGISTRY, Recipe
@@ -36,6 +36,8 @@ SUPPLY_NONE = "none"      # the recipe needs no supply (max_mv 0)
 COMMIT_ACTION = "recipe_commit"  #: the ConfirmStore action commit tokens are issued for
 PREPARE_NOTE = ("this recipe changes the chip: after the power yes it reads what it will "
                 "change, saves a backup, and stops; the change needs its own yes")
+CHANGE_NOTE = ("this recipe makes a change: after the power yes it shows exactly what will "
+               "change and stops; the change needs its own yes")
 NO_BACKUP_NOTE = "the owner declined the backup: nothing is saved before the change"
 ASK_VOLTAGE = "ask the owner for the target's voltage (3.3 V is usual)"
 CHECK_HINT = ("check the wiring and the address; the power is left as it is, so fix it "
@@ -141,7 +143,7 @@ def plan_recipe(session: Any, confirm: ConfirmStore, name: str,
     if recipe.risk == "owner-only":
         warnings.append("ask the owner to confirm the device is theirs before running this")
     if recipe.risk == "destructive":
-        warnings.append(PREPARE_NOTE)
+        warnings.append(PREPARE_NOTE if "backup" in recipe.options else CHANGE_NOTE)
         if merged.get("backup") is False:
             warnings.append(NO_BACKUP_NOTE)
 
@@ -302,6 +304,28 @@ def _terminal_power(con: Any, plan: power.PowerPlan) -> Dict[str, Any]:
     return dict(plan.to_dict(), applied=True, **readings)
 
 
+class _Sent:
+    """Whether a terminal commit's change line has gone out (see ``Recipe.change_lines``)."""
+
+    def __init__(self) -> None:
+        self.change = False
+
+
+MAY_HAVE_CHANGED_HINT = "the change may have happened: check before relying on it"
+GONE_AFTER_CHANGE = ("the board disconnected after the change was sent; plug it back in "
+                     "and call connect")
+
+
+def _may_have_changed(recipe: Recipe, out: Dict[str, Any]) -> Dict[str, Any]:
+    """``out`` marked as a change that may have happened: never a plain "not committed"."""
+    out = dict(out)
+    out["recipe"] = recipe.name
+    out["committed"] = None
+    out["may_have_changed"] = True
+    out["hint"] = recipe.change_hint or MAY_HAVE_CHANGED_HINT
+    return out
+
+
 class _TripWatch:
     """A ``Console`` whose replies are watched for the supply cutting out.
 
@@ -311,14 +335,22 @@ class _TripWatch:
     no BPIO2 tool re-asserts the supply into the fault.
     """
 
-    def __init__(self, con: Any, session: Any) -> None:
+    def __init__(self, con: Any, session: Any, change_lines: Tuple[str, ...] = (),
+                 sent: Optional["_Sent"] = None) -> None:
         self._con = con
         self._session = session
         #: For recipes that keep per-session state (``state.of(con.session)``).
         self.session = session
         self.tripped = None  # type: Optional[str]
+        self._change_lines = change_lines
+        self.sent = sent if sent is not None else _Sent()
 
     def command(self, *args: Any, **kwargs: Any) -> Any:
+        line = args[0] if args else kwargs.get("line", "")
+        if any(line.startswith(start) for start in self._change_lines):
+            # Marked before the line goes out: once it may have reached the
+            # board, a failure can no longer be read as "nothing changed".
+            self.sent.change = True
         reply = self._con.command(*args, **kwargs)
         if reply.error and TRIPPED in reply.error.lower():
             self._session.power = None
@@ -488,6 +520,8 @@ def commit_recipe(session: Any, confirm: ConfirmStore, token: str) -> Dict[str, 
         return {"error": "plan again: recipe %r is gone or no longer changes the chip"
                 % payload["name"]}
 
+    sent = _Sent()
+
     def go(bp: Any) -> Dict[str, Any]:
         if payload["port"] != session.port:
             return {"error": "plan again: this was prepared for another board (%s)"
@@ -495,20 +529,86 @@ def commit_recipe(session: Any, confirm: ConfirmStore, token: str) -> Dict[str, 
         error = _power_error(bp, session, recipe, payload["mv"], payload["supply"])
         if error:
             return {"error": error}
-        options, prepared = payload["options"], payload["prepared"]
-        try:
-            check = recipe.check(bp, options)
-        except NackError as exc:
-            check = {"ok": False, "error": str(exc)}
-        if not check.get("ok", False):
-            return {"error": "plan again: the chip no longer answers the check (%s)"
-                    % (check.get("error") or check.get("hint") or "check failed")}
-        ident = check.get("identity")
-        if not (isinstance(ident, str) and ident) or ident != prepared.get("_identity"):
-            return {"error": "plan again: the chip is not the one that was prepared "
-                    "(%s, was %s)" % (check.get("identity"), prepared.get("_identity"))}
-        result = recipe.commit(bp, options, prepared)
-        # A change that failed or did not verify (e.g. a write-protected chip) is not a commit.
-        committed = "error" not in result and result.get("verified") is not False
-        return {"recipe": recipe.name, "committed": committed, "result": result}
-    return session.run(go)
+        if recipe.transport == "terminal":
+            return _commit_terminal(bp, session, recipe, payload, sent)
+        return _check_then_commit(bp, recipe, payload)
+    try:
+        return session.run(go)
+    except BoardGone:
+        # session.run has dropped the board; the change may still have happened.
+        if sent.change:
+            return _may_have_changed(recipe, {"error": GONE_AFTER_CHANGE})
+        raise
+
+
+def _check_then_commit(dev: Any, recipe: Recipe, payload: Dict[str, Any],
+                       sent: Optional[_Sent] = None) -> Dict[str, Any]:
+    """Re-run the check on ``dev`` (the board, or the ``Console``) and commit if it
+    is still the prepared chip.
+
+    With ``sent`` (a terminal commit) and no ``change_lines``, the change counts
+    as sent from the moment ``commit`` runs. A commit whose result says
+    ``may_have_changed`` (a request the source has not settled) is reported
+    with ``committed`` None, never False."""
+    options, prepared = payload["options"], payload["prepared"]
+    try:
+        check = recipe.check(dev, options)
+    except NackError as exc:
+        check = {"ok": False, "error": str(exc)}
+    if not check.get("ok", False):
+        return {"error": "plan again: the chip no longer answers the check (%s)"
+                % (check.get("error") or check.get("hint") or "check failed")}
+    ident = check.get("identity")
+    if not (isinstance(ident, str) and ident) or ident != prepared.get("_identity"):
+        return {"error": "plan again: the chip is not the one that was prepared "
+                "(%s, was %s)" % (check.get("identity"), prepared.get("_identity"))}
+    if sent is not None and not recipe.change_lines:
+        sent.change = True
+    result = recipe.commit(dev, options, prepared)
+    if result.get("may_have_changed"):
+        return _may_have_changed(recipe, {"result": result})
+    # A change that failed or did not verify (e.g. a write-protected chip) is not a commit.
+    committed = "error" not in result and result.get("verified") is not False
+    return {"recipe": recipe.name, "committed": committed, "result": result}
+
+
+def _commit_terminal(bp: Any, session: Any, recipe: Recipe, payload: Dict[str, Any],
+                     sent: _Sent) -> Dict[str, Any]:
+    """Commit a terminal recipe in the terminal, only while it is still in the
+    recipe's mode. Never switches the mode, the supply or the pull-ups.
+
+    ``sent`` records when the change line goes out (``Recipe.change_lines``).
+    A trip or an error before that is a plain error with ``committed`` False;
+    after it, the change may have happened, so the reply says so
+    (``committed`` None, ``may_have_changed``, the recipe's ``change_hint``).
+    A lost port is left to ``commit_recipe``, which sees ``sent`` too.
+    """
+    want = recipe.terminal_mode or "hiz"
+    try:
+        with bp.console() as raw:
+            con = _TripWatch(raw, session, recipe.change_lines, sent)
+            now = con.command("").mode  # Enter: a fresh prompt names the mode
+            if con.tripped:
+                return {"recipe": recipe.name, "committed": False, "error": con.tripped}
+            if now.upper() != want.upper():
+                return {"error": "plan again: the board is in %s mode now" % now}
+            out = _check_then_commit(con, recipe, payload, sent)
+            if con.tripped:
+                # The supply cut out during the check or the change: say so,
+                # and never hand a re-run the old power.
+                session.last_recipe = None
+                if sent.change:
+                    return _may_have_changed(recipe, dict(out, error=con.tripped))
+                out.setdefault("error", con.tripped)
+                if "committed" in out:
+                    out["committed"] = False
+            return out
+    except PortGoneError:
+        raise
+    except BusPirateError as exc:
+        if TRIPPED in str(exc).lower():
+            session.power = None
+            session.last_recipe = None
+        if sent.change:
+            return _may_have_changed(recipe, {"error": str(exc)})
+        return {"recipe": recipe.name, "committed": False, "error": str(exc)}

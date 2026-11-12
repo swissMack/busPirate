@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 import struct
 import time
-from typing import List
+from typing import Any, Dict, List, Optional
 
 import flatbuffers
 
@@ -56,6 +56,7 @@ PIN_LABELS = {
     "2WIRE": ["VOUT", "SDA", "SCLK", "RST", "", "", "", "", "", "GND"],
     "PS2": ["VOUT", "DAT", "CLK", "", "", "", "", "", "", "GND"],
     "INFRARED": ["VOUT"] + [""] * 8 + ["GND"],
+    "HDUART": ["VOUT", "RXTX", "", "RST", "", "", "", "", "", "GND"],
 }
 
 
@@ -498,6 +499,29 @@ class FakeBp6:
         #: Text the receiver prints at the prompt after each IR send (it hears the
         #: board's own LED): a NEC/RC5 decode or an aIR line, straight after the ETX.
         self.ir_heard = ""
+        #: The smart card's answer to reset, printed after ``{`` while ``[`` printing is on.
+        self.card_atr = b""
+        self._hduart_printing = False
+        #: The USB-PD plank (``usbpd`` in I2C mode). Each offer is a dict: ``type``
+        #: Fixed/PPS/AVS, ``mv`` (the voltage, or the top of a PPS/AVS range), ``ma``,
+        #: optional ``domain`` (SPR) and, for PPS/AVS, ``min`` (the firmware's
+        #: description such as ``>=3300 mV``). ``usbpd_source`` None prints "PD source
+        #: connected" when there are offers, else "No source detected".
+        self.usbpd_pdos = []  # type: List[Dict[str, Any]]
+        self.usbpd_source = None  # type: Optional[str]
+        self.usbpd_result = "accepted"
+        self.usbpd_vbus_mv = 5000
+        self.usbpd_requested = (5000, 0)
+        #: How many ``usbpd status`` reads still show the old VBUS after a request.
+        self.usbpd_vbus_lag = 0
+        #: Whether a ``pending``/``unknown`` request takes effect later (at the
+        #: first status read past the lag).
+        self.usbpd_pending_lands = True
+        self._usbpd_landing = None  # type: Optional[List[int]]  # [mv, ma, reads left]
+        #: The Bus Pirate's own disk (``ls``, ``hex``, ``rm`` in every mode):
+        #: path from the root, lower case, such as ``dumps/flash.bin`` -> contents.
+        #: Directories are the paths' parents; a key ending in ``/`` is an empty one.
+        self.disk = {}  # type: Dict[str, bytes]
         #: Self-test (``~``): whether a human presses the button, whether the NAND
         #: has a file system, and extra failing lines to print (each is one error).
         self.button_pressed = True
@@ -861,7 +885,7 @@ class FakeBp6:
     # -- the text terminal ----------------------------------------------------
 
     HIZ_REFUSAL = "Command has no effect in HiZ mode, press 'm' to choose a mode"
-    TERMINAL_MODES = ("HiZ", "DIO", "JTAG", "I2C", "2WIRE", "PS2", "INFRARED")
+    TERMINAL_MODES = ("HiZ", "DIO", "JTAG", "I2C", "2WIRE", "PS2", "INFRARED", "HDUART")
 
     def lines_received(self) -> List[bytes]:
         """Every write the terminal port received, in order."""
@@ -933,6 +957,7 @@ class FakeBp6:
     def _set_mode(self, name: str) -> None:
         self.mode = name
         self.ir_protocol = "RAW"
+        self._hduart_printing = False
         self.psu_enabled = False   # the HiZ setup of every mode switches these off
         self.pullups = False
         self.pwm.clear()
@@ -1120,6 +1145,8 @@ class FakeBp6:
             self._finish(text, f"\x07{self.HIZ_REFUSAL}\r\n")
         elif name == "m":
             self._cmd_mode(text, args)
+        elif name in ("ls", "hex", "rm"):
+            self._cmd_disk(text, name, args)
         elif name == "W":
             self._cmd_psu_on(text, args)
         elif name == "w":
@@ -1152,10 +1179,204 @@ class FakeBp6:
             self._cmd_irtx(text, text[len("irtx"):].strip())
         elif text.lstrip().startswith(">") and self.mode == "INFRARED" and self.ir_protocol != "RAW":
             self._cmd_ir_write(text)
+        elif name in ("}", "{", "[", "]") and self.mode == "HDUART":
+            self._cmd_hduart_bus(text, name)
         elif name == "bluetag" and self.mode == "JTAG":
             self._cmd_bluetag(text, args)
+        elif name == "usbpd" and self.mode == "I2C":
+            self._cmd_usbpd(text, args)
         else:
             self._finish(text, f"Invalid command: {text}. Type ? for help.\r\n")
+
+    # -- the Bus Pirate's disk (commands/global/disk.c, hex.c) ----------------
+
+    DISK_DATE = "2020-01-01 00:00"
+
+    def _disk_error(self, echo: str, reason: str) -> None:
+        """A FatFs error: coloured ``Error:``, no line ending, then the prompt."""
+        self._say(f"{echo}\x1b[0K\r\n\x1b[38;2;191;165;48mError:\x1b[38;2;150;150;150m "
+                  f"{reason}\x1b[0m{self.mode}> \x03")
+
+    @staticmethod
+    def _disk_key(path: str) -> str:
+        return path.strip("/").lower()
+
+    def _disk_dirs(self) -> List[str]:
+        dirs = set()
+        for key in self.disk:
+            parts = key.rstrip("/").split("/")
+            for i in range(1, len(parts) + (1 if key.endswith("/") else 0)):
+                dirs.add("/".join(parts[:i]))
+        return sorted(dirs)
+
+    def _cmd_disk(self, text: str, name: str, args) -> None:
+        flags = [a for a in args if a.startswith("-")]
+        words = [a for a in args if not a.startswith("-") and not a.isdigit()]
+        if name == "ls":
+            self._cmd_ls(text, words[0] if words else "/", "-l" in flags)
+            return
+        if not words:
+            self._disk_error(text, "no file")
+            return
+        key = self._disk_key(words[0])
+        data = self.disk.get(key)
+        if name == "rm" and data is None and key in self._disk_dirs():
+            empty = not any(k.startswith(key + "/") and k != key + "/" for k in self.disk)
+            if not empty:
+                self._disk_error(text, "denied")
+                return
+            self.disk.pop(key + "/", None)
+            self._finish(text)
+            return
+        if data is None or key.endswith("/"):
+            self._disk_error(text, "no file")
+        elif name == "rm":
+            del self.disk[key]
+            self._finish(text)
+        else:
+            self._cmd_hex(text, args, data)
+
+    def _cmd_ls(self, text: str, path: str, long: bool) -> None:
+        where = self._disk_key(path)
+        if where and where not in self._disk_dirs():
+            self._finish(text)  # the firmware prints nothing and only sets the error flag
+            return
+        prefix = where + "/" if where else ""
+        dirs, files = set(), []
+        for key, data in sorted(self.disk.items()):
+            if not key.startswith(prefix) or key == prefix:
+                continue
+            rest = key[len(prefix):]
+            if "/" in rest:
+                dirs.add(rest.split("/", 1)[0])
+            else:
+                files.append((rest, len(data)))
+        if long:
+            body = "".join("       -  %s  %s/\r\n" % (self.DISK_DATE, d) for d in sorted(dirs))
+            body += "".join("%8u  %s  %s\r\n" % (size, self.DISK_DATE, f) for f, size in files)
+        else:
+            body = "".join("%s/\r\n" % d for d in sorted(dirs))
+            body += "".join("%s\r\n" % f for f, _ in files)
+        body += "%d dirs, %d files\r\n" % (len(dirs), len(files))
+        self._finish(text, body)
+
+    def _cmd_hex(self, text: str, args, data: bytes) -> None:
+        def flag(name: str, default: int) -> int:
+            if name in args and args.index(name) + 1 < len(args):
+                return int(args[args.index(name) + 1], 0)
+            return default
+        if not data:
+            self._finish(text)
+            return
+        start = min(flag("-s", 0), len(data) - 1)
+        last = min((start + max(flag("-b", len(data)), 1) - 1) | 0xF, len(data) - 1)
+        rows = ["", "          " + " ".join("%02X" % i for i in range(16))
+                + "  0123456789ABCDEF", "-" * 57 + "-|----------------|"]
+        for at in range(start & ~0xF, last + 1, 16):
+            row = data[at:min(at + 16, last + 1)]
+            hexes = "".join("%02X " % b for b in row) + "   " * (16 - len(row))
+            ascii_part = "".join(chr(b) if 0x20 <= b < 0x7F else "." for b in row)
+            rows.append("%08X: %s|%s|" % (at, hexes, ascii_part.ljust(16)))
+        self._finish(text, "".join(r + "\r\n" for r in rows))
+
+    HDUART_BUS = {"}": "RST LOW", "{": "RST HIGH", "[": "UART OPEN (ASYNC READ)",
+                   "]": "UART CLOSE"}
+
+    def _cmd_hduart_bus(self, text: str, name: str) -> None:
+        """HDUART bus syntax: ``}``/``{`` drive RST, ``[``/``]`` start/stop printing bytes."""
+        if name == "[":
+            self._hduart_printing = True
+        elif name == "]":
+            self._hduart_printing = False
+        self._finish(text, self.HDUART_BUS[name] + "\r\n")
+        if name == "{" and self._hduart_printing:
+            self._say("".join("0x%02x " % b for b in self.card_atr))
+
+    USBPD_RESULTS = {"accepted": 0x01, "rejected": 0x02, "failed": 0x03, "pending": 0x00}
+
+    @staticmethod
+    def _usbpd_low(pdo: Dict[str, Any]) -> int:
+        if pdo["type"] == "Fixed":
+            return pdo["mv"]
+        numbers = re.findall(r"\d+", pdo.get("min", ""))
+        return int(numbers[-1]) if numbers else pdo["mv"]
+
+    def _usbpd_measure(self) -> str:
+        if self._usbpd_landing is not None:
+            mv, ma, left = self._usbpd_landing
+            if left <= 0:
+                self.usbpd_vbus_mv, self.usbpd_requested = mv, (mv, ma)
+                self._usbpd_landing = None
+            else:
+                self._usbpd_landing[2] -= 1
+        return ("VBUS voltage: %d mV\r\nVBUS current: 0 mA\r\n"
+                "Requested V : %d mV\r\nRequested I : %d mA\r\nTemperature : 30 C\r\n"
+                % ((self.usbpd_vbus_mv,) + self.usbpd_requested))
+
+    def _cmd_usbpd(self, text: str, args) -> None:
+        """``usbpd status|request|reset`` (commands/i2c/usbpd.c, the AP33772S plank)."""
+        sub = args[0] if args else ""
+        if sub == "status":
+            source = self.usbpd_source or ("PD source connected" if self.usbpd_pdos
+                                           else "No source detected")
+            body = ("Source      : %s\r\nCC line     : CC1\r\nData role   : UFP\r\n"
+                    "De-rating   : none\r\n" % source) + self._usbpd_measure()
+            body += "\r\nAvailable PDO entries: %d\r\n" % len(self.usbpd_pdos)
+            for i, pdo in enumerate(self.usbpd_pdos, 1):
+                kind = "%s %s" % (pdo.get("domain", "SPR"), pdo["type"])
+                if pdo["type"] == "Fixed":
+                    body += "PDO %d (%s): %d mV, 0-%d mA\r\n" % (i, kind, pdo["mv"], pdo["ma"])
+                else:
+                    body += "PDO %d (%s): %s to %d mV, 0-%d mA\r\n" % (
+                        i, kind, pdo.get("min", "reserved"), pdo["mv"], pdo["ma"])
+            self._finish(text, body)
+        elif sub == "reset":
+            self.usbpd_vbus_mv, self.usbpd_requested = 5000, (5000, 0)
+            self._usbpd_landing = None
+            self._finish(text, "PD hard reset sent successfully\r\n")
+        elif sub == "request":
+            self._cmd_usbpd_request(text, args[1:])
+        else:
+            self._finish(text, "usage: usbpd status|request|reset [-p <index>] [-v <mV>] "
+                         "[-i <mA>]\r\n")
+
+    def _cmd_usbpd_request(self, text: str, args) -> None:
+        def flag(name: str) -> Optional[int]:
+            if name in args and args.index(name) + 1 < len(args):
+                value = args[args.index(name) + 1]
+                return int(value) if value.isdigit() else 0
+            return None
+        index = flag("-p") or 0
+        if not 1 <= index <= len(self.usbpd_pdos):
+            self._finish(text, "Invalid PDO index specified: %d\r\n" % index)
+            return
+        pdo = self.usbpd_pdos[index - 1]
+        low = self._usbpd_low(pdo)
+        mv = pdo["mv"] if pdo["type"] == "Fixed" else (flag("-v") or 0)
+        if not low <= mv <= pdo["mv"]:
+            self._finish(text, "Requested voltage %d mV out of range (%d-%d mV)\r\n"
+                         % (mv, low, pdo["mv"]))
+            return
+        ma = flag("-i")
+        ma = pdo["ma"] if ma is None else ma
+        if not 0 <= ma <= pdo["ma"]:
+            self._finish(text, "Requested current %d mA out of range (0-%d mA)\r\n"
+                         % (ma, pdo["ma"]))
+            return
+        body = "Requesting PDO %d, %dmV @ %dmA\r\n" % (index, mv, ma)
+        body += "PD request %s (PD_MSGRLT=0x%02X)\r\n" % (
+            self.usbpd_result, self.USBPD_RESULTS.get(self.usbpd_result, 0xFF))
+        if self.usbpd_result == "accepted":
+            self.usbpd_requested = (mv, ma)
+            body += "Negotiated voltage: %d mV\r\n" % mv
+            if self.usbpd_vbus_lag:
+                self._usbpd_landing = [mv, ma, self.usbpd_vbus_lag]
+            else:
+                self.usbpd_vbus_mv = mv
+        elif self.usbpd_result in ("pending", "unknown") and self.usbpd_pending_lands:
+            # Measured below, in this reply: lands at the first status read past the lag.
+            self._usbpd_landing = [mv, ma, self.usbpd_vbus_lag + 1]
+        self._finish(text, body + "\r\n" + self._usbpd_measure())
 
     IR_SENSORS = {"38b": "38kHz barrier", "38d": "36-40kHz demodulator", "56d": "56kHz demodulator"}
 

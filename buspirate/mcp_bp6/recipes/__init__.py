@@ -38,8 +38,16 @@ class Recipe:
     when the firmware's own prompt sets it) and the pull-ups. ``precheck``,
     if given, runs over BPIO2 with the board before the terminal opens. A
     recipe with ``target_powered_ok`` False refuses a target that has its own
-    supply, giving ``target_powered_error`` as the reason when it is set. No
-    terminal recipe may be destructive.
+    supply, giving ``target_powered_error`` as the reason when it is set. A
+    destructive terminal recipe's ``commit`` gets the ``Console`` too, and runs
+    only while the terminal is still in ``terminal_mode``.
+
+    ``change_lines`` are the starts of the terminal lines that make the change
+    (``"rm "``, ``"usbpd request"``). The engine marks the commit as sent the
+    moment one goes out; a trip or an error after that point is reported as
+    ``committed: None`` with ``may_have_changed`` and ``change_hint`` (what the
+    owner should do to find out), never as a plain "not committed". A terminal
+    commit with no ``change_lines`` counts as sent as soon as ``commit`` runs.
     """
 
     name: str
@@ -69,6 +77,8 @@ class Recipe:
     #: Given the merged options, the wiring to show in place of ``wiring`` (a recipe
     #: whose pins depend on an option, such as which IR sensor is used).
     wiring_for: Optional[Callable[[Dict[str, Any]], Tuple[Tuple[str, str], ...]]] = None
+    change_lines: Tuple[str, ...] = ()
+    change_hint: str = ""
 
     def __post_init__(self) -> None:
         if self.bus not in BUSES:
@@ -90,8 +100,6 @@ class Recipe:
                                              or self.terminal_flags or self.supply_by != "engine"):
             raise ValueError("recipe %r: terminal_mode, terminal_flags, precheck and supply_by are for "
                              "terminal recipes" % self.name)
-        if self.transport == "terminal" and self.risk == "destructive":
-            raise ValueError("recipe %r: a terminal recipe may not change a chip" % self.name)
 
 
 REGISTRY = {}  # type: Dict[str, Recipe]
@@ -130,4 +138,4 @@ def find_recipes(query: Optional[str]) -> List[Dict[str, str]]:
 
 
 from . import i2c  # noqa: E402,F401  (registers the I2C recipes)
-from . import board, ddr, handoff, identify, jtag, led, infrared, onewire, pins, signals, sniff, spi, uart  # noqa: E402,F401  (the other buses)
+from . import board, ddr, disk, handoff, identify, jtag, led, infrared, onewire, pins, signals, sniff, smartcard, spi, uart, usbpd  # noqa: E402,F401  (the other buses)

@@ -201,7 +201,7 @@ def test_pins_set_and_read():
 def test_bp6_notes():
     out = call(build_server(BoardSession(simulated="bp6")), "bp6_notes")
     text = out["text"]
-    assert len(text.splitlines()) < 100
+    assert len(text.splitlines()) < 120
     for word in ("5 V", "pull-up", "orange", "SHT4x", "SLE4442", "owner-only", "HiZ"):
         assert word in text
 

@@ -59,6 +59,26 @@ range is refused.
 - `gps`: the phase 1 `gps` recipe already reads and decodes NMEA over BPIO2, and the terminal command returns silently without VOUT.
 - `logic`: it only records what the BP6 itself drives, and its only text output is the first 80 samples. Use the `pulseview` hand-off.
 - `tvbgone`: it cannot be interrupted, and it switches off every TV in range.
+- Macros and scripts: any byte the board receives aborts a run, so one cannot be left running.
+- `button`: it binds a script to the board's button and is kept only until a reboot.
+- `pause -b`: it waits only for a press of the physical button, so nothing can end it.
+- `bridge`: it ends only on the button.
+- `fusb302 scan`: it is interactive.
+- `format`, `edit` and `hexedit`: they are interactive.
+- UART `glitch` and `sle4442`: left out of phase 3c, their source was not reviewed.
+
+## Checked on a real board (2026-11-12, firmware 2026-10-12)
+
+- `disk-list`, `disk-show` and `disk-hex` work; `disk-hex` aligns rows to 16 bytes, also
+  from an unaligned start, and a read past the end of a file returns what is there.
+- Absolute paths such as `/dumps/flash.bin` work; a missing file or folder gives an error.
+- `m hduart` writes its settings file without a hang.
+- `ls -la` (combined flags) prints nothing, so the recipes send `-l` alone.
+- `disk-delete` stops for the second yes; `recipe_commit` then deletes (`verified` true).
+- `smartcard-atr` on the owner's SIM: a 22-byte ATR, T=0, checksum ok, 4.8 mA at 3.0 V.
+- HDUART listen mode receives; the IO1 clock runs alongside IO0; RST is on IO2.
+- Once, after `m hduart` saved its settings file, the next terminal open failed
+  ("terminal did not answer"); the open after it worked, and opens after a `rm` were fine.
 
 ## Unverified on a real board
 
@@ -92,5 +112,8 @@ Built from the datasheets and the firmware source; all fakes pass. Check on hard
 - A cut-off sniff transaction arrives on the same line as the prompt.
 - IR decodes printed at the prompt (§6) are handled as trailing text after the prompt.
 - If the PS/2 sniffer's ready text is late, the stop key can be swallowed; hiz then needs a replug.
+- Whether the USB-PD plank needs VOUT from the Bus Pirate or feeds it.
+- USB-PD: VBUS is read again up to 3 times, 0.5 s apart; whether that is long enough to settle.
+- A card's first bytes could be lost while `RST HIGH` prints; the owner's SIM answered in full (22).
 
 Name the exact part for 24xx/25xx/93Cxx writes: a wrong size mis-addresses the backup and the write alike.
