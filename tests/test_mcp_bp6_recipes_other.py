@@ -729,3 +729,47 @@ def test_swd_recipe_channel_range_refused(session, confirm):
     plan = engine.plan_recipe(session, confirm, "swd-pinout", {"channels": 1})
     out = engine.run_recipe(session, confirm, plan["token"], {})
     assert out["check"]["ok"] is False and "SWD needs 2 to 8 channels" in str(out)
+
+
+def _sniff_lines(n):
+    return ["[ [0xA0]+ [0x00]+ [0x%02X]-]\r\n" % (i % 256) for i in range(n)]
+
+
+def test_i2c_sniff_recipe_runs(session, confirm):
+    fake = _fake(session)
+    fake.sniff_lines = _sniff_lines(3)
+    _, result = _run(session, confirm, "i2c-sniff", {"millivolts": 3300, "seconds": 0.2})
+    assert result["result"]["count"] == 3, result
+    assert fake.mode == "I2C"
+    assert b"m i2c -s 400\r" in fake.lines_received()
+    assert fake.keys_seen[-1] == b"x"
+
+
+def test_2wire_sniff_recipe_runs(session, confirm):
+    fake = _fake(session)
+    fake.sniff_lines = ["[ 0x30 0x00 0xFF]\r\n"]
+    _, result = _run(session, confirm, "2wire-sniff", {"millivolts": 3300, "seconds": 0.2})
+    assert result["result"]["transactions"][0]["data"] == "30 00 FF", result
+    assert fake.mode == "2WIRE"
+
+
+def test_sniff_truncates(session, confirm):
+    fake = _fake(session)
+    fake.sniff_lines = _sniff_lines(250)
+    _, result = _run(session, confirm, "i2c-sniff", {"millivolts": 3300, "seconds": 1})
+    r = result["result"]
+    assert r["count"] == 250 and len(r["transactions"]) == 200 and r["truncated"] is True
+
+
+def test_sniff_seconds_refused(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "i2c-sniff", {"millivolts": 3300, "seconds": 61})
+    if "error" in plan:
+        assert "60" in plan["error"]
+        return
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out["check"]["ok"] is False and "60" in out["check"]["error"]
+
+
+def test_sniff_notes_name_driven_pins():
+    for n in ("i2c-sniff", "2wire-sniff"):
+        assert any("IO2 and IO3" in note for note in REGISTRY[n].notes)

@@ -53,6 +53,9 @@ PIN_LABELS = {
     "LED": ["VOUT", "SDO", "", "", "", "", "", "", "", "GND"],
     "DIO": ["VOUT"] + [""] * 8 + ["GND"],
     "JTAG": ["VOUT"] + [""] * 8 + ["GND"],
+    "2WIRE": ["VOUT", "SDA", "SCLK", "RST", "", "", "", "", "", "GND"],
+    "PS2": ["VOUT", "DAT", "CLK", "", "", "", "", "", "", "GND"],
+    "INFRARED": ["VOUT"] + [""] * 8 + ["GND"],
 }
 
 
@@ -481,6 +484,8 @@ class FakeBp6:
         #: Every key received while a command was streaming (see ``_stream``).
         self.keys_seen = []
         self._streaming = None
+        #: What ``sniff`` streams in I2C and 2WIRE modes, one string per chunk.
+        self.sniff_lines = []
         #: The infrared protocol (-p) the INFRARED prompt shows: RAW, NEC or RC5.
         self.ir_protocol = "RAW"
         #: Self-test (``~``): whether a human presses the button, whether the NAND
@@ -1106,6 +1111,11 @@ class FakeBp6:
             self._cmd_freq(text, args)
         elif name == "~":
             self._cmd_selftest(text)
+        elif name == "sniff" and self.mode in ("I2C", "2WIRE"):
+            banner = "I2C Sniffer" if self.mode == "I2C" else "2Wire Sniffer"
+            self._stream(text, banner + "\r\nPress x to exit\r\n", ("x",), "",
+                         ["".join(self.sniff_lines[i:i + 10])
+                          for i in range(0, len(self.sniff_lines), 10)])
         elif name == "bluetag" and self.mode == "JTAG":
             self._cmd_bluetag(text, args)
         else:
