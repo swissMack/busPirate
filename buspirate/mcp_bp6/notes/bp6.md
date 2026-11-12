@@ -59,11 +59,24 @@ range is refused.
 - `gps`: the phase 1 `gps` recipe already reads and decodes NMEA over BPIO2, and the terminal command returns silently without VOUT.
 - `logic`: it only records what the BP6 itself drives, and its only text output is the first 80 samples. Use the `pulseview` hand-off.
 - `tvbgone`: it cannot be interrupted, and it switches off every TV in range.
-- Macros and scripts: any byte received aborts a run, and pauses end only on the button.
+- Macros and scripts: any byte the board receives aborts a run, so one cannot be left running.
+- `button`: it binds a script to the board's button and is kept only until a reboot.
+- `pause -b`: it waits only for a press of the physical button, so nothing can end it.
 - `bridge`: it ends only on the button.
 - `fusb302 scan`: it is interactive.
 - `format`, `edit` and `hexedit`: they are interactive.
 - UART `glitch` and `sle4442`: left out of phase 3c, their source was not reviewed.
+
+## Checked on a real board (2026-11-12, firmware 2026-10-12)
+
+- `disk-list`, `disk-show` and `disk-hex` work; `disk-hex` aligns rows to 16 bytes, also
+  from an unaligned start, and a read past the end of a file returns what is there.
+- Absolute paths such as `/dumps/flash.bin` work; a missing file or folder gives an error.
+- `m hduart` writes its settings file without a hang.
+- `ls -la` (combined flags) prints nothing, so the recipes send `-l` alone.
+- `disk-delete` stops for the second yes; `recipe_commit` then deletes (`verified` true).
+- Once, after `m hduart` saved its settings file, the next terminal open failed
+  ("terminal did not answer"); the open after it worked, and opens after a `rm` were fine.
 
 ## Unverified on a real board
 
@@ -101,9 +114,6 @@ Built from the datasheets and the firmware source; all fakes pass. Check on hard
 - The PWM clock on IO1 runs alongside HDUART on IO0.
 - RST on IO2 idles low after `}`.
 - Whether the USB-PD plank needs VOUT from the Bus Pirate or feeds it.
-- Each firmware disk write ejects and re-mounts the USB drive (possible hang).
-- Disk commands accept absolute paths such as `/dumps/flash.bin`.
-- The `hex` rows align to 16 bytes as in ui_hex.c.
 - USB-PD `verified` reads VBUS right after the request; it may not have settled.
 
 Name the exact part for 24xx/25xx/93Cxx writes: a wrong size mis-addresses the backup and the write alike.

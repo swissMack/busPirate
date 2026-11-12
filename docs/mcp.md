@@ -139,7 +139,9 @@ How it differs from `buspirate`:
   `ir-send-rc5` and `ir-send-raw` transmit one code. Results are capped at 200
   entries and marked `truncated` when cut. Not automated: the USB sniffer
   (it hangs the board without traffic), `gps` (use the `gps` recipe), `logic`
-  (use the `pulseview` hand-off) and `tvbgone` (it cannot be stopped).
+  (use the `pulseview` hand-off) and `tvbgone` (it cannot be stopped). Also not automated: macros and scripts, `button`,
+  `pause -b`, `bridge`, `fusb302 scan`, `format`, `edit`, `hexedit`, UART `glitch`
+  and `sle4442`.
 - **Smart card, USB-PD and disk recipes:** `smartcard-atr` reads a smart card's
   answer to reset (read-only). `usbpd-status` reads the USB-PD plank's offers and
   VBUS; `usbpd-request` asks the source for one offer and `usbpd-reset` sends a
