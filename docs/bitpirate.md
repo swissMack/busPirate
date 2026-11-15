@@ -200,6 +200,34 @@ otherwise fit the diode. Flash the normal build afterwards.
 Hardware verification of this patch is still pending: it builds and its
 native tests pass, but it has not yet been run on the board.
 
+### Binary-safe UART bridge (optional, local patch)
+
+The stock UART `bridge` drops every 0x00 byte in both directions: on the way
+in, 0x00 is read as "no key", and on the way out the byte goes through a text
+string. That is harmless for typing, but it breaks binary protocols such as
+esptool. `firmware/bitpirate-1.8-bridge-raw.patch` adds `bridge raw` next to
+it. The plain `bridge` stays exactly as before.
+
+- `bridge raw` passes every byte, 0x00 included, between the USB terminal and
+  the UART pins (TX IO10, RX IO11 on the Dock, VIO switch on 3V3).
+- It works on the USB serial terminal only, and refuses over Wi-Fi.
+- It runs at the UART mode's configured baud. A button on the board stops it,
+  like the plain bridge.
+
+Apply it after the LCD patch: `git apply …/bitpirate-1.8-bridge-raw.patch`.
+
+To flash another ESP32 through it, enter UART mode at 115200 8N1, run
+`bridge raw`, put the target into download mode by hand (IO0 low, pulse EN),
+then point esptool at the Bit Pirate's USB port:
+
+```sh
+python3 -m esptool --chip esp32s3 --port /dev/cu.usbmodem… --baud 115200 \
+  --before no_reset --after no_reset flash_id
+```
+
+Leave `--baud` at the bridge's baud. esptool cannot change it through the
+bridge.
+
 ## How it differs from a Bus Pirate
 
 | | Bus Pirate v3 / v4 | ESP32 Bit Pirate |
