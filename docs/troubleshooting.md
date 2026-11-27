@@ -285,13 +285,13 @@ Each on the dock, run from its panel. 1-Wire and DIO need a part on the
 header; Wi-Fi and Bluetooth need nothing. Where the real reply differs from
 the simulator's, the simulator is fixed to match.
 
-- [ ] 1-Wire: entering it sets Data GPIO to 15 (`config` shows `[15]`)
-- [ ] 1-Wire with a DS18B20 on IO15 and a 4k7 pull-up: Find devices, Ping,
+- [ ] 1-Wire: entering it sets Data GPIO to 13 (`config` shows `[13]`)
+- [ ] 1-Wire with a DS18B20 on loom IO0 (GPIO13) and a 4k7 pull-up: Find devices, Ping,
       Read the ROM, Read DS18B20 temperature
 - [ ] 1-Wire with nothing on the bus: Read the ROM is stopped and reported,
       and the next action works
 - [ ] 1-Wire Sniff: shows the line live; Stop, then HiZ, leave the board at `HIZ> `
-- [ ] DIO: Set IO15 high and Read it back; PWM on IO15, then Measure
+- [ ] DIO: Set IO0 (GPIO13) high and Read it back; PWM on IO0 (GPIO13), then Measure
       frequency on a pin wired to it; Reset a pin stops the PWM
 - [ ] DIO Servo and Pulse on a scope or a servo
 - [ ] JTAG: entering it sets the scan pins to the eight header pins; Find

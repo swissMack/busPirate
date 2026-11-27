@@ -15,16 +15,38 @@ from __future__ import annotations
 from typing import Dict, Tuple
 
 from ._modes import CliCommand, CliMode, CliParam
+from .bp6 import BP6_CABLE
 
-#: The dock header's GPIOs in header order, IO0..IO7 of the Bus Pirate 6
-#: layout (see bitpirate.DOCK_HEADER).
-DOCK_GPIOS = (15, 16, 17, 18, 10, 11, 12, 13)
+#: The dock header's GPIOs that a Bus Pirate 6 cable's IO0..IO7 land on when
+#: its VOUT wire sits on VIO: IO0 is next to VIO. DOCK_GPIOS[n] is loom IOn.
+DOCK_GPIOS = (13, 12, 11, 10, 18, 17, 16, 15)
+
+
+def loom_pin(n: int) -> str:
+    """Dock pin ``n`` named as on the Bus Pirate 6 loom's heat shrink, GPIO in brackets."""
+    return f"IO{n} (GPIO{DOCK_GPIOS[n]})"
+
+
+#: The dock's VIO pin, where the loom's VOUT wire goes.
+VOUT_PIN = "VOUT (VIO)"
+#: Every dock pin name -> the Bus Pirate 6 loom label that plugs onto it.
+LOOM_LABELS: Dict[str, str] = {
+    **{loom_pin(n): f"IO{n}" for n in range(8)},
+    VOUT_PIN: "VOUT",
+    "GND": "GND",
+}
+
+
+def loom_colour(pin: str) -> str:
+    """The Bus Pirate 6 loom colour for a dock pin name; '' if it has none."""
+    return BP6_CABLE.get(LOOM_LABELS.get(pin, ""), "")
+
 
 _PIN = CliParam(
     "pin", "enum", "Pin",
-    default=15,
-    choices=[{"value": g, "label": f"IO{g}"} for g in DOCK_GPIOS],
-    help="A pin on the dock's header",
+    default=13,
+    choices=[{"value": g, "label": loom_pin(n)} for n, g in enumerate(DOCK_GPIOS)],
+    help="A pin on the dock's header, by its loom label",
 )
 
 
@@ -35,16 +57,16 @@ def _num(name: str, label: str, default: int, minimum: int, maximum: int,
 
 
 # Controllers/OneWireController.cpp. Its config asks one question, "Data
-# GPIO" (handleConfig); IO15 is the Bus Pirate 6's 1-Wire pin, IO0.
+# GPIO" (handleConfig); loom IO0 (GPIO13) is the Bus Pirate 6's 1-Wire pin.
 ONEWIRE = CliMode(
     id="onewire_cli",
     title="1-Wire",
     cli_name="1wire",
     group="Buses",
-    blurb="Find 1-Wire parts on IO15, read their ROM codes and a DS18B20's temperature.",
+    blurb="Find 1-Wire parts on IO0 (GPIO13), read their ROM codes and a DS18B20's temperature.",
     doc="bitpirate-wiki/02-1wire",
-    pins={"Data GPIO": "15"},
-    wires=(("IO15", "DATA", "with a 4k7 pull-up to VIO; most parts need one"),),
+    pins={"Data GPIO": "13"},
+    wires=((loom_pin(0), "DATA", "with a 4k7 pull-up to VIO; most parts need one"),),
     commands=(
         CliCommand("scan", "Find devices", "scan",
                    help="Searches the bus and lists every ROM code"),
@@ -66,7 +88,7 @@ DIO = CliMode(
     group="Buses",
     blurb="Drive, read and time the header pins one at a time: levels, PWM, pulses, servos.",
     doc="bitpirate-wiki/09-dio",
-    wires=(("IO15 … IO13", "the target pin", "whichever header pin you pick in each action"),),
+    wires=(("IO0–IO7", "the target pin", "whichever header pin you pick in each action"),),
     # Leaving DIO resets nothing (ModeController releaseMode skips it), so a
     # pin set high, a PWM or a servo would carry on after HiZ.
     release=tuple(f"reset {g}" for g in DOCK_GPIOS),
@@ -112,7 +134,7 @@ JTAG = CliMode(
     blurb="Find which header pins a target's SWD or JTAG port is on, and its IDCODE.",
     doc="bitpirate-wiki/15-jtag",
     pins={"GPIOs to scan (SWD/JTAG)": " ".join(str(g) for g in DOCK_GPIOS)},
-    wires=(("IO15 … IO13", "SWDIO, SWCLK or TDI, TDO, TCK, TMS",
+    wires=(("IO0–IO7", "SWDIO, SWCLK or TDI, TDO, TCK, TMS",
             "any order on any header pins: the scan finds which is which"),),
     commands=(
         CliCommand("scan_swd", "Find SWD pins", "scan swd", timeout=60.0),

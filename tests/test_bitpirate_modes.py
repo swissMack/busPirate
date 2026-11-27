@@ -89,10 +89,10 @@ def test_dock_pins_only():
                 assert {str(c["value"]) for c in p.choices} == DOCK_GPIOS, (owner, cmd.name)
 
 
-def test_onewire_data_is_on_io15():
+def test_onewire_data_is_on_io13():
     onewire = next(m for m in MODES if m.id == "onewire_cli")
     assert onewire.cli_name == "1wire"
-    assert onewire.pins == {"Data GPIO": "15"}
+    assert onewire.pins == {"Data GPIO": "13"}
 
 
 # -- the driver: one generic mode (Task 2) -------------------------------------
@@ -129,10 +129,10 @@ def test_running_a_command_returns_its_reply_lines(bp, fake):
 def test_entering_a_mode_puts_its_pins_on_the_dock(bp, fake):
     bp.cli_mode(_BY_ID["onewire_cli"])
     assert fake.mode == "1WIRE"
-    assert fake.settings["1WIRE"]["Data GPIO"] == "15"
+    assert fake.settings["1WIRE"]["Data GPIO"] == "13"
     bp.mode.close()
     bp.cli_mode(_BY_ID["jtag"])
-    assert fake.settings["JTAG"]["GPIOs to scan (SWD/JTAG)"] == "15 16 17 18 10 11 12 13"
+    assert fake.settings["JTAG"]["GPIOs to scan (SWD/JTAG)"] == "13 12 11 10 18 17 16 15"
 
 
 def test_a_mode_without_config_is_entered_without_one(bp, fake):
@@ -165,11 +165,11 @@ def test_a_command_that_never_ends_is_stopped_and_reported(bp, fake):
 
 def test_forgetting_drops_the_cached_answers(bp, fake):
     uart = bp.uart()
-    assert bp.settings["UART"]["TX GPIO number"] == "10"
+    assert bp.settings["UART"]["TX GPIO number"] == "18"
     bp.settings["UART"]["Baud rate"] = "9600"
     uart.forget(("Baud rate",))
     assert "Baud rate" not in bp.settings["UART"]
-    assert bp.settings["UART"]["TX GPIO number"] == "10"
+    assert bp.settings["UART"]["TX GPIO number"] == "18"
 
 
 # -- the session (Task 2) ---------------------------------------------------------
@@ -192,10 +192,10 @@ def test_switching_between_cli_and_bus_modes_reenters_each(session):
     assert fake.mode == "1WIRE"
     session.ensure_mode("i2c")
     assert fake.mode == "I2C"
-    assert fake.settings["I2C"]["SDA GPIO"] == "15"
+    assert fake.settings["I2C"]["SDA GPIO"] == "13"
     session.ensure_mode("cli:onewire_cli")
     assert fake.mode == "1WIRE"
-    assert fake.settings["1WIRE"]["Data GPIO"] == "15"
+    assert fake.settings["1WIRE"]["Data GPIO"] == "13"
     session.ensure_mode("cli:dio")
     assert fake.mode == "DIO"
 
@@ -255,7 +255,7 @@ def test_a_bit_pirate_sees_its_mode_panels(client):
     assert order.index("uart") < order.index("onewire_cli") < order.index("bluetooth")
     assert panels["onewire_cli"]["doc"] == "bitpirate-wiki/02-1wire"
     onewire_wires = {w["signal"]: w["target"] for w in panels["onewire_cli"]["wiring"]}
-    assert "IO15" in onewire_wires and "GND" in onewire_wires
+    assert "IO0 (GPIO13)" in onewire_wires and "GND" in onewire_wires
 
 
 def test_a_bus_pirate_sees_none_of_them(client):
