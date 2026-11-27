@@ -96,14 +96,13 @@ so the Web CLI (which starts after one) was back on its own.
 `firmware/bitpirate-1.8-dock-pins.patch` moves the DevKit builds' defaults
 to the Dock's, so both terminals agree from power-up:
 
-| Mode | Pins |
+| Mode | Pins (Bus Pirate 6 loom label, GPIO) |
 |------|------|
-| I2C | IO15 = SDA, IO16 = SCL |
-| SPI | IO12 = CLK, IO13 = MOSI, IO10 = MISO, IO11 = CS |
+| I2C | SDA IO0 (GPIO13), SCL IO1 (GPIO12) |
+| SPI | MISO IO4 (GPIO18), CS IO5 (GPIO17), CLK IO6 (GPIO16), MOSI IO7 (GPIO15) |
+| 1-Wire | data IO0 (GPIO13) |
 
-> **Out of date:** these follow the old, reversed reading of the header. The
-> right pins are I2C 13 / 12 and SPI CLK 16, MOSI 15, MISO 18, CS 17 (see
-> [Pins](#pins-the-bit-pirate-dock)); the patch is to be redone.
+UART already defaults to TX IO4 (GPIO18) and RX IO5 (GPIO17).
 
 Apply it after the mode-LED patch, before `pio run`:
 
