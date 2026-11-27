@@ -515,7 +515,9 @@ def test_destructive_commits_never_touch_power(session, confirm, tmp_path, monke
         "microwire-eeprom-write": {"part": "93C46", "data_hex": "01 02"},
         "onewire-eeprom-write": {"data_hex": "01 02"},
     }
-    destructive = {n for n, r in REGISTRY.items() if r.risk == "destructive"}
+    # Terminal recipes commit over the console, not BPIO2; their own tests check the lines sent.
+    destructive = {n for n, r in REGISTRY.items()
+                   if r.risk == "destructive" and r.transport == "bpio2"}
     assert destructive == set(cases)
 
     def forbid(what):
@@ -549,3 +551,496 @@ def test_destructive_commits_never_touch_power(session, confirm, tmp_path, monke
             done = engine.commit_recipe(session, confirm, out["commit"]["token"])
         assert "result" in done and done["committed"] is True, (name, done)
     assert set(committed) == set(cases)
+
+
+# -- signals (terminal) -----------------------------------------------------------
+
+from buspirate.mcp_bp6 import state  # noqa: E402
+
+
+def _sent(session, since=0):
+    return [ln for ln in _fake(session).lines_received()[since:] if ln != b"\r"]
+
+
+def test_signal_recipes_registered_as_terminal():
+    for name in ("pwm-signal", "frequency-measure"):
+        r = REGISTRY[name]
+        assert (r.bus, r.transport, r.terminal_mode, r.default_mv) == ("pins", "terminal", "dio", 3300)
+        assert (r.min_mv, r.max_mv, r.milliamps, r.pullups) == (1200, 5000, 100, False)
+
+
+def test_pwm_signal_recipe_runs(session, confirm):
+    _, out = _run(session, confirm, "pwm-signal", {"pin": 2, "hz": 2000, "duty": 25})
+    assert out["check"]["ok"] and out["result"]["pin"] == 2
+    assert out["result"]["actual_hz"] == 2000
+    assert abs(out["result"]["actual_duty_percent"] - 25) < 0.5
+    assert state.of(session).pwm_pins == {2}
+    assert _fake(session).pwm == {2: (2000.0, 25.0)}
+    assert any("pwm_off" in n for n in REGISTRY["pwm-signal"].notes)
+
+
+def test_pwm_pair_partner_refused(session, confirm):
+    # A re-run sends no m (which would switch IO2's PWM off), so IO2 still runs.
+    _run(session, confirm, "pwm-signal", {"pin": 2})
+    mark = len(_fake(session).lines_received())
+    out = engine.run_recipe(session, confirm, None, {"pin": 3})
+    assert out["check"]["ok"] is False
+    assert "IO2 and IO3 share one PWM" in out["check"]["error"]
+    assert b"G 3\r" not in _sent(session, mark)
+
+
+def test_first_run_forgets_pwm_pins(session, confirm):
+    state.of(session).pwm_pins.add(2)  # m dio switches IO2's PWM off
+    _, out = _run(session, confirm, "pwm-signal", {"pin": 3})
+    assert out["check"]["ok"] is True, out
+    assert state.of(session).pwm_pins == {3}
+
+
+def test_frequency_even_pin_refused(session, confirm):
+    _, out = _run(session, confirm, "frequency-measure", {"pin": 2})
+    assert out["check"]["ok"] is False
+    assert "only IO1, IO3, IO5 and IO7" in out["check"]["error"]
+    assert b"f 2\r" not in _sent(session)
+
+
+def test_frequency_recipe_reads(session, confirm):
+    _fake(session).signals[3] = (1000.0, 50.0)
+    _, out = _run(session, confirm, "frequency-measure", {"pin": 3})
+    assert out["result"] == {"pin": 3, "hz": 1000, "duty_percent": 50.0}
+    assert b"f 3\r" in _sent(session)
+
+
+# -- self-test (terminal ~) -------------------------------------------------------
+
+def test_selftest_registered():
+    r = REGISTRY["self-test"]
+    assert (r.bus, r.transport, r.terminal_mode, r.wiring) == ("board", "terminal", None, ())
+    assert (r.min_mv, r.max_mv, r.default_mv, r.options) == (0, 0, 0, {"button_s": 20})
+
+
+def test_selftest_precheck_refuses_connected_pins(session, confirm):
+    _fake(session).adc_mv = (0, 0, 0, 3300, 0, 0, 0, 0)
+    plan = engine.plan_recipe(session, confirm, "self-test", {})
+    mark = len(_fake(session).lines_received())
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "disconnect everything from the Bus Pirate's pins first" in out["check"]["error"]
+    assert b"~\r" not in _sent(session, mark)
+
+
+def test_selftest_precheck_refuses_live_vout(session, confirm):
+    _fake(session).vout_mv = 3300
+    plan = engine.plan_recipe(session, confirm, "self-test", {})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "VOUT" in out["check"]["error"]
+
+
+def test_selftest_precheck_refuses_while_the_supply_is_on(session, confirm):
+    fake = _fake(session)
+    fake.psu_enabled = True
+    plan = engine.plan_recipe(session, confirm, "self-test", {})
+    mark = len(fake.lines_received())
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert ("switch the supply off and disconnect everything from the Bus Pirate's pins "
+            "first") in out["check"]["error"], out
+    assert b"~\r" not in _sent(session, mark)
+
+
+def test_selftest_plan_names_its_own_supply(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "self-test", {})
+    assert plan["power"] is None and plan["wiring"] == []
+    assert ("the self-test switches the Bus Pirate's own supply on at 3.3 V with no current "
+            "limit") in plan["warnings"]
+    assert any("press the board's button" in w for w in plan["warnings"])
+
+
+def test_selftest_pass(session, confirm):
+    session.power = object()
+    _, out = _run(session, confirm, "self-test")
+    res = out["result"]
+    assert (res["passed"], res["button"], res["errors"]) == (True, "pressed", [])
+    assert session.power is None
+    assert not _fake(session).psu_enabled
+
+
+def test_selftest_button_skipped(session, confirm):
+    _fake(session).button_pressed = False
+    _, out = _run(session, confirm, "self-test", run_options={"button_s": 0})
+    res = out["result"]
+    assert b" " in _sent(session)
+    assert (res["passed"], res["button"], res["errors"]) == (False, "skipped", [])
+    assert res["verdict"] == "every block passed; the button test was skipped"
+
+
+def test_selftest_never_formats(session, confirm):
+    _fake(session).nand_formatted = False
+    _, out = _run(session, confirm, "self-test")
+    assert b"n\r" in _sent(session)
+    assert out["result"]["passed"] is True
+
+
+def test_selftest_reports_error_lines(session, confirm):
+    _fake(session).selftest_faults = ["BIO3 FLOAT: 1/0.92V ERROR!"]
+    _, out = _run(session, confirm, "self-test")
+    res = out["result"]
+    assert res["passed"] is False and res["errors"] == ["BIO3 FLOAT: 1/0.92V ERROR!"]
+    assert "BIO3 FLOAT: 1/0.92V ERROR!" in res["verdict"]
+
+
+def test_selftest_bad_button_s_stops(session, confirm):
+    _, out = _run(session, confirm, "self-test", run_options={"button_s": 99})
+    assert out["check"]["ok"] is False
+
+
+# -- blueTag (terminal) -----------------------------------------------------------
+
+def test_jtag_recipes_registered():
+    for name, channels in (("jtag-pinout", 6), ("swd-pinout", 4)):
+        r = REGISTRY[name]
+        assert (r.bus, r.transport, r.terminal_mode, r.default_mv) == ("jtag", "terminal", "jtag", 3300)
+        assert (r.min_mv, r.max_mv, r.milliamps, r.pullups) == (1200, 5000, 100, False)
+        assert r.options == {"channels": channels, "pulsing": True}
+        assert [t for _, t in r.wiring].count("GND") == 1 and ("VREF", "VOUT") in r.wiring
+        assert [p for _, p in r.wiring[:8]] == ["IO%d" % n for n in range(8)]
+        assert not any("pin 1" in t for t, _ in r.wiring)
+
+
+def test_wiring_follows_channels(session, confirm):
+    def pins(name, opts):
+        return [w["bp6_pin"] if "bp6_pin" in w else w for w in
+                engine.plan_recipe(session, confirm, name, opts)["wiring"]]
+    swd = pins("swd-pinout", {"channels": 4})
+    jtag = pins("jtag-pinout", {})
+    assert len(swd) == 6 and len(jtag) == 8, (swd, jtag)
+    assert "IO4" not in str(swd) and "IO5" in str(jtag) and "IO6" not in str(jtag)
+
+
+def test_plan_warns_disturbs_target(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "jtag-pinout", {})
+    assert any("blueTag pulses the pins and can disturb a running target" in w
+               for w in plan["warnings"])
+
+
+def test_jtag_pinout_recipe_runs(session, confirm):
+    _fake(session).bluetag_hit = {"jtag": type(_fake(session)).BLUETAG_JTAG_HIT}
+    _, out = _run(session, confirm, "jtag-pinout", {"channels": 6})
+    assert out["result"]["pinout"]["TCK"] == "IO4", out
+    assert _fake(session).mode == "JTAG"
+
+
+def test_swd_recipe_channel_range_refused(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "swd-pinout", {"channels": 1})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out["check"]["ok"] is False and "SWD needs 2 to 8 channels" in str(out)
+
+
+def _sniff_lines(n):
+    return ["[ [0xA0]+ [0x00]+ [0x%02X]-]\r\n" % (i % 256) for i in range(n)]
+
+
+def test_i2c_sniff_recipe_runs(session, confirm):
+    fake = _fake(session)
+    fake.sniff_lines = _sniff_lines(3)
+    _, result = _run(session, confirm, "i2c-sniff", {"millivolts": 3300, "seconds": 0.2})
+    assert result["result"]["count"] == 3, result
+    assert fake.mode == "I2C"
+    assert b"m i2c -s 400\r" in fake.lines_received()
+    assert fake.keys_seen[-1] == b"x"
+
+
+def test_2wire_sniff_recipe_runs(session, confirm):
+    fake = _fake(session)
+    fake.sniff_lines = ["[ 0x30 0x00 0xFF]\r\n"]
+    _, result = _run(session, confirm, "2wire-sniff", {"millivolts": 3300, "seconds": 0.2})
+    assert result["result"]["transactions"][0]["data"] == "30 00 FF", result
+    assert fake.mode == "2WIRE"
+
+
+def test_sniff_truncates(session, confirm):
+    fake = _fake(session)
+    fake.sniff_lines = _sniff_lines(250)
+    _, result = _run(session, confirm, "i2c-sniff", {"millivolts": 3300, "seconds": 2})
+    r = result["result"]
+    assert r["count"] == 250 and len(r["transactions"]) == 200 and r["truncated"] is True
+
+
+def test_sniff_seconds_refused(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "i2c-sniff", {"millivolts": 3300, "seconds": 61})
+    assert "token" in plan, plan
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out["check"]["ok"] is False and "60" in out["check"]["error"]
+
+
+def test_i2c_sniff_keeps_cut_off_last_transaction(session, confirm):
+    fake = _fake(session)
+    fake.sniff_lines = ["[ [0xA0]+ [0x00]+ [0x12]-]\r\n", "[ [0xA0]+ [0x00]+"]
+    _, result = _run(session, confirm, "i2c-sniff", {"millivolts": 3300, "seconds": 0.3})
+    last = result["result"]["transactions"][-1]
+    assert result["result"]["count"] == 2 and last["complete"] is False
+    assert last["data"] == "00"
+
+
+def test_sniff_notes_name_driven_pins():
+    for n in ("i2c-sniff", "2wire-sniff"):
+        assert any("IO2 and IO3" in note for note in REGISTRY[n].notes)
+
+
+# -- PS/2 sniffer -------------------------------------------------------------
+
+PS2_LINES = ["[0x0000] t:0x00001234 D:0x1C\r\nMAKE_A --> a\r\n-----------\r\n",
+             "[0x0001] t:0x00001240 D:0xF0\r\n[0x0002] t:0x00001241 D:0x1C\r\n"
+             "BREAK_A --> a\r\n**********\r\nkey break tracker (limit 0x13F bytes): a\r\n"
+             "**********\r\n-----------\r\n"]
+
+
+def test_ps2_sniff_recipe_runs(session, confirm):
+    fake = _fake(session)
+    fake.ps2_lines = PS2_LINES
+    _, result = _run(session, confirm, "ps2-sniff", {"seconds": 0.2})
+    r = result["result"]
+    assert r["typed"] == "a" and r["keys"] == ["MAKE_A", "BREAK_A"], result
+    assert r["supply"] == {"millivolts": 5000, "milliamps": 400, "on": True}
+    assert session.power.millivolts == 5000 and session.power.milliamps == 400
+    assert fake.psu_enabled and fake.pullups
+    assert b"m ps2\r" in fake.lines_received()
+    assert fake.keys_seen == [b"q"]  # raw, after Sniffing..., no Enter
+
+
+def test_ps2_plan_is_owner_only_and_names_5v(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "ps2-sniff", {})
+    assert "token" in plan, plan
+    text = " ".join(plan["warnings"])
+    assert "ask the owner to confirm the device is theirs" in text
+    assert "5.0 V (400 mA)" in text
+
+
+def test_ps2_refuses_live_vout(session, confirm):
+    _fake(session).vout_mv = 3300
+    plan = engine.plan_recipe(session, confirm, "ps2-sniff", {})
+    assert "VOUT reads a voltage" in plan.get("error", ""), plan
+
+
+def test_ps2_psu_error(session, confirm):
+    fake = _fake(session)
+    fake.ps2_psu_error = 2
+    _, result = _run(session, confirm, "ps2-sniff", {"seconds": 0.2})
+    assert "PSU ERROR CODE 2" in result["error"], result
+    assert session.power is None and not fake.psu_enabled
+
+
+def test_ps2_rerun_psu_error_clears_the_power(session, confirm):
+    fake = _fake(session)
+    fake.ps2_lines = PS2_LINES
+    _, first = _run(session, confirm, "ps2-sniff", {"seconds": 0.2})
+    assert "result" in first and session.power is not None, first
+    fake.ps2_psu_error = 2
+    again = engine.run_recipe(session, confirm, None, {})
+    assert "PSU ERROR CODE 2" in again.get("error", ""), again
+    assert session.power is None
+
+
+def test_ps2_power_recorded_even_if_parsing_raises(session, confirm, monkeypatch):
+    from buspirate.bp6 import ps2
+
+    def boom(text):
+        raise ValueError("parse blew up")
+    monkeypatch.setattr(ps2, "parse", boom)
+    with pytest.raises(ValueError):
+        _run(session, confirm, "ps2-sniff", {"seconds": 0.2})
+    assert session.power is not None and session.power.millivolts == 5000
+
+
+def test_ps2_seconds_refused(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "ps2-sniff", {"seconds": 61})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out["check"]["ok"] is False
+
+
+def test_ps2_hiz_turns_supply_off(session, confirm):
+    pytest.importorskip("mcp")
+    import asyncio
+    import json
+    from buspirate.mcp_bp6.server import build_server
+    fake = _fake(session)
+    _run(session, confirm, "ps2-sniff", {"seconds": 0.2})
+    assert fake.psu_enabled
+    server = build_server(session)
+    out = json.loads(asyncio.run(server.call_tool("hiz", {})).content[0].text)
+    assert out["hiz"] is True, out
+    assert fake.psu_enabled is False and fake.mode == "HiZ" and session.power is None
+
+
+def test_ps2_recipe_shape():
+    r = REGISTRY["ps2-sniff"]
+    assert (r.risk, r.supply_by, r.terminal_mode, r.pullups) == ("owner-only", "action", "ps2", False)
+    assert (r.default_mv, r.min_mv, r.max_mv, r.milliamps) == (5000, 5000, 5000, 400)
+    assert r.target_powered_ok is False and r.options == {"seconds": 10}
+
+
+# -- infrared -----------------------------------------------------------------
+
+from buspirate.devices import ir  # noqa: E402
+
+NEC_AIR = ir.to_air(38, ir.encode_nec(4, 8))
+SHORT_AIR = "$38:900,450,560,560,560,"
+
+
+def _ir(session, confirm, name, opts):
+    return _run(session, confirm, name, dict(opts, millivolts=3300))
+
+
+def test_ir_receive_decodes_nec(session, confirm):
+    fake = _fake(session)
+    fake.ir_frames = [NEC_AIR]
+    _, out = _ir(session, confirm, "ir-receive", {"seconds": 0.3})
+    frame = out["result"]["frames"][0]
+    assert frame["decoded"] == {"protocol": "nec", "address": 4, "command": 8}, out
+    assert frame["air"].startswith("$38:9000,4500,")
+    assert b"m infrared -p raw -r 38k_demod\r" in fake.lines_received()
+    assert b"irrx -s 38d\r" in fake.lines_received()
+
+
+def test_ir_receive_two_frames_space_between(session, confirm):
+    fake = _fake(session)
+    fake.ir_frames = [SHORT_AIR, SHORT_AIR]
+    _, out = _ir(session, confirm, "ir-receive", {"seconds": 0.3})
+    assert out["result"]["count"] == 2, out
+    # one space per menu shown (the last one asks for a frame that never comes), then x:
+    # raw keys, no Enter
+    assert fake.keys_seen == [b" ", b" ", b"x"], fake.keys_seen
+    assert not any(k.endswith(b"\r") for k in fake.keys_seen)
+
+
+def test_ir_receive_marks_long_frames(session, confirm):
+    fake = _fake(session)
+    fake.ir_frames = [NEC_AIR, SHORT_AIR]
+    _, out = _ir(session, confirm, "ir-receive", {"seconds": 0.3})
+    frames = out["result"]["frames"]
+    assert frames[0]["resendable"] is False and frames[1]["resendable"] is True
+    assert frames[1]["decoded"] is None
+
+
+def test_ir_send_nec(session, confirm):
+    fake = _fake(session)
+    _, out = _ir(session, confirm, "ir-send-nec", {"address": 4, "command": 8})
+    assert out["result"]["tx"] == "0x0408", out
+    assert b"> 0x0408\r" in fake.lines_received()
+    assert b"m infrared -p nec\r" in fake.lines_received()
+    assert fake.ir_sent == [("nec", 0x0408)]
+
+
+def test_ir_send_rc5(session, confirm):
+    fake = _fake(session)
+    _, out = _ir(session, confirm, "ir-send-rc5", {"address": 5, "command": 12, "toggle": 1})
+    assert b"> 0x094C\r" in fake.lines_received()
+    assert fake.ir_sent == [("rc5", 0x094C)]
+    # tx is what the firmware echoed: it forces S1 and S2 (0x3000) into the value
+    assert out["result"]["tx"] == "0x394C" and out["result"]["sent"] is True
+
+
+def test_ir_send_raw_resends_received(session, confirm):
+    fake = _fake(session)
+    _, out = _ir(session, confirm, "ir-send-raw", {"air": SHORT_AIR})
+    assert fake.ir_sent == [("raw", SHORT_AIR)], out
+    assert b"irtx " + SHORT_AIR.encode() + b"\r" in fake.lines_received()
+    assert out["result"] == {"sent": True, "carrier_khz": 38, "pairs": 3}
+
+
+NEC_HEARD = "\r\n(0x00f7fb04) Address: 4 (0x04) Command: 8 (0x08)"
+
+
+def test_ir_send_nec_heard_by_its_own_receiver(session, confirm):
+    # The board prints the code its receiver heard straight after the prompt.
+    fake = _fake(session)
+    fake.ir_heard = NEC_HEARD
+    _, out = _ir(session, confirm, "ir-send-nec", {"address": 4, "command": 8})
+    assert out["result"] == {"sent": True, "tx": "0x0408"}, out
+    assert fake.ir_sent == [("nec", 0x0408)]
+
+
+def test_ir_send_raw_heard_by_its_own_receiver(session, confirm):
+    fake = _fake(session)
+    fake.ir_heard = SHORT_AIR + ";\r\n"
+    _, out = _ir(session, confirm, "ir-send-raw", {"air": SHORT_AIR})
+    assert out["result"] == {"sent": True, "carrier_khz": 38, "pairs": 3}, out
+    assert fake.ir_sent == [("raw", SHORT_AIR)]
+
+
+def test_ir_send_raw_too_long(session, confirm):
+    fake = _fake(session)
+    plan = engine.plan_recipe(session, confirm, "ir-send-raw", {"millivolts": 3300, "air": NEC_AIR})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    err = out["check"]["error"]
+    assert out["check"]["ok"] is False and "256" in err and "ir-send-nec" in err, out
+    assert not any(l.startswith(b"irtx") for l in fake.lines_received())
+    assert fake.ir_sent == []
+
+
+def test_ir_send_refuses_semicolon(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "ir-send-raw",
+                              {"millivolts": 3300, "air": "$38:9000,4500,;"})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out["check"]["ok"] is False, out
+    plan = engine.plan_recipe(session, confirm, "ir-send-raw",
+                              {"millivolts": 3300, "air": "$38:1,\n"})
+    assert engine.run_recipe(session, confirm, plan["token"], {})["check"]["ok"] is False
+
+
+def test_ir_receive_keeps_carrierless_frame(session, confirm):
+    fake = _fake(session)
+    fake.ir_frames = ["$0:" + NEC_AIR.split(":", 1)[1]]
+    _, out = _ir(session, confirm, "ir-receive", {"seconds": 0.3})
+    frame = out["result"]["frames"][0]
+    assert out["result"]["count"] == 1 and frame["resendable"] is False
+    assert frame["carrier_khz"] == 0 and frame["air"].startswith("$0:9000,")
+    assert frame["decoded"] == {"protocol": "nec", "address": 4, "command": 8}
+
+
+def test_ir_recipes_name_voltage():
+    for n in ("ir-receive", "ir-send-nec", "ir-send-rc5", "ir-send-raw"):
+        assert any("3.3 V" in note for note in REGISTRY[n].notes), n
+    assert any("IO1" in note for note in REGISTRY["ir-receive"].notes)
+
+
+def test_ir_voltage_note_follows_the_plan():
+    # Plans allow 2.7-5.0 V: the note names the default, not a fixed 3.3 V.
+    for n in ("ir-receive", "ir-send-nec", "ir-send-rc5", "ir-send-raw"):
+        note = next(note for note in REGISTRY[n].notes if "3.3 V" in note)
+        assert "planned voltage" in note and "default" in note, note
+        assert "is set to 3.3 V" not in note, note
+
+
+def test_ir_sensor_refused(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "ir-receive", {"millivolts": 3300, "sensor": "99"})
+    out = engine.run_recipe(session, confirm, plan["token"], {})
+    assert out["check"]["ok"] is False and "38d, 56d, 38b" in out["check"]["error"], out
+
+
+def test_ir_send_values_refused(session, confirm):
+    cases = [("ir-send-nec", {"address": 256, "command": 0}),
+             ("ir-send-nec", {"address": 1}),
+             ("ir-send-rc5", {"address": 32, "command": 0}),
+             ("ir-send-rc5", {"address": 0, "command": 64}),
+             ("ir-send-rc5", {"address": 0, "command": 0, "toggle": 2}),
+             ("ir-receive", {"seconds": 61})]
+    for name, opts in cases:
+        plan = engine.plan_recipe(session, confirm, name, dict(opts, millivolts=3300))
+        out = engine.run_recipe(session, confirm, plan["token"], {})
+        assert out["check"]["ok"] is False, (name, opts, out)
+    assert not _fake(session).ir_sent
+
+
+def test_ir_wiring_follows_sensor(session, confirm):
+    def rx(sensor):
+        plan = engine.plan_recipe(session, confirm, "ir-receive", {"sensor": sensor})
+        return [w["pin"] for w in plan["wiring"]
+                if "receiver" in w["target"].lower()]
+    assert rx("56d") == ["IO7"] and rx("38d") == ["IO5"] and rx("38b") == ["IO3"]
+    plan = engine.plan_recipe(session, confirm, "ir-receive", {"sensor": "56d"})
+    pins = [w["pin"] for w in plan["wiring"]]
+    assert "IO4" in pins and "IO5" not in pins and "VOUT" in pins and "GND" in pins
+
+
+def test_ir_recipes_found_by_words():
+    from buspirate.mcp_bp6.recipes import find_recipes
+    assert {r["name"] for r in find_recipes("blast")} == {"ir-send-nec", "ir-send-rc5", "ir-send-raw"}
+    assert find_recipes("learn")[0]["name"] == "ir-receive"

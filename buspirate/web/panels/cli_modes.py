@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from ... import boards
 from ...boards._modes import CliCommand, CliMode, CliParam, cli_mode_capability
+from ...boards.bitpirate_modes import VOUT_PIN, loom_colour
 from ...capabilities import CAP_CLI_EXTRAS
 from ..params import ParamError
 from ..registry import Action, Panel, Param, Wire, lines, live
@@ -124,9 +125,11 @@ def action_for(cmd: CliCommand, requires: Optional[str] = None) -> Action:
 def _wiring(mode: CliMode) -> List[Wire]:
     if not mode.wires:
         return []
-    rows = [Wire("GND", "", "GND", "always connect this first")]
-    rows += [Wire(signal, "", target, note) for signal, target, note in mode.wires]
-    rows.append(Wire("VIO", "", "VCC", "the voltage set on the dock's slide switch"))
+    rows = [Wire("GND", loom_colour("GND"), "GND", "always connect this first")]
+    rows += [Wire(signal, loom_colour(signal), target, note)
+             for signal, target, note in mode.wires]
+    rows.append(Wire(VOUT_PIN, loom_colour(VOUT_PIN), "VCC",
+                     "the voltage set on the dock's slide switch"))
     return rows
 
 

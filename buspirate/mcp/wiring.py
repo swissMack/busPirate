@@ -11,8 +11,8 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from .. import boards
-from ..boards.bitpirate import DOCK_HEADER
-from ..boards.bp6 import BP6_CABLE, BP6_HEADER
+from ..boards.bitpirate import DOCK_BP6
+from ..boards.bp6 import BP6_CABLE
 from ..web.wiring import colour_name
 
 JOBS = ("i2c", "spi", "uart", "onewire", "rawwire", "pins")
@@ -32,15 +32,8 @@ class WiringStep:
 def cable_colour(variant: str, pin: str) -> str:
     """The wire colour for ``pin`` on ``variant``; '' if the board has none."""
     if variant == "bitpirate":
-        # VIO and GND are named, not positional: the dock header runs GND..VIO
-        # where the Bus Pirate 6 runs VOUT..GND.
-        if pin == "VIO":
-            return BP6_CABLE["VOUT"]
-        if pin == "GND":
-            return BP6_CABLE["GND"]
-        if pin in DOCK_HEADER:
-            return BP6_CABLE[BP6_HEADER[DOCK_HEADER.index(pin)]]
-        return ""
+        # Dock pins are named after the Bus Pirate 6 loom label on them.
+        return BP6_CABLE.get(DOCK_BP6.get(pin, ""), "")
     if variant == "bp6":
         return BP6_CABLE.get(pin, "")
     return colour_name(pin)

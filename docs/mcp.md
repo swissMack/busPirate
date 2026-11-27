@@ -119,18 +119,61 @@ How it differs from `buspirate`:
   `onewire-eeprom`, `ddr4-spd`, `ddr5-spd` and `midi`; changing ones
   `i2c-eeprom-write`, `fram-write`, `spi-flash-write`, `spi-eeprom-write`,
   `microwire-eeprom-write` and `onewire-eeprom-write`.
+- **Signal recipes:** `pwm-signal` (a square wave on one IO pin, 3.3 V unless
+  you plan another voltage) and `frequency-measure` (frequency and duty of a
+  signal on IO1, IO3, IO5 or IO7). The `pwm`, `pwm_off` and `frequency` tools do
+  the same by hand; the pin swings between 0 V and the supply voltage.
+- **Terminal recipes:** `self-test`, `jtag-pinout` and `swd-pinout` (the blueTag
+  pin finder; it can take over a minute at 8 channels, and the pads can be wired
+  in any order) use the board's terminal. They switch mode first, which turns
+  the supply off, then switch the confirmed supply back on. Their voltages must
+  be multiples of 10 mV; anything else is refused when the plan is made. The
+  self-test switches the board's own supply on at 3.3 V and only passes if you
+  press the board's button.
+- **Sniffer and infrared recipes:** `i2c-sniff`, `2wire-sniff` and `ps2-sniff`
+  listen on the bus for `seconds` (default 5, PS/2 10, at most 60) and return
+  the transactions they saw, so trigger the target while it listens.
+  `ps2-sniff` is owner-only: the owner must confirm the keyboard is theirs, and
+  it switches the supply on at 5.0 V and 400 mA. `ir-receive` listens for
+  `seconds` (default 10) and returns up to 50 frames; `ir-send-nec`,
+  `ir-send-rc5` and `ir-send-raw` transmit one code. Results are capped at 200
+  entries and marked `truncated` when cut. Not automated: the USB sniffer
+  (it hangs the board without traffic), `gps` (use the `gps` recipe), `logic`
+  (use the `pulseview` hand-off) and `tvbgone` (it cannot be stopped). Also not automated: macros and scripts, `button`,
+  `pause -b`, `bridge`, `fusb302 scan`, `format`, `edit`, `hexedit`, UART `glitch`
+  and `sle4442`.
+- **Smart card, USB-PD and disk recipes:** `smartcard-atr` reads a smart card's
+  answer to reset (read-only). `usbpd-status` reads the USB-PD plank's offers and
+  VBUS; `usbpd-request` asks the source for one offer and `usbpd-reset` sends a
+  hard reset, which power-cycles anything on the plank (VBUS drops to 0 V, then
+  5 V). The plank's output stays at the requested voltage after `hiz`; run
+  `usbpd-reset` to bring it back to 5 V. `disk-list`, `disk-show` and `disk-hex`
+  read the Bus Pirate's own disk (`disk-show` reads the file as hex, never with
+  `cat`, which can crash the board on a `%`); `disk-delete` removes a file. `usbpd-request`
+  and `disk-delete` need two yeses: they stop and return a `commit` naming the
+  voltage or the file, and `recipe_commit` runs only after the second yes.
+- **Hand-offs:** `flashrom`, `avrdude` and `pulseview` lend the board to that
+  program. flashrom and avrdude switch the supply on (3.3 V by default) and
+  refuse a target with its own power; PulseView gets 3.3 V at 100 mA while it
+  holds the port. While the board is lent, its tools refuse. `connect` or `hiz`
+  takes it back (reset, supply off). If the reset is not confirmed, the board
+  stays lent and the owner is told to retry or press the board's button.
 - **Two yeses for a change:** `recipe_run` on a changing recipe stops after it
   has saved a backup to your disk and returns a `commit` with a plain summary
   and a token. Nothing is written yet. After your second yes the assistant calls
   `recipe_commit(token)`, which writes and reads back. A commit is only reported
   as done (`committed: true`) when the read-back matches; otherwise
-  `committed` is false and the result names the backup file. `recipe_commit`
+  `committed` is false and the result names the backup file. When a USB-PD
+  request or a disk delete was sent but cannot be confirmed (VBUS has not
+  settled after three re-reads, or the supply tripped, the terminal failed or
+  the board vanished after the change line went out), `committed` is null with
+  `may_have_changed: true` and a `hint` saying how to find out. `recipe_commit`
   never switches power or touches the pull-ups.
 - **Primitive tools:** `board_status`, `connect`, `wiring`, `hiz`, `power_off`,
   `measure_voltages`, `power_plan`, `power_apply`, `i2c_scan`, `i2c_read`,
   `i2c_write`, `spi_transfer`, `uart_send`, `uart_listen`, `onewire_scan`,
   `pins` (drive IO pins with 1, 0 or `"in"` and read every pin's level and
-  voltage) and `bp6_notes` (limits, pin map with colours, the pull-up rule and
+  voltage), `pwm`, `pwm_off`, `frequency` and `bp6_notes` (limits, pin map with colours, the pull-up rule and
   the risks).
 - **The supply is capped at 5 V, and goes off when the session ends:** on exit
   the board goes to HiZ, supply and pull-ups off, so an LCD loses its text.

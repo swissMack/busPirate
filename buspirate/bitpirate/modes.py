@@ -45,14 +45,14 @@ MAX_WRITE = 96
 
 #: Pins each mode is set to, as answers to its ``config`` questions: the
 #: ESP32 Bit Pirate Dock's 10-pin header, which copies the Bus Pirate 6's.
-#: Header IO0..IO7 are GPIO15, 16, 17, 18, 10, 11, 12, 13 (the dock's
-#: schematic), so I2C sits on IO0/IO1, SPI on IO4..IO7 and UART on IO4/IO5,
-#: as on a Bus Pirate 6. The firmware's own s3-devkit defaults put I2C on
+#: A Bus Pirate 6 cable plugged in with VOUT on VIO puts IO0..IO7 on GPIO13,
+#: 12, 11, 10, 18, 17, 16, 15 (IO0 is next to VIO), so I2C sits on IO0/IO1,
+#: SPI on IO4..IO7 and UART on IO4/IO5, as on a Bus Pirate 6. The firmware's own s3-devkit defaults put I2C on
 #: GPIO6/7, which the dock's header does not carry.
 DOCK_PINS: Dict[str, Dict[str, str]] = {
-    "I2C": {"SDA GPIO": "15", "SCL GPIO": "16"},
-    "SPI": {"MISO GPIO": "10", "CS GPIO": "11", "SCLK GPIO": "12", "MOSI GPIO": "13"},
-    "UART": {"TX GPIO number": "10", "RX GPIO number": "11"},
+    "I2C": {"SDA GPIO": "13", "SCL GPIO": "12"},
+    "SPI": {"MISO GPIO": "18", "CS GPIO": "17", "SCLK GPIO": "16", "MOSI GPIO": "15"},
+    "UART": {"TX GPIO number": "18", "RX GPIO number": "17"},
 }
 
 

@@ -777,12 +777,12 @@ check("the I2C diagram is the dock",
   bitBoard && bitBoard.querySelector("image").getAttribute("href") === "/static/img/board-bitpirate-dock.jpg",
   bitBoard ? bitBoard.querySelector("image").getAttribute("href") : "no board");
 const bitCallouts = bitBoard ? [...bitBoard.querySelectorAll(".boardlabel")].map((t) => t.textContent) : [];
-check("its callouts name the dock header pins", bitCallouts.includes("IO16 → SCL") && bitCallouts.includes("IO15 → SDA"),
+check("its callouts name the dock header pins", bitCallouts.includes("IO1 (GPIO12) → SCL") && bitCallouts.includes("IO0 (GPIO13) → SDA"),
   bitCallouts.join("|"));
 check("no Bus Pirate reference cards or cable caveat for it",
   $("panel").querySelectorAll(".card-img").length === 1 && !$("panel").textContent.includes("SparkFun"),
   `${$("panel").querySelectorAll(".card-img").length}`);
-check("no colour swatches in its wiring table", $("panel").querySelector(".wiring .swatch") === null);
+check("its wiring table shows the Bus Pirate 6 loom colours", $("panel").querySelectorAll(".wiring .swatch").length >= 4);
 check("the scan form has no power switch",
   $("panel").querySelector('[data-action="scan"] [name="power"]') === null);
 

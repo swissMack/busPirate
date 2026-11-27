@@ -81,8 +81,10 @@ shifters give 5V, 3V3 or 1V8. UART is never RS-232 on any of them.
 
 - Plug the DevKit's **USB** (or **USB OTG**) port, not UART / USB TTL.
 - A freshly plugged board takes about 3 s before it listens.
-- The dock header follows the BP6 layout: IO0–IO7 = GPIO 15, 16, 17, 18,
-  10, 11, 12, 13. Stock firmware's I2C default (GPIO 6/7) is not on the dock.
+- The dock takes a BP6 loom (red VOUT on VIO). Pins are named by loom label
+  with the GPIO in brackets: IO0 (GPIO13), IO1 (GPIO12), IO2 (GPIO11),
+  IO3 (GPIO10), IO4 (GPIO18), IO5 (GPIO17), IO6 (GPIO16), IO7 (GPIO15).
+  Always name Bit Pirate pins this way, never by bare GPIO. Stock firmware's I2C default (GPIO 6/7) is not on the dock.
 - No software-controlled supply: VIO is the dock's slide switch.
 - Pull-ups are the ESP32's internal ones (about 45 kΩ).
 - SPI: mode 0 only, 1/2/4/8 MHz; flash read, dump and verify only.

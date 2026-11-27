@@ -63,7 +63,9 @@ class BoardSession:
         with self._lock:
             if self.board is not None:
                 self._drop()
-            if port is None:
+            if port is None or port == "auto":
+                # Discover here, so ``self.port`` is always a real device
+                # name: port checks after a reset compare against it.
                 found = self.candidates()
                 if not found:
                     raise NotConnected(

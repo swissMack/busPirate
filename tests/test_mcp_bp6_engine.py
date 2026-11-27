@@ -87,8 +87,10 @@ def test_find_recipes_by_name_word_and_title(recipes):
     assert toys("pcf8574") == ["toy-backpack"]
     assert toys("temperature") == ["toy-sensor"]
     assert {r["name"] for r in find_recipes("toy")} >= {"toy-backpack", "toy-sensor"}
-    assert find_recipes("toy")[0] == {"name": "toy-backpack", "title": "Toy I2C backpack",
-                                      "bus": "i2c"}
+    first = find_recipes("toy")[0]
+    assert (first["name"], first["title"], first["bus"]) == (
+        "toy-backpack", "Toy I2C backpack", "i2c")
+    assert first["source"]
     assert {"toy-backpack", "toy-sensor"} <= {r["name"] for r in find_recipes(None)}
     assert find_recipes("no-such-thing") == []
 
@@ -309,8 +311,10 @@ def _destructive(recipes, calls, identity=None, result=None):
         calls.append(("commit", prepared["_data"], prepared["_identity"]))
         return dict(result) if result is not None else {"written": 4}
 
+    # A backup option, as the memory write recipes have: the plan says it saves one.
     return recipes(name="toy-write", risk="destructive", check=check, action=prepare,
-                   commit=commit, default_mv=3300, max_mv=3600)
+                   commit=commit, default_mv=3300, max_mv=3600,
+                   options={"address": LCD, "byte": 0x08, "backup": True})
 
 
 def _prepared(session, confirm, **options):
@@ -551,3 +555,284 @@ def test_millivolts_none_is_absent_and_non_integer_refused(session, confirm, rec
     for bad in ("3300", 3.3, True):
         plan = engine.plan_recipe(session, confirm, "toy-backpack", {"millivolts": bad})
         assert "error" in plan and "token" not in plan
+
+
+# -- terminal recipes -------------------------------------------------------------
+
+from buspirate.mcp import jobs  # noqa: E402
+from buspirate.mcp_bp6 import state  # noqa: E402
+
+
+def _term_check(con, opts):
+    assert con.mode  # the console, not the board
+    return {"ok": True}
+
+
+def _term_action(con, opts):
+    """Ask the terminal for its info."""
+    return {"mode": con.command("i").mode}
+
+
+def _term(**changes):
+    fields = dict(name="toy-term", transport="terminal", terminal_mode="dio",
+                  default_mv=3300, check=_term_check, action=_term_action, options={})
+    fields.update(changes)
+    return fields
+
+
+def _sent(session, since):
+    """The terminal lines sent since ``since``, without the Enters that wake it."""
+    return [ln for ln in _fake(session).lines_received()[since:] if ln != b"\r"]
+
+
+def _mark(session):
+    return len(_fake(session).lines_received())
+
+
+def _term_ran(session, confirm):
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "error" not in result, result
+    return plan, result
+
+
+def test_terminal_recipe_powers_after_mode(session, confirm, recipes):
+    recipes(**_term())
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    mark = _mark(session)
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "error" not in result, result
+    assert _sent(session, mark) == [b"m dio\r", b"W 3.30 100\r", b"P\r", b"i\r"]
+    assert result["result"] == {"mode": "DIO"} and result["check"]["ok"] is True
+    assert result["power"]["vout_mv"] == 3300 and result["power"]["applied"] is True
+    assert session.power is not None and session.power.to_dict() == plan["power"]
+    assert _fake(session).psu_enabled and _fake(session).pullups
+    assert state.of(session).terminal_mode == "dio"
+
+
+def test_terminal_recipe_target_powered_sends_no_W(session, confirm, recipes):
+    recipes(**_term())
+    _fake(session).adc_mv = [3300] * 8
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    assert plan["target_powered"] is True
+    mark = _mark(session)
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "error" not in result, result
+    assert _sent(session, mark) == [b"m dio\r", b"P\r", b"i\r"]
+    assert session.power is None and _fake(session).psu_enabled is False
+
+
+def test_target_powered_refused_when_not_ok(session, confirm, recipes):
+    recipes(**_term(target_powered_ok=False))
+    _fake(session).adc_mv = [3300] * 8
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    assert "token" not in plan and "3300" in plan["error"]
+
+
+def test_trip_during_W_clears_power(session, confirm, recipes):
+    recipes(**_term())
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    _fake(session).trip_next_w = True
+    mark = _mark(session)
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "Current over limit" in result["error"]
+    assert session.power is None and _fake(session).psu_enabled is False
+    assert b"i\r" not in _sent(session, mark) and "result" not in result
+    assert session.last_recipe is None
+
+
+def test_rerun_wrong_mode_refused(session, confirm, recipes):
+    recipes(**_term())
+    _term_ran(session, confirm)
+    jobs.i2c_scan(session, 100)
+    mark = _mark(session)
+    result = engine.run_recipe(session, confirm, None, {})
+    assert result["error"] == "plan again: the board is in I2C mode now"
+    assert not any(ln.startswith((b"m ", b"W")) for ln in _sent(session, mark))
+
+
+def test_rerun_same_mode_sends_no_m_or_W(session, confirm, recipes):
+    recipes(**_term())
+    _term_ran(session, confirm)
+    mark = _mark(session)
+    result = engine.run_recipe(session, confirm, None, {})
+    assert "error" not in result, result
+    assert _sent(session, mark) == [b"i\r"]
+    assert result["result"] == {"mode": "DIO"}
+
+
+def _destructive_term(ran, ident=None):
+    def check(con, opts):
+        assert con.mode  # the console, not the board
+        return {"ok": True, "identity": ident[0] if ident else opts.get("ident", "X")}
+
+    def action(con, opts):
+        """Prepare a change."""
+        return {"chip": "c", "operation": "op", "start": 0, "length": 1, "summary": "s",
+                "backup": None}
+
+    def commit(con, opts, prepared):
+        ran.append(con)
+        return {"done": True}
+
+    return _term(risk="destructive", check=check, action=action, commit=commit)
+
+
+def test_terminal_destructive_allowed():
+    _toy(**_destructive_term([]))
+
+
+def test_terminal_destructive_commit_runs_in_terminal(session, confirm, recipes):
+    ran = []
+    recipes(**_destructive_term(ran))
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "error" not in result, result
+    done = engine.commit_recipe(session, confirm, result["commit"]["token"])
+    assert done["committed"] is True and done["result"] == {"done": True}, done
+    assert len(ran) == 1 and callable(getattr(ran[0], "command", None))
+
+
+def test_terminal_commit_refused_after_mode_change(session, confirm, recipes):
+    ran = []
+    # No supply, so the power check passes and the mode check is what refuses.
+    recipes(**dict(_destructive_term(ran), default_mv=0, min_mv=0, max_mv=0, pullups=False))
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "error" not in result, result
+
+    def switch(bp):
+        with bp.console() as con:
+            con.command("m i2c -s 400")
+    session.run(switch)
+    done = engine.commit_recipe(session, confirm, result["commit"]["token"])
+    assert done["error"].startswith("plan again") and "I2C" in done["error"], done
+    assert ran == []
+
+
+def test_terminal_commit_refused_on_identity_change(session, confirm, recipes):
+    ran = []
+    ident = ["X"]
+    recipes(**_destructive_term(ran, ident))
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "error" not in result, result
+    ident[0] = "Y"
+    done = engine.commit_recipe(session, confirm, result["commit"]["token"])
+    assert done["error"].startswith("plan again"), done
+    assert ran == []
+
+
+def test_change_note_without_backup_option(session, confirm, recipes):
+    recipes(**_destructive_term([]))
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    assert engine.CHANGE_NOTE in plan["warnings"]
+    assert engine.PREPARE_NOTE not in plan["warnings"]
+
+
+def test_precheck_runs_over_bpio2_first(session, confirm, recipes):
+    seen = []
+
+    def precheck(bp, opts):
+        seen.append(bp.status().mode)  # BPIO2 answers: the console is not open
+        return {"ok": False, "error": "no target found", "hint": "wire it up"}
+
+    recipes(**_term(precheck=precheck))
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    mark = _mark(session)
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert seen and result["check"]["ok"] is False and result["stopped"] == "check failed"
+    assert result["hint"] == "wire it up" and "result" not in result
+    assert _fake(session).lines_received()[mark:] == []  # the terminal port was never opened
+    assert _fake(session).psu_enabled is False and session.power is None
+
+
+def test_hiz_returns_terminal_to_hiz(session, confirm, recipes):
+    pytest.importorskip("mcp")
+    import asyncio
+    import json
+
+    from buspirate.mcp_bp6.server import build_server
+
+    recipes(**_term())
+    _term_ran(session, confirm)
+    fake = _fake(session)
+    fake.pwm.update({0: (1000.0, 50.0), 2: (2000.0, 25.0)})  # as two G commands leave it
+    state.of(session).pwm_pins.update({2, 0})
+    mark = _mark(session)
+    server = build_server(session)
+    out = json.loads(asyncio.run(server.call_tool("hiz", {})).content[0].text)
+    assert out["hiz"] is True
+    assert _sent(session, mark) == [b"g 0\r", b"g 2\r", b"m hiz\r"]
+    assert fake.mode == "HiZ" and not fake.pwm and fake.psu_enabled is False
+    assert session.power is None
+    assert state.of(session).pwm_pins == set() and state.of(session).terminal_mode is None
+    # With no terminal mode recorded, hiz opens no console.
+    mark = _mark(session)
+    asyncio.run(server.call_tool("hiz", {}))
+    assert _fake(session).lines_received()[mark:] == []
+
+
+TRIP = "\x07\r\nError: Current over limit, power supply disabled\r\n"
+
+
+def _tripping_action(session, on_call):
+    calls = []
+
+    def action(con, opts):
+        """Trip the supply while the action runs."""
+        calls.append(1)
+        if len(calls) == on_call:
+            fake = _fake(session)
+            fake.psu_enabled, fake.psu_tripped = False, True
+            fake._say(TRIP)  # printed by the board on its own, between commands
+        return {"mode": con.command("i").mode}
+    return action
+
+
+def test_trip_during_action_clears_power(session, confirm, recipes):
+    recipes(**_term(action=_tripping_action(session, 1)))
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "Current over limit" in result["error"] and "plan again" in result["error"]
+    assert result["power"] is None and session.power is None
+    assert session.last_recipe is None
+
+
+def test_trip_during_rerun_action_clears_power(session, confirm, recipes):
+    recipes(**_term(action=_tripping_action(session, 2)))
+    _term_ran(session, confirm)
+    assert session.power is not None
+    result = engine.run_recipe(session, confirm, None, {})
+    assert "Current over limit" in result["error"]
+    assert result["power"] is None and session.power is None
+    assert engine.run_recipe(session, confirm, None, {})["error"].startswith("plan again")
+
+
+def test_terminal_recipe_refuses_a_voltage_off_the_10_mv_step(session, confirm):
+    mark = _mark(session)
+    plan = engine.plan_recipe(session, confirm, "pwm-signal", {"millivolts": 3333})
+    assert "token" not in plan
+    assert plan["error"].startswith("3333 mV cannot be set through the terminal")
+    assert "3330 mV" in plan["error"]
+    assert _fake(session).lines_received()[mark:] == []
+    assert "token" in engine.plan_recipe(session, confirm, "pwm-signal", {"millivolts": 3330})
+
+
+def test_bpio2_recipe_keeps_any_millivolt(session, confirm, recipes):
+    recipes()
+    assert "token" in engine.plan_recipe(session, confirm, "toy-backpack", {"millivolts": 3333})
+
+
+def test_terminal_flags_on_m_line(session, confirm, recipes):
+    recipes(**_term(terminal_mode="i2c", terminal_flags="-s 400"))
+    plan = engine.plan_recipe(session, confirm, "toy-term", {})
+    mark = _mark(session)
+    result = engine.run_recipe(session, confirm, plan["token"], {})
+    assert "error" not in result, result
+    assert _sent(session, mark)[0] == b"m i2c -s 400\r"
+
+
+def test_terminal_flags_only_for_terminal():
+    with pytest.raises(ValueError):
+        _toy(transport="bpio2", terminal_flags="-s 400")
