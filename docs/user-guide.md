@@ -281,34 +281,39 @@ the pins each panel needs ringed and labelled, and sets the firmware's pins to
 match every time it enters a mode, so Bus Pirate 5/6 cables and adapters plug
 straight in.
 
-| Bus | Wire this dock pin | Bus Pirate 6 name | To the target's |
-|-----|--------------------|-------------------|-----------------|
-| I2C | IO13 | IO0 | SDA |
-| | IO12 | IO1 | SCL |
-| SPI | IO18 | IO4 | DO / MISO |
-| | IO17 | IO5 | CS |
-| | IO16 | IO6 | SCK / CLK |
-| | IO15 | IO7 | DI / MOSI |
-| UART | IO18 (its TX) | IO4 | RX |
-| | IO17 (its RX) | IO5 | TX |
-| 1-Wire | IO13 | IO0 | DQ |
-| all | GND | GND | GND — connect it first |
-| if needed | VIO | VOUT | VCC |
+Use a Bus Pirate 6 loom, plugged in with red VOUT on the dock's VIO and
+black on GND. The dashboard names every pin as on the loom's heat shrink,
+with the ESP32 GPIO in brackets, so it reads the same as on a Bus Pirate 6:
 
-The header, top to bottom as printed beside it, with the Bus Pirate 6
-cable wire that lands on each pin (red VOUT on VIO, black on GND):
+| Bus | Loom wire (GPIO) | Colour | To the target's |
+|-----|------------------|--------|-----------------|
+| I2C | IO0 (GPIO13) | orange | SDA |
+| | IO1 (GPIO12) | yellow | SCL |
+| SPI | IO4 (GPIO18) | purple | DO / MISO |
+| | IO5 (GPIO17) | brown | CS |
+| | IO6 (GPIO16) | grey | SCK / CLK |
+| | IO7 (GPIO15) | white | DI / MOSI |
+| UART | IO4 (GPIO18), its TX | purple | RX |
+| | IO5 (GPIO17), its RX | brown | TX |
+| 1-Wire | IO0 (GPIO13) | orange | DQ |
+| all | GND | black | GND — connect it first |
+| if needed | VOUT (VIO) | red | VCC |
+
+The header, top to bottom, with the dock's silkscreen (GPIO numbers) on the
+left and the loom wire that lands on each pin on the right:
 
 ```
-   GND  ●  black  GND
-   IO15 ●  white  IO7  SPI MOSI
-   IO16 ●  grey   IO6  SPI CLK
-   IO17 ●  brown  IO5  SPI CS   / UART RX
-   IO18 ●  purple IO4  SPI MISO / UART TX
-   IO10 ●  blue   IO3
-   IO11 ●  green  IO2
-   IO12 ●  yellow IO1  I2C SCL
-   IO13 ●  orange IO0  I2C SDA / 1-Wire
-   VIO  ●  red    VOUT the switched supply
+   silkscreen    loom
+   GND   ●  GND   black
+   IO15  ●  IO7   white   SPI MOSI
+   IO16  ●  IO6   grey    SPI CLK
+   IO17  ●  IO5   brown   SPI CS   / UART RX
+   IO18  ●  IO4   purple  SPI MISO / UART TX
+   IO10  ●  IO3   blue
+   IO11  ●  IO2   green
+   IO12  ●  IO1   yellow  I2C SCL
+   IO13  ●  IO0   orange  I2C SDA / 1-Wire
+   VIO   ●  VOUT  red     the switched supply
 ```
 
 **Set the voltage first.** The slide switch at the top of the dock picks 5V,

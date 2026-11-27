@@ -4,12 +4,12 @@
 
 | Signal | v3/v4 (Seeed) | BP6 | Bit Pirate dock |
 |---|---|---|---|
-| CLK / SCK | CLK, purple | IO6, grey | IO16, grey |
-| MOSI / DI | MOSI, grey | IO7, white | IO15, white |
-| MISO / DO | MISO, black | IO4, purple | IO18, purple |
-| CS / SS (active low) | CS, white | IO5, brown | IO17, brown |
+| CLK / SCK | CLK, purple | IO6, grey | IO6 (GPIO16), grey |
+| MOSI / DI | MOSI, grey | IO7, white | IO7 (GPIO15), white |
+| MISO / DO | MISO, black | IO4, purple | IO4 (GPIO18), purple |
+| CS / SS (active low) | CS, white | IO5, brown | IO5 (GPIO17), brown |
 | GND | brown | black | black |
-| VCC | +3.3V, red | VOUT, red | VIO, red |
+| VCC | +3.3V, red | VOUT, red | VOUT (VIO), red |
 
 - **Serial flash: tie WP and HOLD high.** This catches people every time.
 - Most serial flash is **3.3 V only**; 5 V destroys it. On a v3/v4 the

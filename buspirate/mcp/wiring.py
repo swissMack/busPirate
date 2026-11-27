@@ -32,7 +32,7 @@ class WiringStep:
 def cable_colour(variant: str, pin: str) -> str:
     """The wire colour for ``pin`` on ``variant``; '' if the board has none."""
     if variant == "bitpirate":
-        # The Bus Pirate 6 cable label that lands on this dock pin.
+        # Dock pins are named after the Bus Pirate 6 loom label on them.
         return BP6_CABLE.get(DOCK_BP6.get(pin, ""), "")
     if variant == "bp6":
         return BP6_CABLE.get(pin, "")

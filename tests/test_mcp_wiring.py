@@ -19,9 +19,9 @@ def test_bp6_spi_uses_shrink_colours():
 
 def test_bitpirate_dock_follows_a_bp6_cable_plugged_vout_to_vio():
     steps = {s.pin: s for s in wiring_steps("bitpirate", "i2c")}
-    assert steps["IO13"].colour == "orange"   # next to VIO == BP6 IO0
-    assert steps["IO12"].colour == "yellow"   # BP6 IO1
-    assert steps["VIO"].colour == "red" and steps["GND"].colour == "black"
+    assert steps["IO0 (GPIO13)"].colour == "orange"   # loom IO0, next to VIO
+    assert steps["IO1 (GPIO12)"].colour == "yellow"
+    assert steps["VOUT (VIO)"].colour == "red" and steps["GND"].colour == "black"
 
 
 def test_bitpirate_dock_buses_land_on_bp6_cable_colours():
@@ -29,7 +29,7 @@ def test_bitpirate_dock_buses_land_on_bp6_cable_colours():
     assert spi["DO"] == "purple" and spi["CS"] == "brown"     # IO4, IO5
     assert spi["SCK"] == "grey" and spi["DI"] == "white"      # IO6, IO7
     uart = {s.pin: s.colour for s in wiring_steps("bitpirate", "uart")}
-    assert uart["IO18"] == "purple" and uart["IO17"] == "brown"  # TX IO4, RX IO5
+    assert uart["IO4 (GPIO18)"] == "purple" and uart["IO5 (GPIO17)"] == "brown"
 
 
 def test_every_step_has_pin_and_colour():

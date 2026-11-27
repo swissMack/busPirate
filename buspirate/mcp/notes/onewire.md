@@ -6,9 +6,9 @@ Mostly Dallas/Maxim temperature sensors (DS18B20) and ID chips.
 
 | Signal | v3/v4 (Seeed) | BP6 | Bit Pirate dock |
 |---|---|---|---|
-| DQ (data) | MOSI, grey | IO0, orange | IO13, orange |
+| DQ (data) | MOSI, grey | IO0, orange | IO0 (GPIO13), orange |
 | GND | brown | black | black |
-| VDD | +3.3V, red (or none for parasite power) | VOUT, red | VIO, red |
+| VDD | +3.3V, red (or none for parasite power) | VOUT, red | VOUT (VIO), red |
 
 **Fit a 4.7 kΩ resistor from DQ to VCC.** The Bus Pirate's internal pull-ups
 are too weak on their own, and this is far the most common reason a bus
@@ -55,11 +55,11 @@ the DS18B20, DS1822 and DS1825; a DS18S20 counts in half degrees.
   bytes, so Find devices reads the **one** device on the bus. With several,
   type `m 1wire` then `scan` in the terminal. Verified with a DS18B20 and an
   external 4.7 kΩ to VOUT.
-- **Bit Pirate:** data on IO13 on the dock (unverified on hardware).
+- **Bit Pirate:** data on loom IO0 (GPIO13) (unverified on hardware).
 
 Sources:
 - docs/onewire.md
 - docs/troubleshooting.md (1-Wire finds nothing, 85.0 °C, v4 and BP6 checks)
 - docs/bus-pirate-6.md (1-Wire limits)
-- docs/bitpirate.md (1-Wire on IO13)
+- docs/bitpirate.md (1-Wire on loom IO0)
 - buspirate/web/wiring.py (Seeed colours)

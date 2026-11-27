@@ -255,7 +255,7 @@ def test_a_bit_pirate_sees_its_mode_panels(client):
     assert order.index("uart") < order.index("onewire_cli") < order.index("bluetooth")
     assert panels["onewire_cli"]["doc"] == "bitpirate-wiki/02-1wire"
     onewire_wires = {w["signal"]: w["target"] for w in panels["onewire_cli"]["wiring"]}
-    assert "IO13" in onewire_wires and "GND" in onewire_wires
+    assert "IO0 (GPIO13)" in onewire_wires and "GND" in onewire_wires
 
 
 def test_a_bus_pirate_sees_none_of_them(client):

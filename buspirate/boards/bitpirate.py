@@ -6,7 +6,7 @@ from ..capabilities import CAP_CLI_EXTRAS
 from ._board import Board
 from ._modes import cli_mode_capability
 from ._wiring import wire
-from .bitpirate_modes import MODES
+from .bitpirate_modes import LOOM_LABELS, MODES, VOUT_PIN, loom_colour, loom_pin
 
 # The ESP32 Bit Pirate Dock (github.com/AndreiVladescu/ESP32-Bit-Pirate-Hardware)
 # with an ESP32-S3-DevKitC-1 seated in it, photographed as
@@ -14,15 +14,19 @@ from .bitpirate_modes import MODES
 # GPIO15, 16, 17, 18, 10, 11, 12, 13, VIO from the top of the photo (dock
 # schematic, J3/CN1). A Bus Pirate 6 cable plugs in with VOUT on VIO and GND
 # on GND, so its IO0 lands next to VIO on GPIO13 and its IO7 on GPIO15
-# (DOCK_BP6; checked with the owner's labelled cable, 2026-11-27). The
-# silkscreen names the pins by GPIO, so the diagram does too. The holes sit at x=150 from y=251 in
+# (checked with the owner's labelled cable, 2026-11-27). Pins are named as on
+# the loom's heat shrink, with the GPIO in brackets. The holes sit at x=150 from y=251 in
 # steps of 21.16, measured on the photo with markers drawn over it.
-DOCK_HEADER = ["GND", "IO15", "IO16", "IO17", "IO18", "IO10", "IO11", "IO12", "IO13", "VIO"]
-#: Dock header pin -> the Bus Pirate 6 cable label that lands on it.
-DOCK_BP6: Dict[str, str] = {
-    "VIO": "VOUT", "IO13": "IO0", "IO12": "IO1", "IO11": "IO2", "IO10": "IO3",
-    "IO18": "IO4", "IO17": "IO5", "IO16": "IO6", "IO15": "IO7", "GND": "GND",
-}
+DOCK_HEADER = ["GND"] + [loom_pin(n) for n in range(7, -1, -1)] + [VOUT_PIN]
+#: Dock header pin -> the Bus Pirate 6 loom label that lands on it.
+DOCK_BP6: Dict[str, str] = LOOM_LABELS
+
+
+def _loom(pin: str, target: str, note: str = "") -> Dict[str, str]:
+    """A wiring row for a dock pin, with its Bus Pirate 6 loom colour."""
+    row = wire(pin, target, note)
+    row["colour"] = loom_colour(pin)
+    return row
 DOCK_GEOMETRY = {"width": 700, "height": 661, "x": 150, "first_y": 251.2, "pitch": 21.16}
 
 
@@ -40,9 +44,9 @@ def _dock_pins():
 _DOCK_PINS, _DOCK_SIDE = _dock_pins()
 
 
-_BITPIRATE_GND = wire("GND", "GND", "always connect this first")
-_BITPIRATE_VIO = wire(
-    "VIO", "VCC", "the voltage set on the dock's slide switch: 5V, 3V3 or 1V8"
+_BITPIRATE_GND = _loom("GND", "GND", "always connect this first")
+_BITPIRATE_VIO = _loom(
+    VOUT_PIN, "VCC", "the voltage set on the dock's slide switch: 5V, 3V3 or 1V8"
 )
 _BITPIRATE_PINS_NOTE = (
     "The dashboard sets these pins itself each time it enters a mode: the Bus "
@@ -66,13 +70,14 @@ _BOARD_BITPIRATE = {
     "side": _DOCK_SIDE,
     # The DevKit's red power LED, right of the regulator.
     "leds": {"PWR": [572, 336]},
-    #: Not a Bus Pirate: there is no probe cable, so no cable colours and no
-    #: Dangerous Prototypes reference cards.
+    #: Not a Bus Pirate: no probe cable of its own (a Bus Pirate 6 loom is
+    #: used, so the rows carry its colours) and no Dangerous Prototypes cards.
     "cable": False,
     "caveat": (
-        "This is the ESP32 Bit Pirate Dock. Its header follows the Bus Pirate "
-        "6, labelled by GPIO: IO13, next to VIO, is the Bus Pirate's IO0, "
-        "through to IO15 as IO7. Check the silkscreen beside the header if yours differs."
+        "This is the ESP32 Bit Pirate Dock with a Bus Pirate 6 loom: pins are "
+        "named as on the loom's heat shrink, with the ESP32 GPIO in brackets. "
+        "Plug the loom in with red VOUT on VIO and black on GND; IO0 is then "
+        "next to VIO. The dock's silkscreen prints the GPIO numbers."
     ),
     #: What replaces a panel's Bus Pirate wording on this board. See
     #: server._panels_json.
@@ -90,8 +95,8 @@ _BOARD_BITPIRATE = {
         },
         "i2c": {
             "wiring": [
-                wire("IO13", "SDA", "data, both directions (Bus Pirate IO0)"),
-                wire("IO12", "SCL", "clock (Bus Pirate IO1)"),
+                _loom(loom_pin(0), "SDA", "data, both directions"),
+                _loom(loom_pin(1), "SCL", "clock"),
                 _BITPIRATE_GND,
                 _BITPIRATE_VIO,
             ],
@@ -109,10 +114,10 @@ _BOARD_BITPIRATE = {
         },
         "spi": {
             "wiring": [
-                wire("IO16", "SCK / CLK", "clock (Bus Pirate IO6)"),
-                wire("IO15", "DI / MOSI", "Bit Pirate out, chip in (Bus Pirate IO7)"),
-                wire("IO18", "DO / MISO", "chip out, Bit Pirate in (Bus Pirate IO4)"),
-                wire("IO17", "CS / SS", "active low (Bus Pirate IO5)"),
+                _loom(loom_pin(6), "SCK / CLK", "clock"),
+                _loom(loom_pin(7), "DI / MOSI", "Bit Pirate out, chip in"),
+                _loom(loom_pin(4), "DO / MISO", "chip out, Bit Pirate in"),
+                _loom(loom_pin(5), "CS / SS", "active low"),
                 _BITPIRATE_GND,
                 _BITPIRATE_VIO,
             ],
@@ -131,13 +136,13 @@ _BOARD_BITPIRATE = {
         },
         "uart": {
             "wiring": [
-                wire("IO18", "RX", "the Bit Pirate's TX (Bus Pirate IO4) drives the target's receive pin"),
-                wire("IO17", "TX", "the Bit Pirate's RX (Bus Pirate IO5) listens to the target's transmit pin"),
+                _loom(loom_pin(4), "RX", "the Bit Pirate's TX drives the target's receive pin"),
+                _loom(loom_pin(5), "TX", "the Bit Pirate's RX listens to the target's transmit pin"),
                 _BITPIRATE_GND,
             ],
             "notes": [
-                "TX and RX cross over. If you see nothing, swapping IO17 and "
-                "IO18 is the first thing to try.",
+                "TX and RX cross over. If you see nothing, swapping IO4 and "
+                "IO5 is the first thing to try.",
                 "Garbled characters mean the baud rate is wrong, not the wiring.",
                 _BITPIRATE_VOLTAGE_NOTE,
                 _BITPIRATE_PINS_NOTE,

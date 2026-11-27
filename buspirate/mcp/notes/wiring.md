@@ -49,15 +49,16 @@ connector do not line up exactly with the pins.
 The dock's 10-pin header takes a BP6 cable with its VOUT (red) wire on VIO
 and GND (black) on GND, so every labelled wire keeps its BP6 meaning.
 
-| Dock pin | VIO | IO13 | IO12 | IO11 | IO10 | IO18 | IO17 | IO16 | IO15 | GND |
+| Dock silkscreen | VIO | IO13 | IO12 | IO11 | IO10 | IO18 | IO17 | IO16 | IO15 | GND |
 |---|---|---|---|---|---|---|---|---|---|---|
 | BP6 cable label | VOUT | IO0 | IO1 | IO2 | IO3 | IO4 | IO5 | IO6 | IO7 | GND |
 | Colour | red | orange | yellow | green | blue | purple | brown | grey | white | black |
 
 The silkscreen runs GND, IO15, IO16, IO17, IO18, IO10, IO11, IO12, IO13, VIO;
-IO0 is next to VIO. Buses on the dock: I2C SDA IO13, SCL IO12;
-SPI MISO IO18, CS IO17, CLK IO16, MOSI IO15; UART TX IO18, RX IO17;
-1-Wire IO13. Checked against an owner's labelled BP6 cable, 2026-11-27.
+IO0 is next to VIO. The silkscreen's "IO" numbers are GPIOs, not loom
+labels: always name a Bit Pirate pin by loom label with the GPIO in brackets,
+e.g. "IO0 (GPIO13)". Buses: I2C SDA IO0, SCL IO1; SPI MISO IO4, CS IO5,
+CLK IO6, MOSI IO7; UART TX IO4, RX IO5; 1-Wire IO0 — as on a BP6. Checked against an owner's labelled BP6 cable, 2026-11-27.
 
 ## Rules for every job
 

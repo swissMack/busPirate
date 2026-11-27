@@ -6,8 +6,8 @@ No clock: both ends must agree on the baud rate.
 
 | Bus Pirate | v3/v4 (Seeed) | BP6 | Bit Pirate dock | goes to target |
 |---|---|---|---|---|
-| RX (listens) | MISO, black | IO5, brown | IO17, brown | the target's **TX** |
-| TX (sends) | MOSI, grey | IO4, purple | IO18, purple | the target's **RX** |
+| RX (listens) | MISO, black | IO5, brown | IO5 (GPIO17), brown | the target's **TX** |
+| TX (sends) | MOSI, grey | IO4, purple | IO4 (GPIO18), purple | the target's **RX** |
 | GND | brown | black | black | GND, first |
 
 Connect the Bus Pirate's supply only if the target needs it. A target with its

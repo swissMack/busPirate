@@ -36,9 +36,9 @@ RGB LED shows which mode the board is in:
 | LED | Mode | What it means |
 |-----|------|---------------|
 | off | HiZ | Every pin released; safe to rewire |
-| blue | I2C | The I2C pins are driven (IO15 / IO16 on the dock) |
-| green | SPI | The SPI pins are driven (IO10–IO13 on the dock) |
-| yellow | UART or HDUART | The UART pins are in use (IO10 / IO11 on the dock) |
+| blue | I2C | The I2C pins are driven (loom IO0 / IO1) |
+| green | SPI | The SPI pins are driven (loom IO4–IO7) |
+| yellow | UART or HDUART | The UART pins are in use (loom IO4 / IO5) |
 | cyan | 1-Wire | The 1-Wire pin is in use |
 | dim white | any other mode | Pins in use; see the mode's own help |
 
@@ -155,7 +155,7 @@ filled in, so the board never stops to ask.
 
 **Buses**
 
-- **1-Wire** (data on IO13): find devices, ping, read the ROM, read a
+- **1-Wire** (data on loom IO0, GPIO13): find devices, ping, read the ROM, read a
   DS18B20's temperature, sniff the line.
 - **DIO**, any header pin by hand: read, set high, low, input or output,
   pull-up, pull-down, PWM, measure a frequency, pulse, drive a servo, reset.
@@ -199,7 +199,8 @@ The dashboard puts I2C, SPI, UART, 1-Wire and JTAG on the dock's header
 (see [Pins](#pins-the-bit-pirate-dock)), and DIO offers header pins only.
 A mode started from the Terminal begins on the firmware's own default
 pins, and many are not on the header. In that mode, type `config` and give
-it header pins: IO15 to IO18 and IO10 to IO13 (GPIO numbers). Wi-Fi,
+it header pins by GPIO number: loom IO0–IO7 are GPIO 13, 12, 11, 10, 18,
+17, 16, 15. Wi-Fi,
 Bluetooth and USB need no header pins.
 
 The dock's slide switch still sets the voltage on the header. A module wired
@@ -252,14 +253,15 @@ Its 10-pin header follows the Bus Pirate 6: a Bus Pirate 6 cable plugs in
 with its VOUT wire on VIO and GND on GND, which puts IO0–IO7 on GPIO13, 12,
 11, 10, 18, 17, 16 and 15. IO0 is next to VIO. Each time the
 dashboard enters a mode it sets the firmware's pins to the Bus Pirate 6
-layout of that header:
+layout of that header. The dashboard names the pins by loom label, with the
+GPIO in brackets:
 
-| Bus | Signal | Dock pin (GPIO) | Bus Pirate 6 |
-|---|---|---|---|
-| I2C | SDA / SCL | IO13 / IO12 | IO0 / IO1 |
-| SPI | MISO / CS / CLK / MOSI | IO18 / IO17 / IO16 / IO15 | IO4 / IO5 / IO6 / IO7 |
-| UART | TX / RX | IO18 / IO17 | IO4 / IO5 |
-| 1-Wire | data | IO13 | IO0 |
+| Bus | Signal | Loom wire (GPIO) |
+|---|---|---|
+| I2C | SDA / SCL | IO0 (GPIO13) / IO1 (GPIO12) |
+| SPI | MISO / CS / CLK / MOSI | IO4 (GPIO18) / IO5 (GPIO17) / IO6 (GPIO16) / IO7 (GPIO15) |
+| UART | TX / RX | IO4 (GPIO18) / IO5 (GPIO17) |
+| 1-Wire | data | IO0 (GPIO13) |
 
 The firmware's own s3-devkit defaults (I2C 6 / 7, SPI CS 10 / CLK 12 /
 MISO 11 / MOSI 13, UART RX 17 / TX 18) are overridden: GPIO6 and 7 are not on
