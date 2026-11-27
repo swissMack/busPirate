@@ -1,0 +1,217 @@
+diff --git a/src/Controllers/UartController.cpp b/src/Controllers/UartController.cpp
+index 69a73efd..192c85bd 100644
+--- a/src/Controllers/UartController.cpp
++++ b/src/Controllers/UartController.cpp
+@@ -52,6 +52,7 @@ void UartController::handleCommand(const TerminalCommand& cmd) {
+     else if (cmd.getRoot() == "readraw") handleRaw();
+     else if (cmd.getRoot() == "readhex") handleRaw();
+     else if (cmd.getRoot() == "write") handleWrite(cmd);
++    else if (cmd.getRoot() == "bridge" && cmd.getSubcommand() == "raw") handleBridgeRaw();
+     else if (cmd.getRoot() == "bridge") handleBridge();
+     else if (cmd.getRoot() == "at") handleAtCommand(cmd);
+     else if (cmd.getRoot() == "emulator") handleEmulation();
+@@ -112,6 +113,36 @@ void UartController::handleBridge() {
+     }
+ }
+ 
++/*
++Bridge raw
++*/
++void UartController::handleBridgeRaw() {
++    if (GlobalState::getInstance().getTerminalMode() != TerminalTypeEnum::SerialPort) {
++        terminalView.println("Uart Bridge raw: needs the USB serial terminal (not Wi-Fi).\n");
++        return;
++    }
++
++    terminalView.println("Uart Bridge raw: binary-safe. Press [ANY ESP32 BUTTON] to stop.\n");
++    while (true) {
++        // UART -> host, byte for byte (print(uint8_t) writes the raw byte)
++        while (uartService.available()) {
++            terminalView.print(static_cast<uint8_t>(uartService.read()));
++        }
++
++        // Host -> UART; 0x00 is data here, not "no key"
++        uint8_t b;
++        while (terminalInput.readByte(b)) {
++            uartService.write(static_cast<char>(b));
++        }
++
++        // Device button stops the bridge, as in the text bridge
++        if (deviceInput.readChar() != KEY_NONE) {
++            terminalView.println("\r\nUart Bridge: Stopped by user.\n");
++            break;
++        }
++    }
++}
++
+ /*
+ Read
+ */
+diff --git a/src/Controllers/UartController.h b/src/Controllers/UartController.h
+index c94a29dd..d0353789 100644
+--- a/src/Controllers/UartController.h
++++ b/src/Controllers/UartController.h
+@@ -50,6 +50,10 @@ private:
+     // Start bidirectional UART bridge
+     void handleBridge();
+ 
++    // Binary-safe bridge for tools like esptool: every byte, 0x00 included,
++    // passes through untouched. USB serial terminal only.
++    void handleBridgeRaw();
++
+     // Perform ascii read
+     void handleRead(const TerminalCommand& cmd);
+ 
+diff --git a/src/Inputs/SerialTerminalInput.cpp b/src/Inputs/SerialTerminalInput.cpp
+index 49a6182a..2cc83e85 100644
+--- a/src/Inputs/SerialTerminalInput.cpp
++++ b/src/Inputs/SerialTerminalInput.cpp
+@@ -17,4 +17,10 @@ char SerialTerminalInput::readChar() {
+         return static_cast<char>(hostSerial.read());
+     }
+     return KEY_NONE;
+-}
+\ No newline at end of file
++}
++
++bool SerialTerminalInput::readByte(uint8_t& out) {
++    if (!hostSerial.available()) return false;
++    out = static_cast<uint8_t>(hostSerial.read());
++    return true;
++}
+diff --git a/src/Inputs/SerialTerminalInput.h b/src/Inputs/SerialTerminalInput.h
+index dd1d6a4b..47345236 100644
+--- a/src/Inputs/SerialTerminalInput.h
++++ b/src/Inputs/SerialTerminalInput.h
+@@ -13,6 +13,7 @@ public:
+     char handler() override;
+     void waitPress(uint32_t timeoutMs) override;
+     char readChar() override;
++    bool readByte(uint8_t& out) override;
+ 
+ private:
+     IHostSerial& hostSerial;
+diff --git a/src/Interfaces/IInput.h b/src/Interfaces/IInput.h
+index 6d02621f..d2cfdad4 100644
+--- a/src/Interfaces/IInput.h
++++ b/src/Interfaces/IInput.h
+@@ -18,6 +18,16 @@ public:
+     // Non blocking read
+     virtual char readChar() = 0;
+ 
++    // Non blocking, binary-safe read: true and the byte in `out` if one was
++    // waiting. Unlike readChar(), a 0x00 byte is data, not "no key".
++    // Inputs without a byte stream fall back to readChar().
++    virtual bool readByte(uint8_t& out) {
++        const char c = readChar();
++        if (c == KEY_NONE) return false;
++        out = static_cast<uint8_t>(c);
++        return true;
++    }
++
+     // Wait an inpout
+     virtual void waitPress(uint32_t timeoutMs = 0) = 0;
+     
+diff --git a/src/Shells/HelpShell.cpp b/src/Shells/HelpShell.cpp
+index ae6f3007..5d8af4ff 100644
+--- a/src/Shells/HelpShell.cpp
++++ b/src/Shells/HelpShell.cpp
+@@ -156,6 +156,7 @@ void HelpShell::cmdUart() {
+         "raw                  - Receive raw hex data",
+         "write [text]         - Send at current baud",
+         "bridge               - Full-duplex mode",
++        "bridge raw           - Binary-safe (esptool), USB only",
+         "at                   - AT commands operations",
+         "emulator             - Emulate UART device",
+         "trigger [pattern]    - Send response on pattern",
+diff --git a/test/Controllers/test_UartController.cpp b/test/Controllers/test_UartController.cpp
+index 7b3e5397..50362131 100644
+--- a/test/Controllers/test_UartController.cpp
++++ b/test/Controllers/test_UartController.cpp
+@@ -274,6 +274,40 @@ void test_bridge_forwards_terminal_data_and_displays_uart_data() {
+     TEST_ASSERT_TRUE(fixture.view.contains("Uart Bridge: Stopped by user."));
+ }
+ 
++void test_bridge_raw_passes_zero_bytes_in_both_directions() {
++    UartControllerFixture fixture;
++    fixture.uartService.queueRx(std::string("\x00\x41", 2));
++    fixture.terminalInput.queueReadByte(0x00);
++    fixture.terminalInput.queueReadByte(0xC0);
++    fixture.deviceInput.queueReadChar(KEY_NONE);
++    fixture.deviceInput.queueReadChar('\n');
++
++    fixture.controller.handleCommand(TerminalCommand("bridge", "raw", ""));
++
++    // FakeTerminalView renders print(uint8_t) as its decimal value.
++    bool sawZero = false, sawA = false;
++    for (const auto& call : fixture.view.printCalls) {
++        if (call == "0") sawZero = true;
++        if (call == "65") sawA = true;
++    }
++    TEST_ASSERT_TRUE(sawZero);
++    TEST_ASSERT_TRUE(sawA);
++    TEST_ASSERT_TRUE(fixture.uartService.wrote(std::string(1, '\0')));
++    TEST_ASSERT_TRUE(fixture.uartService.wrote(std::string(1, '\xC0')));
++    TEST_ASSERT_TRUE(fixture.view.contains("Uart Bridge: Stopped by user."));
++}
++
++void test_bridge_raw_refuses_when_terminal_is_not_usb_serial() {
++    UartControllerFixture fixture;
++    GlobalState::getInstance().setTerminalMode(TerminalTypeEnum::WiFiClient);
++    fixture.terminalInput.queueReadByte(0x55);
++
++    fixture.controller.handleCommand(TerminalCommand("bridge", "raw", ""));
++
++    TEST_ASSERT_TRUE(fixture.uartService.writes.empty());
++    TEST_ASSERT_TRUE(fixture.view.contains("USB serial"));
++}
++
+ void test_spam_sends_payload_on_elapsed_delay_then_stops() {
+     UartControllerFixture fixture;
+     queueDefaultConfiguration(fixture);
+@@ -457,6 +491,8 @@ void runUartControllerTests() {
+     RUN_TEST(test_autobaud_can_stop_before_detection);
+     RUN_TEST(test_scan_reports_active_pins_and_updates_device_view);
+     RUN_TEST(test_bridge_forwards_terminal_data_and_displays_uart_data);
++    RUN_TEST(test_bridge_raw_passes_zero_bytes_in_both_directions);
++    RUN_TEST(test_bridge_raw_refuses_when_terminal_is_not_usb_serial);
+     RUN_TEST(test_spam_sends_payload_on_elapsed_delay_then_stops);
+     RUN_TEST(test_spam_rejects_hex_wildcards_without_writing);
+     RUN_TEST(test_trigger_sends_response_when_text_pattern_matches);
+diff --git a/test/Inputs/FakeInput.h b/test/Inputs/FakeInput.h
+index bcdaf73f..3d24ec18 100644
+--- a/test/Inputs/FakeInput.h
++++ b/test/Inputs/FakeInput.h
+@@ -10,6 +10,7 @@ class FakeInput final : public IInput {
+ public:
+     std::deque<char> blockingChars;
+     std::deque<char> nonBlockingChars;
++    std::deque<uint8_t> nonBlockingBytes;
+     uint32_t waitPressCalls = 0;
+     uint32_t lastWaitTimeoutMs = 0;
+ 
+@@ -21,6 +22,13 @@ public:
+         return popOrEnter(nonBlockingChars);
+     }
+ 
++    bool readByte(uint8_t& out) override {
++        if (nonBlockingBytes.empty()) return false;
++        out = nonBlockingBytes.front();
++        nonBlockingBytes.pop_front();
++        return true;
++    }
++
+     void waitPress(uint32_t timeoutMs = 0) override {
+         ++waitPressCalls;
+         lastWaitTimeoutMs = timeoutMs;
+@@ -31,6 +39,10 @@ public:
+         blockingChars.push_back('\n');
+     }
+ 
++    void queueReadByte(uint8_t value) {
++        nonBlockingBytes.push_back(value);
++    }
++
+     void queueReadChar(char ch) {
+         nonBlockingChars.push_back(ch);
+     }
