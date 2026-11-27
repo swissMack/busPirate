@@ -1,36 +1,60 @@
 diff --git a/platformio.ini b/platformio.ini
-index a7ecac0b..c8e6cd6c 100644
+index a7ecac0b..a4f0ea57 100644
 --- a/platformio.ini
 +++ b/platformio.ini
-@@ -471,11 +471,13 @@ build_flags =
+@@ -460,7 +460,8 @@ build_flags =
+   -DLED_TYPE_RGB=true
+ 
+   ; --- OneWire ---
+-  -DONEWIRE_PIN=6
++  ; 1-Wire on loom IO0 (GPIO13), as on a Bus Pirate 6.
++  -DONEWIRE_PIN=13
+ 
+   ; --- UART ---
+   -DUART_BAUD=9600
+@@ -471,11 +472,15 @@ build_flags =
    -DHDUART_PIN=17
  
    ; --- I2C ---
 -  -DI2C_SCL_PIN=7 -DI2C_SDA_PIN=6
-+  ; The Bit Pirate Dock carries IO15/IO16 to its header, not 6/7.
-+  -DI2C_SCL_PIN=16 -DI2C_SDA_PIN=15
++  ; Bus Pirate 6 loom on the Bit Pirate Dock (VOUT on VIO): SDA loom IO0 = GPIO13,
++  ; SCL loom IO1 = GPIO12. GPIO 6/7 are not on the Dock's header.
++  -DI2C_SCL_PIN=12 -DI2C_SDA_PIN=13
    -DI2C_FREQ=100000
  
    ; --- SPI ---
 -  -DSPI_CS_PIN=10 -DSPI_CLK_PIN=12 -DSPI_MISO_PIN=11 -DSPI_MOSI_PIN=13
-+  ; The Dock wires CS to IO11 and MISO to IO10.
-+  -DSPI_CS_PIN=11 -DSPI_CLK_PIN=12 -DSPI_MISO_PIN=10 -DSPI_MOSI_PIN=13
++  ; As on a Bus Pirate 6: MISO loom IO4 = GPIO18, CS IO5 = GPIO17,
++  ; CLK IO6 = GPIO16, MOSI IO7 = GPIO15.
++  -DSPI_CS_PIN=17 -DSPI_CLK_PIN=16 -DSPI_MISO_PIN=18 -DSPI_MOSI_PIN=15
  
    ; --- LoRa SX1262 ---
    -DLORA_SCK_PIN=12 -DLORA_MISO_PIN=11 -DLORA_MOSI_PIN=13 -DLORA_CS_PIN=10
-@@ -549,11 +551,13 @@ build_flags =
+@@ -538,7 +543,8 @@ build_flags =
+   -DLED_TYPE_RGB=true
+ 
+   ; --- OneWire ---
+-  -DONEWIRE_PIN=6
++  ; 1-Wire on loom IO0 (GPIO13), as on a Bus Pirate 6.
++  -DONEWIRE_PIN=13
+ 
+   ; --- UART ---
+   -DUART_BAUD=9600
+@@ -549,11 +555,15 @@ build_flags =
    -DHDUART_PIN=17
  
    ; --- I2C ---
 -  -DI2C_SCL_PIN=7 -DI2C_SDA_PIN=6
-+  ; The Bit Pirate Dock carries IO15/IO16 to its header, not 6/7.
-+  -DI2C_SCL_PIN=16 -DI2C_SDA_PIN=15
++  ; Bus Pirate 6 loom on the Bit Pirate Dock (VOUT on VIO): SDA loom IO0 = GPIO13,
++  ; SCL loom IO1 = GPIO12. GPIO 6/7 are not on the Dock's header.
++  -DI2C_SCL_PIN=12 -DI2C_SDA_PIN=13
    -DI2C_FREQ=100000
  
    ; --- SPI ---
 -  -DSPI_CS_PIN=10 -DSPI_CLK_PIN=12 -DSPI_MISO_PIN=11 -DSPI_MOSI_PIN=13
-+  ; The Dock wires CS to IO11 and MISO to IO10.
-+  -DSPI_CS_PIN=11 -DSPI_CLK_PIN=12 -DSPI_MISO_PIN=10 -DSPI_MOSI_PIN=13
++  ; As on a Bus Pirate 6: MISO loom IO4 = GPIO18, CS IO5 = GPIO17,
++  ; CLK IO6 = GPIO16, MOSI IO7 = GPIO15.
++  -DSPI_CS_PIN=17 -DSPI_CLK_PIN=16 -DSPI_MISO_PIN=18 -DSPI_MOSI_PIN=15
  
    ; --- LoRa SX1262 ---
    -DLORA_SCK_PIN=12 -DLORA_MISO_PIN=11 -DLORA_MOSI_PIN=13 -DLORA_CS_PIN=10

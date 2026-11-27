@@ -134,8 +134,10 @@ firmware behaves as before, and the RGB LED keeps working the same.
 - In HiZ, or any mode without pins, the connection screen: `Bit Pirate WiFi`
   with the full IP on line 2, or `Bit Pirate USB` with line 2 blank.
 - In a mode with pins, a wiring guide for that mode: only the pins in use,
-  named by signal and by the Dock's silkscreen (`IO15`, not `GPIO 15`). It
-  follows the pins actually configured. Modes with more pins than fit
+  named by signal and by Bus Pirate 6 loom label (`SDA IO0`, `SCL IO1`), so
+  it matches the heat shrink on the loom. A GPIO that is not on the Dock's
+  header shows as `G` and its number (`G6`). It follows the pins actually
+  configured. Modes with more pins than fit
   alternate pages every 3 s. Frequency and baud are not shown.
 
 **Wiring.** All four wires go to the DevKit's left header row:
@@ -153,10 +155,16 @@ DevKit's own header, not behind the Dock's level shifters, so the VIO switch
 does not matter. Leave the Dock's POWER header alone.
 
 **Resistors.** The FC-113 pulls SDA and SCL up to its 5 V. Remove those two
-pull-ups from the backpack, and fit 4.7 kΩ from SDA and from SCL to 3V3 (the
-top of the same header row), so the ESP32 never sees 5 V. The firmware only accepts an LCD when both
-lines have working pull-ups, so a backpack with its pull-ups removed and no
-4.7 kΩ fitted is treated as absent.
+pull-ups from the backpack (the two `472` below the PCF8574, see
+`docs/BitPirate LCD/backpack-pullups-annotated.jpg`) so the ESP32 never sees
+5 V; check SDA→VCC and SCL→VCC read open afterwards. No resistors need to be
+fitted: the firmware uses the ESP32's own pull-ups (about 45 kΩ) and runs the
+LCD's I2C at about 25 kHz, which they can drive. External 4.7 kΩ to 3V3 still
+work if you prefer them. Verified on the owner's blue 1602 + FC-113,
+2026-11-27, LCD powered from the DevKit's 5V pin.
+
+Wire SDA and SCL to the **DevKit's** GPIO 8 and 9, not to the Bus Pirate
+loom: the loom's IO labels are different pins (loom IO7 is GPIO15).
 
 **Level fallback.** The PCF8574 at 5 V wants a high of at least 3.5 V and the
 ESP32 only gives 3.3 V, so wire it directly first. If the screen shows
@@ -209,7 +217,8 @@ esptool. `firmware/bitpirate-1.8-bridge-raw.patch` adds `bridge raw` next to
 it. The plain `bridge` stays exactly as before.
 
 - `bridge raw` passes every byte, 0x00 included, between the USB terminal and
-  the UART pins (TX IO10, RX IO11 on the Dock, VIO switch on 3V3).
+  the UART pins (by default TX loom IO4 = GPIO18, RX loom IO5 = GPIO17; VIO
+  switch on 3V3).
 - It works on the USB serial terminal only, and refuses over Wi-Fi.
 - It runs at the UART mode's configured baud. A button on the board stops it,
   like the plain bridge.
