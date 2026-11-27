@@ -101,6 +101,10 @@ to the Dock's, so both terminals agree from power-up:
 | I2C | IO15 = SDA, IO16 = SCL |
 | SPI | IO12 = CLK, IO13 = MOSI, IO10 = MISO, IO11 = CS |
 
+> **Out of date:** these follow the old, reversed reading of the header. The
+> right pins are I2C 13 / 12 and SPI CLK 16, MOSI 15, MISO 18, CS 17 (see
+> [Pins](#pins-the-bit-pirate-dock)); the patch is to be redone.
+
 Apply it after the mode-LED patch, before `pio run`:
 
 ```sh
@@ -151,7 +155,7 @@ filled in, so the board never stops to ask.
 
 **Buses**
 
-- **1-Wire** (data on IO15): find devices, ping, read the ROM, read a
+- **1-Wire** (data on IO13): find devices, ping, read the ROM, read a
   DS18B20's temperature, sniff the line.
 - **DIO**, any header pin by hand: read, set high, low, input or output,
   pull-up, pull-down, PWM, measure a frequency, pulse, drive a servo, reset.
@@ -244,20 +248,22 @@ disconnect) from inside the Web CLI: they drop its own connection.
 
 The dashboard expects the DevKit in an
 [ESP32 Bit Pirate Dock](https://github.com/AndreiVladescu/ESP32-Bit-Pirate-Hardware).
-Its 10-pin header follows the Bus Pirate 6, with IO0–IO7 wired to GPIO15,
-16, 17, 18, 10, 11, 12 and 13 (the dock's schematic). Each time the
+Its 10-pin header follows the Bus Pirate 6: a Bus Pirate 6 cable plugs in
+with its VOUT wire on VIO and GND on GND, which puts IO0–IO7 on GPIO13, 12,
+11, 10, 18, 17, 16 and 15. IO0 is next to VIO. Each time the
 dashboard enters a mode it sets the firmware's pins to the Bus Pirate 6
 layout of that header:
 
 | Bus | Signal | Dock pin (GPIO) | Bus Pirate 6 |
 |---|---|---|---|
-| I2C | SDA / SCL | IO15 / IO16 | IO0 / IO1 |
-| SPI | MISO / CS / CLK / MOSI | IO10 / IO11 / IO12 / IO13 | IO4 / IO5 / IO6 / IO7 |
-| UART | TX / RX | IO10 / IO11 | IO4 / IO5 |
+| I2C | SDA / SCL | IO13 / IO12 | IO0 / IO1 |
+| SPI | MISO / CS / CLK / MOSI | IO18 / IO17 / IO16 / IO15 | IO4 / IO5 / IO6 / IO7 |
+| UART | TX / RX | IO18 / IO17 | IO4 / IO5 |
+| 1-Wire | data | IO13 | IO0 |
 
 The firmware's own s3-devkit defaults (I2C 6 / 7, SPI CS 10 / CLK 12 /
 MISO 11 / MOSI 13, UART RX 17 / TX 18) are overridden: GPIO6 and 7 are not on
-the dock's header. The dock's slide switch sets 5V, 3V3 or 1V8 for VIO and
+the dock's header, and the rest would not match a Bus Pirate 6 cable. The dock's slide switch sets 5V, 3V3 or 1V8 for VIO and
 its level shifters.
 
 ## What happens underneath

@@ -81,8 +81,8 @@ shifters give 5V, 3V3 or 1V8. UART is never RS-232 on any of them.
 
 - Plug the DevKit's **USB** (or **USB OTG**) port, not UART / USB TTL.
 - A freshly plugged board takes about 3 s before it listens.
-- The dock header follows the BP6 layout: IO0–IO7 = GPIO 15, 16, 17, 18,
-  10, 11, 12, 13. Stock firmware's I2C default (GPIO 6/7) is not on the dock.
+- The dock header follows the BP6 layout. With a BP6 cable's VOUT on VIO,
+  IO0–IO7 = GPIO 13, 12, 11, 10, 18, 17, 16, 15 (IO0 is next to VIO). Stock firmware's I2C default (GPIO 6/7) is not on the dock.
 - No software-controlled supply: VIO is the dock's slide switch.
 - Pull-ups are the ESP32's internal ones (about 45 kΩ).
 - SPI: mode 0 only, 1/2/4/8 MHz; flash read, dump and verify only.

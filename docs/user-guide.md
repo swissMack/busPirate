@@ -283,38 +283,40 @@ straight in.
 
 | Bus | Wire this dock pin | Bus Pirate 6 name | To the target's |
 |-----|--------------------|-------------------|-----------------|
-| I2C | IO15 | IO0 | SDA |
-| | IO16 | IO1 | SCL |
-| SPI | IO10 | IO4 | DO / MISO |
-| | IO11 | IO5 | CS |
-| | IO12 | IO6 | SCK / CLK |
-| | IO13 | IO7 | DI / MOSI |
-| UART | IO10 (its TX) | IO4 | RX |
-| | IO11 (its RX) | IO5 | TX |
+| I2C | IO13 | IO0 | SDA |
+| | IO12 | IO1 | SCL |
+| SPI | IO18 | IO4 | DO / MISO |
+| | IO17 | IO5 | CS |
+| | IO16 | IO6 | SCK / CLK |
+| | IO15 | IO7 | DI / MOSI |
+| UART | IO18 (its TX) | IO4 | RX |
+| | IO17 (its RX) | IO5 | TX |
+| 1-Wire | IO13 | IO0 | DQ |
 | all | GND | GND | GND — connect it first |
 | if needed | VIO | VOUT | VCC |
 
-The header, top to bottom as printed beside it:
+The header, top to bottom as printed beside it, with the Bus Pirate 6
+cable wire that lands on each pin (red VOUT on VIO, black on GND):
 
 ```
-   GND  ●
-   IO15 ●  I2C SDA
-   IO16 ●  I2C SCL
-   IO17 ●
-   IO18 ●
-   IO10 ●  SPI MISO / UART TX
-   IO11 ●  SPI CS   / UART RX
-   IO12 ●  SPI CLK
-   IO13 ●  SPI MOSI
-   VIO  ●  the switched supply
+   GND  ●  black  GND
+   IO15 ●  white  IO7  SPI MOSI
+   IO16 ●  grey   IO6  SPI CLK
+   IO17 ●  brown  IO5  SPI CS   / UART RX
+   IO18 ●  purple IO4  SPI MISO / UART TX
+   IO10 ●  blue   IO3
+   IO11 ●  green  IO2
+   IO12 ●  yellow IO1  I2C SCL
+   IO13 ●  orange IO0  I2C SDA / 1-Wire
+   VIO  ●  red    VOUT the switched supply
 ```
 
 **Set the voltage first.** The slide switch at the top of the dock picks 5V,
 3V3 or 1V8 for VIO and for the level shifters on every IO line. Match it to
 the target before wiring it up.
 
-The firmware's own defaults (I2C on GPIO6/7, UART on GPIO17/18) are not used:
-GPIO6 and GPIO7 are not on the dock's header. Moving a pin by hand in the
+The firmware's own I2C and SPI defaults are not used: GPIO6 and GPIO7 are not
+on the dock's header. Its UART default (TX 18, RX 17) happens to match. Moving a pin by hand in the
 Terminal with `config` lasts only until the dashboard next enters that mode.
 
 ### Everyday jobs

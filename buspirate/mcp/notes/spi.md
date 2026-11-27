@@ -4,10 +4,10 @@
 
 | Signal | v3/v4 (Seeed) | BP6 | Bit Pirate dock |
 |---|---|---|---|
-| CLK / SCK | CLK, purple | IO6, grey | IO12, grey |
-| MOSI / DI | MOSI, grey | IO7, white | IO13, white |
-| MISO / DO | MISO, black | IO4, purple | IO10, purple |
-| CS / SS (active low) | CS, white | IO5, brown | IO11, brown |
+| CLK / SCK | CLK, purple | IO6, grey | IO16, grey |
+| MOSI / DI | MOSI, grey | IO7, white | IO15, white |
+| MISO / DO | MISO, black | IO4, purple | IO18, purple |
+| CS / SS (active low) | CS, white | IO5, brown | IO17, brown |
 | GND | brown | black | black |
 | VCC | +3.3V, red | VOUT, red | VIO, red |
 

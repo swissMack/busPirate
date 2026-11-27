@@ -16,13 +16,13 @@ from typing import Dict, Tuple
 
 from ._modes import CliCommand, CliMode, CliParam
 
-#: The dock header's GPIOs in header order, IO0..IO7 of the Bus Pirate 6
-#: layout (see bitpirate.DOCK_HEADER).
-DOCK_GPIOS = (15, 16, 17, 18, 10, 11, 12, 13)
+#: The dock header's GPIOs that a Bus Pirate 6 cable's IO0..IO7 land on when
+#: its VOUT wire sits on VIO: IO0 is next to VIO (see bitpirate.DOCK_BP6).
+DOCK_GPIOS = (13, 12, 11, 10, 18, 17, 16, 15)
 
 _PIN = CliParam(
     "pin", "enum", "Pin",
-    default=15,
+    default=13,
     choices=[{"value": g, "label": f"IO{g}"} for g in DOCK_GPIOS],
     help="A pin on the dock's header",
 )
@@ -35,16 +35,16 @@ def _num(name: str, label: str, default: int, minimum: int, maximum: int,
 
 
 # Controllers/OneWireController.cpp. Its config asks one question, "Data
-# GPIO" (handleConfig); IO15 is the Bus Pirate 6's 1-Wire pin, IO0.
+# GPIO" (handleConfig); IO13 is the Bus Pirate 6's 1-Wire pin, IO0.
 ONEWIRE = CliMode(
     id="onewire_cli",
     title="1-Wire",
     cli_name="1wire",
     group="Buses",
-    blurb="Find 1-Wire parts on IO15, read their ROM codes and a DS18B20's temperature.",
+    blurb="Find 1-Wire parts on IO13, read their ROM codes and a DS18B20's temperature.",
     doc="bitpirate-wiki/02-1wire",
-    pins={"Data GPIO": "15"},
-    wires=(("IO15", "DATA", "with a 4k7 pull-up to VIO; most parts need one"),),
+    pins={"Data GPIO": "13"},
+    wires=(("IO13", "DATA", "with a 4k7 pull-up to VIO; most parts need one"),),
     commands=(
         CliCommand("scan", "Find devices", "scan",
                    help="Searches the bus and lists every ROM code"),
@@ -66,7 +66,7 @@ DIO = CliMode(
     group="Buses",
     blurb="Drive, read and time the header pins one at a time: levels, PWM, pulses, servos.",
     doc="bitpirate-wiki/09-dio",
-    wires=(("IO15 … IO13", "the target pin", "whichever header pin you pick in each action"),),
+    wires=(("IO10–IO13, IO15–IO18", "the target pin", "whichever header pin you pick in each action"),),
     # Leaving DIO resets nothing (ModeController releaseMode skips it), so a
     # pin set high, a PWM or a servo would carry on after HiZ.
     release=tuple(f"reset {g}" for g in DOCK_GPIOS),
@@ -112,7 +112,7 @@ JTAG = CliMode(
     blurb="Find which header pins a target's SWD or JTAG port is on, and its IDCODE.",
     doc="bitpirate-wiki/15-jtag",
     pins={"GPIOs to scan (SWD/JTAG)": " ".join(str(g) for g in DOCK_GPIOS)},
-    wires=(("IO15 … IO13", "SWDIO, SWCLK or TDI, TDO, TCK, TMS",
+    wires=(("IO10–IO13, IO15–IO18", "SWDIO, SWCLK or TDI, TDO, TCK, TMS",
             "any order on any header pins: the scan finds which is which"),),
     commands=(
         CliCommand("scan_swd", "Find SWD pins", "scan swd", timeout=60.0),

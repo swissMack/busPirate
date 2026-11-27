@@ -94,7 +94,7 @@ def test_the_wiring_is_the_docks_bus_pirate_6_header(client):
     connect(client)
     i2c = panels(client)["i2c"]
     assert [(w["signal"], w["target"]) for w in i2c["wiring"][:2]] == [
-        ("IO15", "SDA"), ("IO16", "SCL"),
+        ("IO13", "SDA"), ("IO12", "SCL"),
     ]
     board = client.get("/api/state").json()["board"]
     for wire in i2c["wiring"]:

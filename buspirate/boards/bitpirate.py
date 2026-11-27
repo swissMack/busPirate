@@ -10,12 +10,19 @@ from .bitpirate_modes import MODES
 
 # The ESP32 Bit Pirate Dock (github.com/AndreiVladescu/ESP32-Bit-Pirate-Hardware)
 # with an ESP32-S3-DevKitC-1 seated in it, photographed as
-# static/img/board-bitpirate-dock.jpg (700x661). Its 10-pin header copies the
-# Bus Pirate 6's: GND, IO0..IO7, then VIO, with IO0..IO7 wired to GPIO15, 16,
-# 17, 18, 10, 11, 12 and 13 (dock schematic, J3/CN1). The silkscreen names
-# them by GPIO, so the diagram does too. The holes sit at x=150 from y=251 in
+# static/img/board-bitpirate-dock.jpg (700x661). Its 10-pin header runs GND,
+# GPIO15, 16, 17, 18, 10, 11, 12, 13, VIO from the top of the photo (dock
+# schematic, J3/CN1). A Bus Pirate 6 cable plugs in with VOUT on VIO and GND
+# on GND, so its IO0 lands next to VIO on GPIO13 and its IO7 on GPIO15
+# (DOCK_BP6; checked with the owner's labelled cable, 2026-11-27). The
+# silkscreen names the pins by GPIO, so the diagram does too. The holes sit at x=150 from y=251 in
 # steps of 21.16, measured on the photo with markers drawn over it.
 DOCK_HEADER = ["GND", "IO15", "IO16", "IO17", "IO18", "IO10", "IO11", "IO12", "IO13", "VIO"]
+#: Dock header pin -> the Bus Pirate 6 cable label that lands on it.
+DOCK_BP6: Dict[str, str] = {
+    "VIO": "VOUT", "IO13": "IO0", "IO12": "IO1", "IO11": "IO2", "IO10": "IO3",
+    "IO18": "IO4", "IO17": "IO5", "IO16": "IO6", "IO15": "IO7", "GND": "GND",
+}
 DOCK_GEOMETRY = {"width": 700, "height": 661, "x": 150, "first_y": 251.2, "pitch": 21.16}
 
 
@@ -64,8 +71,8 @@ _BOARD_BITPIRATE = {
     "cable": False,
     "caveat": (
         "This is the ESP32 Bit Pirate Dock. Its header follows the Bus Pirate "
-        "6, labelled by GPIO: IO15 is the Bus Pirate's IO0 through to IO13 as "
-        "IO7. Check the silkscreen beside the header if yours differs."
+        "6, labelled by GPIO: IO13, next to VIO, is the Bus Pirate's IO0, "
+        "through to IO15 as IO7. Check the silkscreen beside the header if yours differs."
     ),
     #: What replaces a panel's Bus Pirate wording on this board. See
     #: server._panels_json.
@@ -83,8 +90,8 @@ _BOARD_BITPIRATE = {
         },
         "i2c": {
             "wiring": [
-                wire("IO15", "SDA", "data, both directions"),
-                wire("IO16", "SCL", "clock"),
+                wire("IO13", "SDA", "data, both directions (Bus Pirate IO0)"),
+                wire("IO12", "SCL", "clock (Bus Pirate IO1)"),
                 _BITPIRATE_GND,
                 _BITPIRATE_VIO,
             ],
@@ -102,10 +109,10 @@ _BOARD_BITPIRATE = {
         },
         "spi": {
             "wiring": [
-                wire("IO12", "SCK / CLK", "clock"),
-                wire("IO13", "DI / MOSI", "Bit Pirate out, chip in"),
-                wire("IO10", "DO / MISO", "chip out, Bit Pirate in"),
-                wire("IO11", "CS / SS", "active low"),
+                wire("IO16", "SCK / CLK", "clock (Bus Pirate IO6)"),
+                wire("IO15", "DI / MOSI", "Bit Pirate out, chip in (Bus Pirate IO7)"),
+                wire("IO18", "DO / MISO", "chip out, Bit Pirate in (Bus Pirate IO4)"),
+                wire("IO17", "CS / SS", "active low (Bus Pirate IO5)"),
                 _BITPIRATE_GND,
                 _BITPIRATE_VIO,
             ],
@@ -124,13 +131,13 @@ _BOARD_BITPIRATE = {
         },
         "uart": {
             "wiring": [
-                wire("IO10", "RX", "the Bit Pirate's TX drives the target's receive pin"),
-                wire("IO11", "TX", "the Bit Pirate's RX listens to the target's transmit pin"),
+                wire("IO18", "RX", "the Bit Pirate's TX (Bus Pirate IO4) drives the target's receive pin"),
+                wire("IO17", "TX", "the Bit Pirate's RX (Bus Pirate IO5) listens to the target's transmit pin"),
                 _BITPIRATE_GND,
             ],
             "notes": [
-                "TX and RX cross over. If you see nothing, swapping IO10 and "
-                "IO11 is the first thing to try.",
+                "TX and RX cross over. If you see nothing, swapping IO17 and "
+                "IO18 is the first thing to try.",
                 "Garbled characters mean the baud rate is wrong, not the wiring.",
                 _BITPIRATE_VOLTAGE_NOTE,
                 _BITPIRATE_PINS_NOTE,

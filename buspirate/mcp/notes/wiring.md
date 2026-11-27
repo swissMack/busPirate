@@ -46,17 +46,18 @@ connector do not line up exactly with the pins.
 
 ## Bit Pirate dock
 
-The dock's 10-pin header follows the BP6 layout, so the same colours apply by
-position. Owners colour their DuPont jumpers to match.
+The dock's 10-pin header takes a BP6 cable with its VOUT (red) wire on VIO
+and GND (black) on GND, so every labelled wire keeps its BP6 meaning.
 
-| Dock pin | VIO | IO15 | IO16 | IO17 | IO18 | IO10 | IO11 | IO12 | IO13 | GND |
+| Dock pin | VIO | IO13 | IO12 | IO11 | IO10 | IO18 | IO17 | IO16 | IO15 | GND |
 |---|---|---|---|---|---|---|---|---|---|---|
-| BP6 equivalent | VOUT | IO0 | IO1 | IO2 | IO3 | IO4 | IO5 | IO6 | IO7 | GND |
+| BP6 cable label | VOUT | IO0 | IO1 | IO2 | IO3 | IO4 | IO5 | IO6 | IO7 | GND |
 | Colour | red | orange | yellow | green | blue | purple | brown | grey | white | black |
 
-The silkscreen runs GND at the top down to VIO; colours follow the signal,
-not the position from the top. Buses on the dock: I2C SDA IO15, SCL IO16;
-SPI MISO IO10, CS IO11, CLK IO12, MOSI IO13; UART TX IO10, RX IO11.
+The silkscreen runs GND, IO15, IO16, IO17, IO18, IO10, IO11, IO12, IO13, VIO;
+IO0 is next to VIO. Buses on the dock: I2C SDA IO13, SCL IO12;
+SPI MISO IO18, CS IO17, CLK IO16, MOSI IO15; UART TX IO18, RX IO17;
+1-Wire IO13. Checked against an owner's labelled BP6 cable, 2026-11-27.
 
 ## Rules for every job
 

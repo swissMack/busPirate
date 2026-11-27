@@ -4,8 +4,8 @@
 
 | Signal | v3/v4 (Seeed) | BP6 | Bit Pirate dock |
 |---|---|---|---|
-| SCL | CLK, purple | IO1, yellow | IO16, yellow |
-| SDA | MOSI, grey | IO0, orange | IO15, orange |
+| SCL | CLK, purple | IO1, yellow | IO12, yellow |
+| SDA | MOSI, grey | IO0, orange | IO13, orange |
 | GND | brown | black | black |
 | Pull-up rail | VPU, green | VOUT (red) | internal ~45 kΩ |
 
